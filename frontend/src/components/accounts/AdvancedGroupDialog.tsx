@@ -193,7 +193,7 @@ export function AdvancedGroupDialog({
         for (const r of valid) {
           const err = validate(r);
           if (err) { toast.error(err); return; }
-          if (!r.system_parent_id && !r.custom_parent_id) {
+          if (r.parentName !== "__none__" && !r.system_parent_id && !r.custom_parent_id) {
             toast.error(`"${r.name}": Select a parent group (required)`);
             return;
           }
@@ -237,7 +237,7 @@ export function AdvancedGroupDialog({
       } else {
         const err = validate(form);
         if (err) { toast.error(err); return; }
-        if (!form.system_parent_id && !form.custom_parent_id) {
+        if (form.parentName !== "__none__" && !form.system_parent_id && !form.custom_parent_id) {
           toast.error("Select a parent group (required by the system)");
           return;
         }
@@ -579,11 +579,6 @@ function UnderCombobox({
             )}
 
             {systemItems.length === 0 && customItems.length === 0 && (
-              <div className="py-6 text-center text-sm text-muted-foreground">No groups found</div>
-            )}
-          </div>
-        </div>
-      )}
               <div className="py-6 text-center text-sm text-muted-foreground">No groups found</div>
             )}
           </div>

@@ -54,7 +54,7 @@ export interface AdvancedLedgerForm {
   name: string;
   alias: string;
   group: string;            // display name of selected "Under" group
-  groupId: number | null;   // id of selected group (acc_group_master.id or acc_ledger_groups.id)
+  groupId: string | number | null;   // id of selected group (acc_group_master.id or acc_ledger_groups.id)
   groupSource: "system" | "custom" | null; // which table groupId belongs to
   inventoryAffected: boolean;
   effectiveDate: string;
@@ -888,7 +888,7 @@ function TransactionConfigDialog({
 
 /** A selectable "Under" option — either a system master group or a custom group. */
 export interface UnderGroupOption {
-  id: number;
+  id: string | number;
   group_name: string;
   source: "system" | "custom";
 }

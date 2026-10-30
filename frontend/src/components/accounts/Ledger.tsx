@@ -23,13 +23,12 @@ import { getUnderDropdown, getLedgers as apiGetLedgers, createLedger as apiCreat
 import { useAuth } from "@/contexts/AuthContext";
 import { RecentActivityCard, RecentActivityItem } from "./RecentActivityCard";
 import { RecentlyCreatedCard, RecentlyCreatedItem } from "./RecentlyCreatedCard";
-import { any } from "zod";
 
 /** Maps the Advanced Ledger form (UI field names) onto the create/update
  *  ledger API payload (DB column / form-comment names). The "Under" group
  *  is sent as { under_id, under_source } only — the backend resolves this
  *  into the mutually-exclusive group_id / master_group_id columns. */
-function ledgerFormToPayload(l: AdvancedLedgerForm, finance_id: number) {
+function ledgerFormToPayload(l: AdvancedLedgerForm, finance_id: number | string) {
   if (!l.groupId || !l.groupSource) {
     throw new Error('Select a valid "Under" group before saving');
   }
@@ -190,7 +189,7 @@ interface LedgerEntry {
   id: number;
   name: string;
   group: string;          // display name — used for flat/ledger view
-  groupId: number | null;    // acc_group_master.id  OR  acc_ledger_groups.id
+  groupId: string | number | null;    // acc_group_master.id  OR  acc_ledger_groups.id
   groupSource: "system" | "custom" | null; // which table groupId refers to
   openingBalance: number;
   balanceType: "Dr" | "Cr";

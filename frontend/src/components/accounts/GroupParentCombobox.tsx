@@ -25,11 +25,11 @@ interface Props {
   /** All existing DB groups to offer as options */
   existingGroups: AccLedgerGroup[];
   /**
-   * When true, only shows DB groups where behaves_like_subledger === 1.
+   * When true, only shows DB groups where behaves_like_subledger === 1 or true.
    * When false (default), shows all existing groups.
    */
   filterSubLedger?: boolean;
-  onSelect: (id: number | null, name: string, nature: GroupNature | null) => void;
+  onSelect: (id: string | number | null, name: string, nature: GroupNature | null) => void;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -59,7 +59,7 @@ export function GroupParentCombobox({
   // DB groups to display
   const dbOptions = useMemo(() => {
     const base = filterSubLedger
-      ? existingGroups.filter(g => g.behaves_like_subledger === 1)
+      ? existingGroups.filter(g => Boolean(g.behaves_like_subledger))
       : existingGroups;
     return base.sort((a, b) => a.group_name.localeCompare(b.group_name));
   }, [existingGroups, filterSubLedger]);

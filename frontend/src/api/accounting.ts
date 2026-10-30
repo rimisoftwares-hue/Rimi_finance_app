@@ -60,7 +60,7 @@ export interface LedgerDetails {
 
 /** Identifies a single "Under" selection unambiguously for create/update payloads. */
 export interface UnderSelection {
-  under_id: number;
+  under_id: string | number;
   under_source: 'system' | 'custom';
 }
 

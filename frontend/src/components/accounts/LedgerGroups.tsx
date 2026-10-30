@@ -926,31 +926,3 @@ function SearchableParentSelect({
     </Popover>
   );
 }
-          <span className="truncate">{label}</span>
-          <ChevronDown className="h-4 w-4 opacity-50 ml-2" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
-        <Command onKeyDown={e => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }}>
-          <CommandInput placeholder="Search group..." autoFocus />
-          <CommandList>
-            <CommandEmpty>No group found.</CommandEmpty>
-            <CommandGroup>
-              <CommandItem value="Primary" onSelect={() => { onChange("__none__"); setOpen(false); }}>
-                <Check className={`mr-2 h-4 w-4 ${value === "__none__" ? "opacity-100" : "opacity-0"}`} />
-                Primary (No parent)
-              </CommandItem>
-              {sorted.map(g => (
-                <CommandItem key={g.id} value={g.name} onSelect={() => { onChange(g.name); setOpen(false); }}>
-                  <Check className={`mr-2 h-4 w-4 ${value === g.name ? "opacity-100" : "opacity-0"}`} />
-                  <span className="flex-1">{g.name}</span>
-                  <Badge variant="outline" className="text-[9px] ml-2 opacity-60">{g.nature}</Badge>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}

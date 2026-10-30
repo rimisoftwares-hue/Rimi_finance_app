@@ -23,7 +23,13 @@ export default function Business() {
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedMonth, setExpandedMonth] = useState<string | null>("Feb 2025");
 
-  const totals = useMemo(() => businessData.reduce((a, r) => ({
+  const filteredData = useMemo(() => {
+    if (!searchTerm.trim()) return businessData;
+    const q = searchTerm.toLowerCase().trim();
+    return businessData.filter(r => r.month.toLowerCase().includes(q));
+  }, [searchTerm]);
+
+  const totals = useMemo(() => filteredData.reduce((a, r) => ({
     principal: a.principal + r.principal,
     interest: a.interest + r.interest,
     defaultAmt: a.defaultAmt + r.defaultAmt,
@@ -32,7 +38,7 @@ export default function Business() {
     hpCount: a.hpCount + r.hpCount,
     loanAmount: a.loanAmount + r.loanAmount,
     docCharge: a.docCharge + r.docCharge,
-  }), { principal: 0, interest: 0, defaultAmt: 0, handLoan: 0, hpTotal: 0, hpCount: 0, loanAmount: 0, docCharge: 0 }), []);
+  }), { principal: 0, interest: 0, defaultAmt: 0, handLoan: 0, hpTotal: 0, hpCount: 0, loanAmount: 0, docCharge: 0 }), [filteredData]);
 
   return (
     <div className="space-y-6">
@@ -80,7 +86,7 @@ export default function Business() {
         <h3 className="text-lg font-semibold text-foreground mb-4">Monthly Comparison</h3>
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={businessData} barGap={4}>
+            <BarChart data={filteredData} barGap={4}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
               <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
               <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} tickFormatter={v => `₹${v / 1000}K`} />
@@ -117,7 +123,7 @@ export default function Business() {
           </div>
         </div>
 
-        {businessData.map((row, i) => {
+        {filteredData.map((row, i) => {
           const hpTotal = row.principal + row.interest + row.defaultAmt + row.handLoan;
           const isExpanded = expandedMonth === row.month;
           return (

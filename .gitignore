@@ -6,3 +6,4 @@ target/
 .agents/
 .playwright-mcp/
 test_assets/
+.cargo/
