@@ -134,15 +134,24 @@ CREATE TABLE IF NOT EXISTS acc_ledger_groups (
     is_active               BOOLEAN         NOT NULL DEFAULT true,
     created_at              TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    system_parent_id        UUID            DEFAULT NULL,
+    custom_parent_id        UUID            DEFAULT NULL,
+    root_master_id          UUID            DEFAULT NULL,
     CONSTRAINT uk_group_name_finance UNIQUE (finance_id, group_name),
     CONSTRAINT fk_alg_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
-    CONSTRAINT fk_alg_parent FOREIGN KEY (parent_group_id) REFERENCES acc_ledger_groups(id) ON DELETE RESTRICT
+    CONSTRAINT fk_alg_parent FOREIGN KEY (parent_group_id) REFERENCES acc_ledger_groups(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_alg_sys_parent FOREIGN KEY (system_parent_id) REFERENCES acc_group_master(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_alg_custom_parent FOREIGN KEY (custom_parent_id) REFERENCES acc_ledger_groups(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_alg_root_master FOREIGN KEY (root_master_id) REFERENCES acc_group_master(id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_alg_finance_id ON acc_ledger_groups (finance_id);
 CREATE INDEX IF NOT EXISTS idx_alg_parent_id ON acc_ledger_groups (parent_group_id);
 CREATE INDEX IF NOT EXISTS idx_alg_nature ON acc_ledger_groups (nature);
 CREATE INDEX IF NOT EXISTS idx_alg_is_active ON acc_ledger_groups (is_active);
+CREATE INDEX IF NOT EXISTS idx_alg_sys_parent_id ON acc_ledger_groups (system_parent_id);
+CREATE INDEX IF NOT EXISTS idx_alg_custom_parent_id ON acc_ledger_groups (custom_parent_id);
+CREATE INDEX IF NOT EXISTS idx_alg_root_master_id ON acc_ledger_groups (root_master_id);
 
 
 -- ============================================================

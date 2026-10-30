@@ -25,10 +25,10 @@ export interface AdvancedGroupForm {
   alias: string;
   /** Display label for the "Under" combobox — "__none__" means Primary */
   parentName: string;
-  /** Set when parent is a system group (acc_group_master) */
-  system_parent_id: number | null;
+  /** Set when parent is a system group (acc_group_master or is_system group) */
+  system_parent_id: string | number | null;
   /** Set when parent is a custom group (acc_ledger_groups) */
-  custom_parent_id: number | null;
+  custom_parent_id: string | number | null;
   nature: GroupNature;
   behavesLikeSubLedger: boolean;
   nettBalances: boolean;
@@ -54,8 +54,8 @@ const DEFAULTS: AdvancedGroupForm = {
 interface Props {
   open: boolean;
   onClose: () => void;
-  onSaved: (groups: { id: number; name: string; nature: GroupNature; parentName: string }[]) => void;
-  financeId: number;
+  onSaved: (groups: { id: string | number; name: string; nature: GroupNature; parentName: string }[]) => void;
+  financeId: string | number;
   /** Unused — kept for API compat, all groups now come from getUnderDropdown */
   existingGroups?: unknown[];
   multi?: boolean;
@@ -78,8 +78,8 @@ export function AdvancedGroupDialog({
   const [form, setForm] = useState<AdvancedGroupForm>(DEFAULTS);
   const [rows, setRows] = useState<AdvancedGroupForm[]>([{ ...DEFAULTS }]);
   const [defaultParentName, setDefaultParentName] = useState<string>("__none__");
-  const [defaultSystemParentId, setDefaultSystemParentId] = useState<number | null>(null);
-  const [defaultCustomParentId, setDefaultCustomParentId] = useState<number | null>(null);
+  const [defaultSystemParentId, setDefaultSystemParentId] = useState<string | number | null>(null);
+  const [defaultCustomParentId, setDefaultCustomParentId] = useState<string | number | null>(null);
   const [defaultNature, setDefaultNature] = useState<GroupNature>("Assets");
   const [saving, setSaving] = useState(false);
 
@@ -89,38 +89,20 @@ export function AdvancedGroupDialog({
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   /**
-   * mergedUnderItems — always includes every predefined Tally group (as system
-   * items) plus whatever the API returned (system from acc_group_master and
-   * custom from acc_ledger_groups).  Predefined groups are used as fallback:
-   * if the API already returned a group with the same name, the API version
-   * (with its real DB id) takes precedence and the static entry is dropped.
+   * mergedUnderItems — uses real DB items as soon as loaded.
+   * Predefined static groups only act as temporary placeholders while fetching.
    */
   const mergedUnderItems = useMemo<UnderDropdownItem[]>(() => {
-    // Real system group names already fetched from API
-    const apiSystemNames = new Set(
-      underItems
-        .filter(i => i.source === "system")
-        .map(i => i.group_name.toLowerCase())
-    );
-
-    // Build synthetic UnderDropdownItem entries for predefined groups that
-    // are NOT yet in the DB (use negative ids so they never clash with real rows)
-    const predefinedFallbacks: UnderDropdownItem[] = PREDEFINED_GROUPS
-      .filter(pg => !apiSystemNames.has(pg.name.toLowerCase()))
-      .map((pg, idx) => ({
-        id: -(idx + 1),          // synthetic negative id — never sent to DB
-        group_name: pg.name,
-        system_parent_id: null,
-        custom_parent_id: null,
-        nature: pg.nature,
-        source: "system" as const,
-        sequence_order: 9000 + idx, // sort after real system groups
-      }));
-
-    // Merge: real system groups → predefined fallbacks → custom groups
-    const systemFromApi = underItems.filter(i => i.source === "system");
-    const customFromApi = underItems.filter(i => i.source === "custom");
-    return [...systemFromApi, ...predefinedFallbacks, ...customFromApi];
+    if (underItems.length > 0) return underItems;
+    return PREDEFINED_GROUPS.map((pg, idx) => ({
+      id: -(idx + 1),
+      group_name: pg.name,
+      system_parent_id: null,
+      custom_parent_id: null,
+      nature: pg.nature,
+      source: "system" as const,
+      sequence_order: 9000 + idx,
+    }));
   }, [underItems]);
 
   // Fetch under-dropdown when dialog opens
@@ -134,7 +116,7 @@ export function AdvancedGroupDialog({
     setDefaultNature("Assets");
     setTimeout(() => nameInputRef.current?.focus(), 120);
 
-    // Load groups for the Under picker (system from acc_group_master + custom from acc_ledger_groups)
+    // Load groups for the Under picker (system + custom from acc_ledger_groups)
     setUnderLoading(true);
     getUnderDropdown()
       .then(res => { if (res.data.success) setUnderItems(res.data.data); })
@@ -149,8 +131,6 @@ export function AdvancedGroupDialog({
 
   /**
    * Called when user picks a parent from the Under combobox (single mode).
-   * Resolves system_parent_id / custom_parent_id and auto-inherits nature.
-   * Predefined fallback items have negative ids (not yet in DB) — handled gracefully.
    */
   const handleParentSelect = (item: UnderDropdownItem | null) => {
     if (!item) {
@@ -217,18 +197,32 @@ export function AdvancedGroupDialog({
             toast.error(`"${r.name}": Select a parent group (required)`);
             return;
           }
+          if (
+            (r.system_parent_id && typeof r.system_parent_id === "number" && r.system_parent_id < 0) ||
+            (r.custom_parent_id && typeof r.custom_parent_id === "number" && r.custom_parent_id < 0)
+          ) {
+            toast.error(`"${r.name}": Parent group is still loading. Please wait a moment.`);
+            return;
+          }
         }
 
-        const payloads = valid.map(g => ({
-          group_name: g.name.trim(),
-          alias: g.alias.trim() || null,
-          system_parent_id: g.system_parent_id,
-          custom_parent_id: g.custom_parent_id,
-          affects_gross_profit: g.affectsGrossProfit,
-          behaves_like_subledger: g.behavesLikeSubLedger,
-          used_for_calculation: g.usedForCalculation,
-          allocation_method: g.allocationMethod,
-        }));
+        const payloads = valid.map(g => {
+          const nettReport: "Debit" | "Credit" | "Both" = g.nettBalances
+            ? (g.nature === "Assets" || g.nature === "Expenses" ? "Debit" : "Credit")
+            : "Both";
+          return {
+            group_name: g.name.trim(),
+            alias: g.alias.trim() || null,
+            system_parent_id: g.system_parent_id,
+            custom_parent_id: g.custom_parent_id,
+            nature: g.nature,
+            affects_gross_profit: g.affectsGrossProfit,
+            behaves_like_subledger: g.behavesLikeSubLedger,
+            nett_balance_report: nettReport,
+            used_for_calculation: g.usedForCalculation,
+            allocation_method: g.allocationMethod,
+          };
+        });
 
         const res = await multiCreateAccLedgerGroup(payloads);
         if (!res.data.success) throw new Error("Failed to save groups");
@@ -247,6 +241,17 @@ export function AdvancedGroupDialog({
           toast.error("Select a parent group (required by the system)");
           return;
         }
+        if (
+          (form.system_parent_id && typeof form.system_parent_id === "number" && form.system_parent_id < 0) ||
+          (form.custom_parent_id && typeof form.custom_parent_id === "number" && form.custom_parent_id < 0)
+        ) {
+          toast.error("Parent group is still loading. Please wait a moment.");
+          return;
+        }
+
+        const nettReport: "Debit" | "Credit" | "Both" = form.nettBalances
+          ? (form.nature === "Assets" || form.nature === "Expenses" ? "Debit" : "Credit")
+          : "Both";
 
         const payload = {
           group_name: form.name.trim(),
@@ -256,7 +261,7 @@ export function AdvancedGroupDialog({
           nature: form.nature,
           affects_gross_profit: form.affectsGrossProfit,
           behaves_like_subledger: form.behavesLikeSubLedger,
-          nett_balance_report: "Both" as const,
+          nett_balance_report: nettReport,
           used_for_calculation: form.usedForCalculation,
           allocation_method: form.allocationMethod,
         };
@@ -273,7 +278,7 @@ export function AdvancedGroupDialog({
     } finally {
       setSaving(false);
     }
-  }, [form, rows, multi, financeId, saving]);
+  }, [form, rows, multi, onSaved, onClose, saving]);
 
   // Keyboard: Ctrl+A = save, F4 = focus parent
   useEffect(() => {
@@ -346,8 +351,10 @@ function UnderCombobox({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 50);
@@ -356,7 +363,8 @@ function UnderCombobox({
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false); setQuery("");
+        setOpen(false);
+        setQuery("");
       }
     };
     document.addEventListener("mousedown", handler);
@@ -371,14 +379,94 @@ function UnderCombobox({
     items.filter(i => i.source === "custom" && (!query || i.group_name.toLowerCase().includes(query.toLowerCase())))
     , [items, query]);
 
+  const flatOptions = useMemo(() => {
+    const list: { key: string; item: UnderDropdownItem | null; label: string; isPrimary?: boolean; source?: string }[] = [];
+    list.push({ key: "primary", item: null, label: "Primary (No parent)", isPrimary: true });
+    systemItems.forEach(i => list.push({ key: `sys-${i.id}`, item: i, label: i.group_name, source: "system" }));
+    customItems.forEach(i => list.push({ key: `cust-${i.id}`, item: i, label: i.group_name, source: "custom" }));
+    return list;
+  }, [systemItems, customItems]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query, open]);
+
+  // Scroll active item into view
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    const activeEl = listRef.current.querySelector(`[data-active="true"]`);
+    if (activeEl) {
+      (activeEl as HTMLElement).scrollIntoView({ block: "nearest" });
+    }
+  }, [activeIndex, open]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!open) {
+        setOpen(true);
+      } else if (flatOptions.length > 0) {
+        setActiveIndex(i => (i + 1) % flatOptions.length);
+      }
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!open) {
+        setOpen(true);
+      } else if (flatOptions.length > 0) {
+        setActiveIndex(i => (i - 1 + flatOptions.length) % flatOptions.length);
+      }
+      return;
+    }
+    if (e.key === "Enter") {
+      if (open && flatOptions.length > 0 && activeIndex >= 0 && activeIndex < flatOptions.length) {
+        e.preventDefault();
+        e.stopPropagation();
+        onSelect(flatOptions[activeIndex].item);
+        setOpen(false);
+        setQuery("");
+      }
+      return;
+    }
+    if (e.key === "Escape") {
+      if (open) {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+        setQuery("");
+      }
+      return;
+    }
+    if (e.key === "F4") {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(true);
+      return;
+    }
+  };
+
+  // Global F4 shortcut to focus and open this combobox
+  useEffect(() => {
+    const handleGlobalF4 = (e: KeyboardEvent) => {
+      if (e.key === "F4") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(true);
+        setTimeout(() => inputRef.current?.focus(), 60);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalF4);
+    return () => window.removeEventListener("keydown", handleGlobalF4);
+  }, []);
+
   const label = value === "__none__" || !value ? placeholder : value;
   const isSet = value && value !== "__none__";
 
-  // console.log("UnderDropdownItem:", items.map((item: any) => ({ name: item.group_name, id: item.id })));
-
-
   return (
-    <div ref={containerRef} className={`relative ${className}`}>
+    <div ref={containerRef} className={`relative ${className}`} onKeyDown={handleKeyDown}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -398,20 +486,29 @@ function UnderCombobox({
               ref={inputRef}
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="Search groups…"
+              placeholder="Search groups… (Arrow keys to navigate, Enter to select)"
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              onKeyDown={e => { if (e.key === "Escape") { setOpen(false); setQuery(""); } }}
+              onKeyDown={handleKeyDown}
             />
           </div>
-          <div className="max-h-72 overflow-y-auto">
+          <div ref={listRef} className="max-h-72 overflow-y-auto">
             {/* Primary */}
-            <div
-              onClick={() => { onSelect(null); setOpen(false); setQuery(""); }}
-              className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-secondary/60 transition-colors
-                ${!isSet ? "text-primary font-medium" : "text-muted-foreground"}`}
-            >
-              <span>Primary (No parent)</span>
-            </div>
+            {(() => {
+              const optIndex = flatOptions.findIndex(o => o.key === "primary");
+              const isActive = activeIndex === optIndex;
+              return (
+                <div
+                  data-active={isActive}
+                  onClick={() => { onSelect(null); setOpen(false); setQuery(""); }}
+                  className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-colors
+                    ${isActive ? "bg-accent text-accent-foreground font-medium" : "hover:bg-secondary/60"}
+                    ${!isSet && !isActive ? "text-primary font-medium" : ""}`}
+                >
+                  <span>Primary (No parent)</span>
+                </div>
+              );
+            })()}
+
             {/* System groups */}
             {systemItems.length > 0 && (
               <>
@@ -419,16 +516,21 @@ function UnderCombobox({
                   <Database className="h-3 w-3" /> Default Tally Groups
                 </div>
                 {systemItems.map(item => {
-                  const isFallback = item.id < 0; // predefined but not yet seeded in DB
+                  const itemKey = `sys-${item.id}`;
+                  const optIndex = flatOptions.findIndex(o => o.key === itemKey);
+                  const isActive = activeIndex === optIndex;
+                  const isFallback = typeof item.id === "number" && item.id < 0;
                   return (
                     <div
-                      key={`sys-${item.id}`}
+                      key={itemKey}
+                      data-active={isActive}
                       onClick={() => {
                         onSelect(item); setOpen(false); setQuery("");
                       }}
                       title={isFallback ? `"${item.group_name}" is predefined but not yet seeded in acc_group_master` : undefined}
-                      className={`flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-secondary/60 transition-colors
-                        ${isSet && value === item.group_name ? "bg-primary/5 text-primary" : "text-foreground"}`}
+                      className={`flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer transition-colors
+                        ${isActive ? "bg-accent text-accent-foreground font-medium" : "hover:bg-secondary/60 text-foreground"}
+                        ${isSet && value === item.group_name && !isActive ? "bg-primary/5 text-primary" : ""}`}
                     >
                       <span className="truncate">{item.group_name}</span>
                       <div className="flex items-center gap-1 shrink-0">
@@ -446,28 +548,42 @@ function UnderCombobox({
                 })}
               </>
             )}
+
             {/* Custom groups */}
             {customItems.length > 0 && (
               <>
                 <div className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold bg-secondary/20 border-y border-border/40">
                   <Sparkles className="h-3 w-3" /> Your Custom Groups
                 </div>
-                {customItems.map(item => (
-                  <div
-                    key={`cust-${item.id}`}
-                    onClick={() => { onSelect(item); setOpen(false); setQuery(""); }}
-                    className={`flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-secondary/60 transition-colors
-                      ${isSet && value === item.group_name ? "bg-primary/5 text-primary" : "text-foreground"}`}
-                  >
-                    <span className="truncate">{item.group_name}</span>
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded border shrink-0 ${(item.nature && NATURE_BADGE[item.nature as GroupNature]) || ""}`}>
-                      {item.nature}
-                    </span>
-                  </div>
-                ))}
+                {customItems.map(item => {
+                  const itemKey = `cust-${item.id}`;
+                  const optIndex = flatOptions.findIndex(o => o.key === itemKey);
+                  const isActive = activeIndex === optIndex;
+                  return (
+                    <div
+                      key={itemKey}
+                      data-active={isActive}
+                      onClick={() => { onSelect(item); setOpen(false); setQuery(""); }}
+                      className={`flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer transition-colors
+                        ${isActive ? "bg-accent text-accent-foreground font-medium" : "hover:bg-secondary/60 text-foreground"}
+                        ${isSet && value === item.group_name && !isActive ? "bg-primary/5 text-primary" : ""}`}
+                    >
+                      <span className="truncate">{item.group_name}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded border shrink-0 ${(item.nature && NATURE_BADGE[item.nature as GroupNature]) || ""}`}>
+                        {item.nature}
+                      </span>
+                    </div>
+                  );
+                })}
               </>
             )}
+
             {systemItems.length === 0 && customItems.length === 0 && (
+              <div className="py-6 text-center text-sm text-muted-foreground">No groups found</div>
+            )}
+          </div>
+        </div>
+      )}
               <div className="py-6 text-center text-sm text-muted-foreground">No groups found</div>
             )}
           </div>

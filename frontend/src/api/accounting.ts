@@ -78,34 +78,42 @@ export interface LedgerGroup {
 
 // ─── Acc Ledger Group (acc_ledger_groups table) ───────────────────────────────
 export interface AccLedgerGroup {
-  id: number;
-  finance_id: number;
+  id: string | number;
+  finance_id: string | number;
   group_name: string;
   alias: string | null;
   alias_lang: Record<string, string> | null;
-  // New two-column parent scheme (matches backend acc_ledger_groups schema)
-  system_parent_id: number | null;   // FK → acc_group_master.id
-  custom_parent_id: number | null;   // FK → acc_ledger_groups.id
-  root_master_id: number | null;
+  parent_group_id?: string | number | null;
+  system_parent_id: string | number | null;
+  custom_parent_id: string | number | null;
+  root_master_id: string | number | null;
   nature: 'Assets' | 'Liabilities' | 'Income' | 'Expenses';
-  affects_gross_profit: number;
-  behaves_like_subledger: number;
+  affects_gross_profit: number | boolean;
+  behaves_like_subledger: number | boolean;
   nett_balance_report: 'Debit' | 'Credit' | 'Both';
-  used_for_calculation: number;
+  used_for_calculation: number | boolean;
   allocation_method: 'By Quantity' | 'By Value' | 'Not Applicable';
-  is_active: number;
+  is_system?: boolean;
+  is_active: number | boolean;
   created_at: string;
   updated_at: string;
 }
 
 /** Unified dropdown item returned by GET /ledger-groups/under-dropdown */
 export interface UnderDropdownItem {
-  id: number;
+  id: string | number;
   group_name: string;
-  system_parent_id: number | null;
-  custom_parent_id: number | null;
+  parent_group_id?: string | number | null;
+  parent_name?: string | null;
+  system_parent_id?: string | number | null;
+  custom_parent_id?: string | number | null;
   nature: 'Assets' | 'Liabilities' | 'Income' | 'Expenses';
-  source: 'system' | 'custom';  // 'system' = acc_group_master, 'custom' = acc_ledger_groups
+  source: 'system' | 'custom';
+  affects_gross_profit?: boolean;
+  behaves_like_subledger?: boolean;
+  nett_balance_report?: 'Debit' | 'Credit' | 'Both';
+  used_for_calculation?: boolean;
+  allocation_method?: 'By Quantity' | 'By Value' | 'Not Applicable';
   sequence_order?: number;
 }
 
@@ -169,7 +177,7 @@ export function getCurrentFYRange(): { from: string; to: string } {
 
 // ─── LEDGER APIs ─────────────────────────────────────────────────────────────
 
-export const getLedgers = (finance_id: number, financial_year?: string) =>
+export const getLedgers = (finance_id: string | number, financial_year?: string) =>
   apiClient.get<{ success: boolean; data: Ledger[] }>('/ledger/list', {
     params: { finance_id, financial_year: financial_year || getFinancialYear() }
   });
@@ -239,49 +247,59 @@ export const getLedgerSummary = (finance_id: number, financial_year?: string) =>
 
 /** GET /ledger-groups/list — custom groups for this company */
 export const getAccLedgerGroups = () =>
-  apiClient.get<{ success: boolean; data: AccLedgerGroup[] }>('/ledger-groups/list');
+  apiClient.get<{ success: boolean; data: { systemGroups: AccLedgerGroup[]; customGroups: AccLedgerGroup[] } | AccLedgerGroup[] }>('/ledger-groups/list');
 
 /** GET /ledger-groups/under-dropdown — merged system + custom groups for parent picker */
 export const getUnderDropdown = () =>
   apiClient.get<{ success: boolean; data: UnderDropdownItem[] }>('/ledger-groups/under-dropdown');
 
-/** POST /ledger-groups/create — create a single custom group
- *  Backend requires exactly one of system_parent_id OR custom_parent_id. */
+/** POST /ledger-groups/create — create a single custom group */
 export const createAccLedgerGroup = (payload: {
   group_name: string;
   alias?: string | null;
   alias_lang?: Record<string, string> | null;
-  system_parent_id?: number | null;   // ← parent is a system (master) group
-  custom_parent_id?: number | null;   // ← parent is another custom group
-  nature?: 'Assets' | 'Liabilities' | 'Income' | 'Expenses';  // resolved by backend from parent
+  parent_group_id?: string | number | null;
+  system_parent_id?: string | number | null;
+  custom_parent_id?: string | number | null;
+  nature?: 'Assets' | 'Liabilities' | 'Income' | 'Expenses';
   affects_gross_profit?: boolean;
   behaves_like_subledger?: boolean;
   nett_balance_report?: 'Debit' | 'Credit' | 'Both';
   used_for_calculation?: boolean;
   allocation_method?: 'By Quantity' | 'By Value' | 'Not Applicable';
-}) => apiClient.post<{ success: boolean; id: number }>('/ledger-groups/create', payload);
+}) => apiClient.post<{ success: boolean; id: string | number }>('/ledger-groups/create', payload);
+
+/** PUT /ledger-groups/update/:id — update a custom group */
+export const updateAccLedgerGroup = (id: string | number, payload: Partial<AccLedgerGroup>) =>
+  apiClient.put<{ success: boolean; message?: string }>(`/ledger-groups/update/${id}`, payload);
+
+/** DELETE /ledger-groups/:id — delete a custom group */
+export const deleteAccLedgerGroup = (id: string | number) =>
+  apiClient.delete<{ success: boolean; message?: string }>(`/ledger-groups/${id}`);
 
 /** POST /ledger-groups/multi-create — create multiple custom groups in bulk */
 export const multiCreateAccLedgerGroup = (groups: Array<{
   group_name: string;
   alias?: string | null;
-  system_parent_id?: number | null;
-  custom_parent_id?: number | null;
+  parent_group_id?: string | number | null;
+  system_parent_id?: string | number | null;
+  custom_parent_id?: string | number | null;
   nature?: string;
   affects_gross_profit?: boolean;
   behaves_like_subledger?: boolean;
   nett_balance_report?: string;
   used_for_calculation?: boolean;
   allocation_method?: string;
-}>) => apiClient.post<{ success: boolean; ids: number[] }>('/ledger-groups/multi-create', { groups });
+}>) => apiClient.post<{ success: boolean; ids: (string | number)[] }>('/ledger-groups/multi-create', { groups });
 
 /** POST /ledger-groups/multi-update — bulk update custom groups */
 export const multiUpdateAccLedgerGroup = (groups: Array<{
-  id: number;
+  id: string | number;
   group_name: string;
   alias?: string | null;
-  system_parent_id?: number | null;
-  custom_parent_id?: number | null;
+  parent_group_id?: string | number | null;
+  system_parent_id?: string | number | null;
+  custom_parent_id?: string | number | null;
   nature?: string;
   affects_gross_profit?: boolean;
   behaves_like_subledger?: boolean;
@@ -291,254 +309,3 @@ export const multiUpdateAccLedgerGroup = (groups: Array<{
 }>) => apiClient.post<{ success: boolean }>('/ledger-groups/multi-update', { groups });
 
 
-// src/api/accounting.ts
-// import apiClient from './apiClient';
-
-// export interface Ledger {
-//   id: number;
-//   ledger_code: string;
-//   ledger_name: string;
-//   alias_name: string | null;
-//   group_id: number;
-//   group_name?: string;
-//   opening_balance: number;
-//   ob_type: 'Dr' | 'Cr';
-//   status: 'Active' | 'Inactive';
-//   is_active: number;
-//   mobile_number?: string;
-//   email?: string;
-//   gst_number?: string;
-//   address?: string;
-//   city?: string;
-//   state?: string;
-//   pincode?: string;
-//   credit_limit?: number;
-//   credit_days?: number;
-//   interest_rate?: number;
-//   allow_bill_wise: number;
-//   allow_cost_center: number;
-//   is_bank_account: number;
-//   bank_name?: string;
-//   account_number?: string;
-//   ifsc_code?: string;
-//   opening_dr: number;
-//   opening_cr: number;
-//   period_dr: number;
-//   period_cr: number;
-//   closing_dr: number;
-//   closing_cr: number;
-// }
-
-// export interface LedgerGroup {
-//   id: number;
-//   group_code: string;
-//   group_name: string;
-//   parent_group_id: number | null;
-//   nature: 'Assets' | 'Liabilities' | 'Income' | 'Expense';
-//   sort_order: number;
-//   is_system: number;
-//   is_active: number;
-//   description: string | null;
-// }
-
-// // ─── Acc Ledger Group (acc_ledger_groups table) ───────────────────────────────
-// export interface AccLedgerGroup {
-//   id: number;
-//   finance_id: number;
-//   group_name: string;
-//   alias: string | null;
-//   alias_lang: Record<string, string> | null;
-//   // New two-column parent scheme (matches backend acc_ledger_groups schema)
-//   system_parent_id: number | null;   // FK → acc_group_master.id
-//   custom_parent_id: number | null;   // FK → acc_ledger_groups.id
-//   root_master_id: number | null;
-//   nature: 'Assets' | 'Liabilities' | 'Income' | 'Expenses';
-//   affects_gross_profit: number;
-//   behaves_like_subledger: number;
-//   nett_balance_report: 'Debit' | 'Credit' | 'Both';
-//   used_for_calculation: number;
-//   allocation_method: 'By Quantity' | 'By Value' | 'Not Applicable';
-//   is_active: number;
-//   created_at: string;
-//   updated_at: string;
-// }
-
-// /** Unified dropdown item returned by GET /ledger-groups/under-dropdown */
-// export interface UnderDropdownItem {
-//   id: number;
-//   group_name: string;
-//   system_parent_id: number | null;
-//   custom_parent_id: number | null;
-//   nature: 'Assets' | 'Liabilities' | 'Income' | 'Expenses';
-//   source: 'system' | 'custom';  // 'system' = acc_group_master, 'custom' = acc_ledger_groups
-//   sequence_order?: number;
-// }
-
-// export interface VoucherType {
-//   id: number;
-//   type_code: string;
-//   type_name: string;
-//   class: string;
-//   prefix: string;
-//   numbering_mode: string;
-// }
-
-// export interface LedgerStatement {
-//   ledger: {
-//     ledger_name: string;
-//     ledger_code: string;
-//     alias_name: string | null;
-//     opening_balance: number;
-//     ob_type: string;
-//     group_name: string;
-//     nature: string;
-//   };
-//   opening: { dr: number; cr: number };
-//   entries: Array<{
-//     voucher_date: string;
-//     voucher_number: string;
-//     voucher_type: string;
-//     entry_type: 'Dr' | 'Cr';
-//     amount: number;
-//     narration: string | null;
-//   }>;
-// }
-
-// export interface LedgerSummary {
-//   totalDr: number;
-//   totalCr: number;
-//   openingBalance: number;
-//   openingType: 'Dr' | 'Cr';
-//   closingBalance: number;
-//   closingType: 'Dr' | 'Cr';
-// }
-
-// // Helper: derive financial year (Apr–Mar)
-// export function getFinancialYear(date?: Date): string {
-//   const d = date || new Date();
-//   const m = d.getMonth() + 1;
-//   const y = d.getFullYear();
-//   return m >= 4 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
-// }
-
-// export function getCurrentFYRange(): { from: string; to: string } {
-//   const now = new Date();
-//   const m = now.getMonth() + 1;
-//   const y = now.getFullYear();
-//   const startYear = m >= 4 ? y : y - 1;
-//   return {
-//     from: `${startYear}-04-01`,
-//     to: `${startYear + 1}-03-31`,
-//   };
-// }
-
-// // ─── LEDGER APIs ─────────────────────────────────────────────────────────────
-
-// export const getLedgers = (finance_id: number, financial_year?: string) =>
-//   apiClient.get<{ success: boolean; data: Ledger[] }>('/ledger/list', {
-//     params: { finance_id, financial_year: financial_year || getFinancialYear() }
-//   });
-
-// export const getLedgerGroups = (finance_id: number) =>
-//   apiClient.get<{ success: boolean; data: LedgerGroup[] }>('/ledger/groups', {
-//     params: { finance_id }
-//   });
-
-// export const createLedgerGroup = (payload: {
-//   finance_id: number;
-//   group_name: string;
-//   parent_group_id?: number | null;
-//   nature: string;
-//   description?: string;
-//   created_by?: number;
-// }) => apiClient.post<{ success: boolean; id: number }>('/ledger/groups/create', payload);
-
-// export const getGroupLedgers = (groupId: number, finance_id: number) =>
-//   apiClient.get<{ success: boolean; data: { group: LedgerGroup; ledgers: Ledger[] } }>(
-//     `/ledger/group/${groupId}`,
-//     { params: { finance_id } }
-//   );
-
-// export const getVoucherTypes = (finance_id: number) =>
-//   apiClient.get<{ success: boolean; data: VoucherType[] }>('/ledger/voucher-types', {
-//     params: { finance_id }
-//   });
-
-// export const getLedgerStatement = (ledger_id: number, finance_id: number, from: string, to: string) =>
-//   apiClient.get<{ success: boolean; data: LedgerStatement }>(`/ledger/${ledger_id}/statement`, {
-//     params: { finance_id, from, to }
-//   });
-
-// export const createLedger = (payload: Record<string, unknown>) =>
-//   apiClient.post<{ success: boolean; id: number }>('/ledger/create', payload);
-
-// export const updateLedger = (id: number, finance_id: number, payload: Record<string, unknown>) =>
-//   apiClient.put<{ success: boolean }>(`/ledger/update/${id}`, { ...payload, finance_id });
-
-// export const deleteLedger = (id: number, finance_id: number) =>
-//   apiClient.delete<{ success: boolean }>(`/ledger/delete/${id}`, {
-//     params: { finance_id }
-//   });
-
-// export const multiCreateLedger = (finance_id: number, ledgers: unknown[]) =>
-//   apiClient.post<{ success: boolean; ids: number[] }>('/ledger/multi-create', { finance_id, ledgers });
-
-// export const getLedgerSummary = (finance_id: number, financial_year?: string) =>
-//   apiClient.get<{ success: boolean; data: LedgerSummary }>('/ledger/summary', {
-//     params: { finance_id, financial_year: financial_year || getFinancialYear() }
-//   });
-
-// // ─── ACC LEDGER GROUP APIs (acc_ledger_groups table) ─────────────────────────
-
-// /** GET /ledger-groups/list — custom groups for this company */
-// export const getAccLedgerGroups = () =>
-//   apiClient.get<{ success: boolean; data: AccLedgerGroup[] }>('/ledger-groups/list');
-
-// /** GET /ledger-groups/under-dropdown — merged system + custom groups for parent picker */
-// export const getUnderDropdown = () =>
-//   apiClient.get<{ success: boolean; data: UnderDropdownItem[] }>('/ledger-groups/under-dropdown');
-
-// /** POST /ledger-groups/create — create a single custom group
-//  *  Backend requires exactly one of system_parent_id OR custom_parent_id. */
-// export const createAccLedgerGroup = (payload: {
-//   group_name: string;
-//   alias?: string | null;
-//   alias_lang?: Record<string, string> | null;
-//   system_parent_id?: number | null;   // ← parent is a system (master) group
-//   custom_parent_id?: number | null;   // ← parent is another custom group
-//   nature?: 'Assets' | 'Liabilities' | 'Income' | 'Expenses';  // resolved by backend from parent
-//   affects_gross_profit?: boolean;
-//   behaves_like_subledger?: boolean;
-//   nett_balance_report?: 'Debit' | 'Credit' | 'Both';
-//   used_for_calculation?: boolean;
-//   allocation_method?: 'By Quantity' | 'By Value' | 'Not Applicable';
-// }) => apiClient.post<{ success: boolean; id: number }>('/ledger-groups/create', payload);
-
-// /** POST /ledger-groups/multi-create — create multiple custom groups in bulk */
-// export const multiCreateAccLedgerGroup = (groups: Array<{
-//   group_name: string;
-//   alias?: string | null;
-//   system_parent_id?: number | null;
-//   custom_parent_id?: number | null;
-//   nature?: string;
-//   affects_gross_profit?: boolean;
-//   behaves_like_subledger?: boolean;
-//   nett_balance_report?: string;
-//   used_for_calculation?: boolean;
-//   allocation_method?: string;
-// }>) => apiClient.post<{ success: boolean; ids: number[] }>('/ledger-groups/multi-create', { groups });
-
-// /** POST /ledger-groups/multi-update — bulk update custom groups */
-// export const multiUpdateAccLedgerGroup = (groups: Array<{
-//   id: number;
-//   group_name: string;
-//   alias?: string | null;
-//   system_parent_id?: number | null;
-//   custom_parent_id?: number | null;
-//   nature?: string;
-//   affects_gross_profit?: boolean;
-//   behaves_like_subledger?: boolean;
-//   nett_balance_report?: string;
-//   used_for_calculation?: boolean;
-//   allocation_method?: string;
-// }>) => apiClient.post<{ success: boolean }>('/ledger-groups/multi-update', { groups });

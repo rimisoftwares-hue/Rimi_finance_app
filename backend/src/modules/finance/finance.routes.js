@@ -8,6 +8,7 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const Jimp = require('jimp');
 const { db } = require('../../config/database.config');
 const { ownerOnly, ownerCheckFinance, enhancedCheckFinance } = require('../../middleware/auth.middleware');
+const { ensureSystemGroups } = require('../accounting/ledgerGroup/group.service');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -406,6 +407,9 @@ const handleCreateFinance = async (req, res) => {
           authenticatedOwner.username || 'Owner',
         ]
       );
+
+      // 8. Ensure Tally Prime Chart of Accounts system groups exist for this new company
+      await ensureSystemGroups(financeId, client);
 
       await client.query('COMMIT');
       client.release();
