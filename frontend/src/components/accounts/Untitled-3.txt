@@ -1,0 +1,637 @@
+-- ============================================================
+--  LEDGER AND RELATED TABLES - COMPLETE SCHEMA
+--  After All Alterations
+-- ============================================================
+--  Tables included:
+--    1. acc_ledger_groups        - Chart of Accounts hierarchy
+--    2. acc_ledgers              - Individual ledger accounts (FULLY ALTERED)
+--    3. acc_ledger_mailing       - Postal addresses (FULLY ALTERED)
+--    4. acc_ledger_banking       - Multiple bank accounts (FULLY ALTERED)
+--    5. acc_ledger_banking_txn_types - Multi-select txn types (NEW)
+--    6. acc_ledger_tax           - PAN/GST registration (FULLY ALTERED)
+--    7. acc_ledger_billwise      - Credit limits & bill-wise (FULLY ALTERED)
+--    8. acc_ledger_tax_config    - GST rate configuration (FULLY ALTERED)
+--    9. acc_ledger_loan_config   - Loan/EMI configuration
+--   10. acc_ledger_bank_config   - Bank cheque/recon config (NEW)
+--   11. acc_ledger_cheque_books  - Cheque book ranges (NEW)
+--   12. acc_voucher_entries      - Double-entry lines
+--   13. acc_bill_references      - Bill-wise outstanding (FULLY ALTERED)
+--   14. acc_ledger_balances      - Cached balances for reporting
+-- ============================================================
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- ============================================================
+-- TABLE 1: acc_ledger_groups
+-- Purpose: Chart of Accounts - Company custom group hierarchy
+-- ============================================================
+CREATE TABLE acc_ledger_groups (
+    id                       INT             NOT NULL AUTO_INCREMENT,
+    finance_id               INT             NOT NULL,
+    group_name               VARCHAR(150)    COLLATE utf8mb4_unicode_ci NOT NULL,
+    alias                    VARCHAR(150)    COLLATE utf8mb4_unicode_ci DEFAULT NULL
+                                             COMMENT 'Alternative name',
+    alias_lang               JSON            DEFAULT NULL
+                                             COMMENT 'Language wise aliases e.g. {"ta":"முதலீடுகள்","hi":"निवेश"}',
+    system_parent_id         INT             DEFAULT NULL
+                                             COMMENT 'FK → acc_group_master.id',
+    custom_parent_id         INT             DEFAULT NULL
+                                             COMMENT 'FK → acc_ledger_groups.id',
+    root_master_id           INT             DEFAULT NULL
+                                             COMMENT 'Top-level acc_group_master ancestor',
+    nature                   ENUM('Assets','Liabilities','Income','Expenses')
+                                             COLLATE utf8mb4_unicode_ci NOT NULL,
+    affects_gross_profit     TINYINT(1)      NOT NULL DEFAULT 0,
+    behaves_like_subledger   TINYINT(1)      NOT NULL DEFAULT 0,
+    nett_balance_report      ENUM('Debit','Credit','Both')
+                                             COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Both',
+    used_for_calculation     TINYINT(1)      NOT NULL DEFAULT 0,
+    allocation_method        ENUM('By Quantity','By Value','Not Applicable')
+                                             COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Not Applicable',
+    is_active                TINYINT(1)      NOT NULL DEFAULT 1,
+    created_at               TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at               TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_group_name_finance        (finance_id, group_name),
+    KEY idx_finance_id                      (finance_id),
+    KEY idx_nature                          (nature),
+    KEY idx_is_active                       (is_active),
+    KEY idx_finance_nature                  (finance_id, nature),
+    KEY idx_system_parent_id               (system_parent_id),
+    KEY idx_custom_parent_id               (custom_parent_id),
+    KEY idx_root_master_id                 (root_master_id),
+    CONSTRAINT fk_alg_finance       FOREIGN KEY (finance_id)
+        REFERENCES finance_detail (id)      ON DELETE CASCADE,
+    CONSTRAINT fk_alg_sys_parent    FOREIGN KEY (system_parent_id)
+        REFERENCES acc_group_master (id)    ON DELETE RESTRICT,
+    CONSTRAINT fk_alg_custom_parent FOREIGN KEY (custom_parent_id)
+        REFERENCES acc_ledger_groups (id)   ON DELETE RESTRICT,
+    CONSTRAINT fk_alg_root_master   FOREIGN KEY (root_master_id)
+        REFERENCES acc_group_master (id)    ON DELETE RESTRICT
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Chart of Accounts - Company custom group hierarchy';
+
+-- ============================================================
+-- TABLE 2: acc_ledgers (FULLY ALTERED)
+-- Purpose: Individual ledger accounts with all Tally fields
+-- ============================================================
+CREATE TABLE acc_ledgers (
+    id              INT             NOT NULL AUTO_INCREMENT,
+    finance_id      INT             NOT NULL,
+    ledger_name     VARCHAR(200)    NOT NULL,
+    group_id        INT             NOT NULL,
+    opening_balance DECIMAL(15,2)   DEFAULT 0.00,
+    ob_type         ENUM('Dr','Cr') DEFAULT 'Dr',
+    is_bank_account TINYINT(1)      DEFAULT 0,
+    is_system       TINYINT(1)      DEFAULT 0,
+    is_active       TINYINT(1)      DEFAULT 1,
+    effective_date  DATE            DEFAULT NULL,
+    remarks         VARCHAR(500)    DEFAULT NULL,
+    created_by      VARCHAR(100)    DEFAULT NULL,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    -- ALTER ADDITIONS (from tally_ledger_alter_tables.sql)
+    inv_values_affected   TINYINT(1)   NOT NULL DEFAULT 0
+        COMMENT 'Inventory values are affected? 1=Yes — INVAFFECT toggle',
+    type_of_ledger        ENUM('Not Applicable','Invoice Rounding','Discount')
+                                     NOT NULL DEFAULT 'Not Applicable'
+        COMMENT 'TYPEOFLEDGER — shown for Sales/Purchase/Expense/Income groups',
+    rounding_method       ENUM('Not Applicable','Normal Rounding','Downward Rounding','Upward Rounding')
+                                     NOT NULL DEFAULT 'Not Applicable'
+        COMMENT 'ROUNDING — shown when type_of_ledger=Invoice Rounding or Sales Account',
+    rounding_limit        DECIMAL(10,2) DEFAULT NULL
+        COMMENT 'Rounding limit value (e.g. 1.00, 0.50)',
+    appropriation_method  ENUM('Not Applicable','Appropriate by Value','Appropriate by Quantity')
+                                     NOT NULL DEFAULT 'Not Applicable'
+        COMMENT 'APPROPRIATION — Method to allocate when used in purchase invoice',
+    is_additional_cost    TINYINT(1)   NOT NULL DEFAULT 0
+        COMMENT 'ADDCOST — Additional cost in purchases invoice? 1=Yes',
+    cost_centre_applicable TINYINT(1)  NOT NULL DEFAULT 0
+        COMMENT 'Cost centres are applicable? 1=Yes',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ledger_code_finance (finance_id, ledger_code),
+    KEY idx_finance_id (finance_id),
+    KEY idx_group_id (group_id),
+    KEY idx_is_active (is_active),
+    CONSTRAINT fk_al_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_al_group FOREIGN KEY (group_id) REFERENCES acc_ledger_groups(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_al_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+    CONSTRAINT fk_al_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicle_detail(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Individual ledger accounts with complete Tally fields';
+
+-- ============================================================
+-- TABLE 3: acc_ledger_mailing (FULLY ALTERED)
+-- Purpose: Full postal address for ledgers with contact details
+-- ============================================================
+CREATE TABLE acc_ledger_mailing (
+    id          INT          NOT NULL AUTO_INCREMENT,
+    finance_id  INT          NOT NULL,
+    ledger_id   INT          NOT NULL,
+    mailing_name     VARCHAR(200)  DEFAULT NULL
+        COMMENT 'Separate mailing name (can differ from ledger name)',
+    addr_line1  VARCHAR(255) DEFAULT NULL,
+    addr_line2  VARCHAR(255) DEFAULT NULL,
+    city        VARCHAR(100) DEFAULT NULL,
+    state       VARCHAR(100) DEFAULT NULL,
+    country     VARCHAR(100) DEFAULT 'India',
+    pin_code    VARCHAR(10)  DEFAULT NULL,
+    provide_contact  TINYINT(1)    NOT NULL DEFAULT 0
+        COMMENT 'Provide Contact Details? 1=Yes 0=No',
+    contact_person   VARCHAR(150)  DEFAULT NULL
+        COMMENT 'Shown only when provide_contact=1',
+    telephone        VARCHAR(30)   DEFAULT NULL,
+    mobile           VARCHAR(20)   DEFAULT NULL,
+    fax              VARCHAR(30)   DEFAULT NULL,
+    email            VARCHAR(150)  DEFAULT NULL,
+    email_cc         VARCHAR(150)  DEFAULT NULL,
+    website          VARCHAR(200)  DEFAULT NULL,
+    created_by  VARCHAR(100) DEFAULT NULL,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ledger_mailing (ledger_id),
+    KEY idx_finance_id (finance_id),
+    KEY idx_city (city),
+    KEY idx_state (state),
+    CONSTRAINT fk_alm_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_alm_ledger FOREIGN KEY (ledger_id) REFERENCES acc_ledgers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Postal addresses with contact details for ledgers';
+
+-- ============================================================
+-- TABLE 4: acc_ledger_banking (FULLY ALTERED)
+-- Purpose: Multiple bank accounts per ledger
+-- ============================================================
+CREATE TABLE acc_ledger_banking (
+    id               INT          NOT NULL AUTO_INCREMENT,
+    finance_id       INT          NOT NULL,
+    ledger_id        INT          NOT NULL,
+    provide_bank_details  TINYINT(1)    NOT NULL DEFAULT 1
+        COMMENT 'Provide bank details? 1=Yes 0=No (Tally toggle)',
+    account_holder_name   VARCHAR(200)  DEFAULT NULL
+        COMMENT 'Defaults to ledger name but editable independently',
+    bank_name        VARCHAR(150) DEFAULT NULL,
+    account_number   VARCHAR(50)  DEFAULT NULL,
+    ifsc_code        VARCHAR(11)  DEFAULT NULL,
+    swift_code       VARCHAR(11)  DEFAULT NULL
+        COMMENT 'SWIFT/BIC code for international transfers',
+    branch_name      VARCHAR(150) DEFAULT NULL,
+    txn_type         ENUM('NEFT','RTGS','IMPS','UPI','Cheque','Cash') DEFAULT 'NEFT',
+    acc_type         ENUM('Savings','Current','OD','CC','FD') DEFAULT 'Savings',
+    upi_id           VARCHAR(100) DEFAULT NULL,
+    is_primary       TINYINT(1)   DEFAULT 0,
+    primary_sentinel TINYINT      GENERATED ALWAYS AS (IF(is_primary = 1, 1, NULL)) STORED,
+    created_by       VARCHAR(100) DEFAULT NULL,
+    created_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ledger_account (finance_id, ledger_id, account_number),
+    UNIQUE KEY uk_ledger_primary (ledger_id, primary_sentinel),
+    KEY idx_finance_id (finance_id),
+    KEY idx_ledger_id (ledger_id),
+    KEY idx_is_primary (is_primary),
+    CONSTRAINT fk_alb_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_alb_ledger FOREIGN KEY (ledger_id) REFERENCES acc_ledgers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Multiple bank accounts per ledger with primary flag';
+
+-- ============================================================
+-- TABLE 5: acc_ledger_banking_txn_types (NEW)
+-- Purpose: Multi-select Transaction Types per bank ledger
+-- ============================================================
+CREATE TABLE acc_ledger_banking_txn_types (
+    id                  INT           NOT NULL AUTO_INCREMENT,
+    finance_id          INT           NOT NULL,
+    ledger_banking_id   INT           NOT NULL
+        COMMENT 'FK → acc_ledger_banking.id',
+    txn_type            ENUM(
+                            'ATM',
+                            'Card',
+                            'Cheque',
+                            'ECS',
+                            'e-Fund Transfer',
+                            'Electronic Cheque',
+                            'Electronic DD/PO',
+                            'Others'
+                        ) NOT NULL,
+    created_at          TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_banking_txn_type (ledger_banking_id, txn_type)
+        COMMENT 'Prevent duplicate txn_type for same bank account',
+    KEY idx_finance_id (finance_id),
+    KEY idx_ledger_banking_id (ledger_banking_id),
+    CONSTRAINT fk_albtt_finance
+        FOREIGN KEY (finance_id)
+        REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_albtt_banking
+        FOREIGN KEY (ledger_banking_id)
+        REFERENCES acc_ledger_banking(id) ON DELETE CASCADE
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Multi-select Transaction Types per bank ledger (Tally BANKING block)';
+
+-- ============================================================
+-- TABLE 6: acc_ledger_tax (FULLY ALTERED)
+-- Purpose: PAN, GSTIN, registration type for ledgers
+-- ============================================================
+CREATE TABLE acc_ledger_tax (
+    id             INT          NOT NULL AUTO_INCREMENT,
+    finance_id     INT          NOT NULL,
+    ledger_id      INT          NOT NULL,
+    pan_number     VARCHAR(10)  DEFAULT NULL,
+    gstin          VARCHAR(15)  DEFAULT NULL,
+    reg_type       ENUM(
+        'Unregistered',
+        'Regular',
+        'Composition',
+        'Consumer',
+        'Overseas',
+        'SEZ Unit',
+        'SEZ Developer',
+        'Deemed Export',
+        'Tax Deductor',
+        'Tax Collector (E-Commerce)',
+        'Input Service Distributor',
+        'UIN Holder'
+    ) NOT NULL DEFAULT 'Unregistered'
+        COMMENT 'Tally GST Registration Type',
+    assessee_other_territory  TINYINT(1)    NOT NULL DEFAULT 0
+        COMMENT 'Assessee of Other Territory? 1=Yes 0=No',
+    territory                 VARCHAR(150)  DEFAULT NULL
+        COMMENT 'Territory name — shown only when assessee_other_territory=1',
+    tds_applicable TINYINT(1)   DEFAULT 0,
+    tcs_applicable TINYINT(1)   DEFAULT 0,
+    created_by     VARCHAR(100) DEFAULT NULL,
+    created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ledger_tax (ledger_id),
+    KEY idx_finance_id (finance_id),
+    KEY idx_gstin (gstin),
+    KEY idx_pan_number (pan_number),
+    KEY idx_reg_type (reg_type),
+    CONSTRAINT fk_alt_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_alt_ledger FOREIGN KEY (ledger_id) REFERENCES acc_ledgers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='PAN, GSTIN, registration type for ledgers';
+
+-- ============================================================
+-- TABLE 7: acc_ledger_billwise (FULLY ALTERED)
+-- Purpose: Credit limits and bill-wise tracking configuration
+-- ============================================================
+CREATE TABLE acc_ledger_billwise (
+    id                   INT          NOT NULL AUTO_INCREMENT,
+    finance_id           INT          NOT NULL,
+    ledger_id            INT          NOT NULL,
+    bill_wise            TINYINT(1)   DEFAULT 0,
+    credit_limit         DECIMAL(15,2) DEFAULT NULL,
+    credit_days          SMALLINT     DEFAULT NULL,
+    check_credit_days    TINYINT(1)   NOT NULL DEFAULT 0
+        COMMENT 'Check for credit days during voucher entry? — Sundry Debtors only',
+    check_credit_limit   TINYINT(1)   DEFAULT 0,
+    separate_discount    TINYINT(1)   DEFAULT 0,
+    created_by           VARCHAR(100) DEFAULT NULL,
+    created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ledger_billwise (ledger_id),
+    KEY idx_finance_id (finance_id),
+    KEY idx_bill_wise (bill_wise),
+    CONSTRAINT fk_albw_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_albw_ledger FOREIGN KEY (ledger_id) REFERENCES acc_ledgers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Credit limits and bill-wise tracking configuration';
+
+-- ============================================================
+-- TABLE 8: acc_ledger_tax_config (FULLY ALTERED)
+-- Purpose: GST rate configuration for tax ledgers
+-- ============================================================
+CREATE TABLE acc_ledger_tax_config (
+    id                      INT          NOT NULL AUTO_INCREMENT,
+    finance_id              INT          NOT NULL,
+    ledger_id               INT          NOT NULL,
+    -- GST Statutory details
+    gst_applicable          ENUM('Applicable','Not Applicable','Undefined')
+                            NOT NULL DEFAULT 'Undefined'
+        COMMENT 'Is GST Applicable? — top level statutory dropdown',
+    set_alter_gst_details   TINYINT(1)    NOT NULL DEFAULT 0
+        COMMENT 'Set/Alter GST Details? 1=Yes — enabled only when gst_applicable=Applicable',
+    gst_description         VARCHAR(200)  DEFAULT NULL
+        COMMENT 'Free-text label for this GST rate config',
+    applicable_from         DATE          DEFAULT NULL
+        COMMENT 'GST effective date for this rate config',
+    hsn_sac_code            VARCHAR(20)   DEFAULT NULL
+        COMMENT 'HSN (goods) or SAC (services) code',
+    hsn_sac_details         ENUM('As per Company','As per Stock Group','Specify Details Here')
+                            NOT NULL DEFAULT 'As per Company',
+    source_of_details       ENUM('As per Company','As per Stock Group','As per Stock Item','Specify Details Here')
+                            NOT NULL DEFAULT 'As per Company',
+    type_of_supply          ENUM('Goods','Services')
+                            DEFAULT NULL
+        COMMENT 'Type of Supply for GST',
+    taxability              ENUM('Taxable','Exempt','Nil Rated')
+                            DEFAULT NULL,
+    -- Tax rates (split rates)
+    igst_rate               DECIMAL(5,2)  NOT NULL DEFAULT 0.00
+        COMMENT 'Integrated Tax Rate %',
+    cgst_rate               DECIMAL(5,2)  NOT NULL DEFAULT 0.00
+        COMMENT 'Central Tax Rate %',
+    sgst_rate               DECIMAL(5,2)  NOT NULL DEFAULT 0.00
+        COMMENT 'State Tax Rate %',
+    cess_rate               DECIMAL(5,2)  NOT NULL DEFAULT 0.00
+        COMMENT 'Cess rate — % or per-unit based on cess_type',
+    cess_type               ENUM('Valorem','Quantum')
+                            NOT NULL DEFAULT 'Valorem'
+        COMMENT 'Valorem=% of value, Quantum=fixed per unit',
+    reverse_charge          TINYINT(1)    NOT NULL DEFAULT 0
+        COMMENT 'Reverse Charge Applicable? 1=Yes',
+    include_in_assessable   TINYINT(1)    NOT NULL DEFAULT 0
+        COMMENT 'Include in assessable value calculation for GST? (freight/packing ledgers)',
+    -- Duties & Taxes group specific fields
+    duty_tax_type           ENUM('GST','TCS','TDS','Others')
+                            DEFAULT NULL
+        COMMENT 'Type of Duty/Tax — for Duties & Taxes group ledgers',
+    tds_nature_of_payment   VARCHAR(150)  DEFAULT NULL
+        COMMENT 'Nature of Payment — shown when duty_tax_type=TDS',
+    tcs_nature_of_goods     VARCHAR(150)  DEFAULT NULL
+        COMMENT 'Nature of Goods — shown when duty_tax_type=TCS',
+    calc_based_on           ENUM('On Total Sales','On Current Subtotal','On Item Rate','On TDS/TCS Assessable Value')
+                            NOT NULL DEFAULT 'On Total Sales'
+        COMMENT 'Percentage of calculation based on — for Duties & Taxes group',
+    nature_of_transaction   VARCHAR(150)  DEFAULT NULL
+        COMMENT 'Nature of Transaction — for Loans & Advances (Asset) group only',
+    -- Original fields
+    gst_type                ENUM('CGST','SGST','IGST','UTGST','Cess') DEFAULT 'CGST',
+    tax_percentage          DECIMAL(5,2) DEFAULT 0.00,
+    default_tax_ledger_name VARCHAR(200) DEFAULT NULL,
+    default_tax_ledger_id   INT          DEFAULT NULL,
+    created_by              VARCHAR(100) DEFAULT NULL,
+    created_at              TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ledger_tax_config (ledger_id),
+    KEY idx_finance_id (finance_id),
+    KEY idx_gst_applicable (gst_applicable),
+    KEY idx_hsn_sac_code (hsn_sac_code),
+    CONSTRAINT fk_altc_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_altc_ledger FOREIGN KEY (ledger_id) REFERENCES acc_ledgers(id) ON DELETE CASCADE,
+    CONSTRAINT fk_altc_default_tax_ledger FOREIGN KEY (default_tax_ledger_id) REFERENCES acc_ledgers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='GST rate configuration for tax ledgers';
+
+-- ============================================================
+-- TABLE 9: acc_ledger_loan_config
+-- Purpose: Loan/EMI configuration linked to loans table
+-- ============================================================
+CREATE TABLE acc_ledger_loan_config (
+    id            INT          NOT NULL AUTO_INCREMENT,
+    finance_id    INT          NOT NULL,
+    ledger_id     INT          NOT NULL,
+    loan_id       INT          DEFAULT NULL,
+    interest_pct  DECIMAL(5,2) DEFAULT NULL,
+    penalty_pct   DECIMAL(5,2) DEFAULT NULL,
+    emi_type      ENUM('EMI','Bullet','Daily','Weekly','Custom') DEFAULT 'EMI',
+    created_by    VARCHAR(100) DEFAULT NULL,
+    created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ledger_loan_config (ledger_id),
+    KEY idx_finance_id (finance_id),
+    KEY idx_loan_id (loan_id),
+    CONSTRAINT fk_allc_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_allc_ledger FOREIGN KEY (ledger_id) REFERENCES acc_ledgers(id) ON DELETE CASCADE,
+    CONSTRAINT fk_allc_loan FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Loan/EMI configuration linked to loans table';
+
+-- ============================================================
+-- TABLE 10: acc_ledger_bank_config (NEW)
+-- Purpose: Bank Accounts group — cheque book and reconciliation config
+-- ============================================================
+CREATE TABLE acc_ledger_bank_config (
+    id                       INT           NOT NULL AUTO_INCREMENT,
+    finance_id               INT           NOT NULL,
+    ledger_id                INT           NOT NULL
+        COMMENT 'FK → acc_ledgers.id (Bank Accounts group ledgers only)',
+    recon_effective_date     DATE          DEFAULT NULL
+        COMMENT 'Effective Date for Reconciliation — start date for bank recon tracking',
+    set_alter_cheque_books   TINYINT(1)    NOT NULL DEFAULT 0
+        COMMENT 'Set/Alter range for Cheque Books? 1=Yes',
+    enable_cheque_printing   TINYINT(1)    NOT NULL DEFAULT 0
+        COMMENT 'Enable Cheque Printing? 1=Yes',
+    cheque_print_bank_name   VARCHAR(150)  DEFAULT NULL
+        COMMENT 'Selected bank print format name. NULL or "Others" = manual dimension config',
+    chq_date_x               SMALLINT      DEFAULT NULL COMMENT 'Date field X position (points)',
+    chq_date_y               SMALLINT      DEFAULT NULL COMMENT 'Date field Y position',
+    chq_amount_x             SMALLINT      DEFAULT NULL COMMENT 'Amount field X position',
+    chq_amount_y             SMALLINT      DEFAULT NULL COMMENT 'Amount field Y position',
+    chq_payee_x              SMALLINT      DEFAULT NULL COMMENT 'Payee name X position',
+    chq_payee_y              SMALLINT      DEFAULT NULL COMMENT 'Payee name Y position',
+    created_by               VARCHAR(100)  DEFAULT NULL,
+    created_at               TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at               TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                           ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ledger_bank_config (ledger_id)
+        COMMENT 'One config row per bank ledger',
+    KEY idx_finance_id (finance_id),
+    KEY idx_recon_effective_date (recon_effective_date),
+    CONSTRAINT fk_albc_finance
+        FOREIGN KEY (finance_id)
+        REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_albc_ledger
+        FOREIGN KEY (ledger_id)
+        REFERENCES acc_ledgers(id) ON DELETE CASCADE
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Bank Accounts group — cheque book and reconciliation config (Tally BANKCONFIG)';
+
+-- ============================================================
+-- TABLE 11: acc_ledger_cheque_books (NEW)
+-- Purpose: Cheque book ranges per bank ledger
+-- ============================================================
+CREATE TABLE acc_ledger_cheque_books (
+    id                INT           NOT NULL AUTO_INCREMENT,
+    finance_id        INT           NOT NULL,
+    bank_config_id    INT           NOT NULL
+        COMMENT 'FK → acc_ledger_bank_config.id',
+    book_name         VARCHAR(100)  NOT NULL
+        COMMENT 'Cheque Book Name / label',
+    from_number       VARCHAR(20)   NOT NULL
+        COMMENT 'Starting cheque number',
+    to_number         VARCHAR(20)   NOT NULL
+        COMMENT 'Ending cheque number',
+    cheque_length     TINYINT       NOT NULL DEFAULT 6
+        COMMENT 'Cheque number digit length for zero-padding',
+    is_active         TINYINT(1)    NOT NULL DEFAULT 1,
+    created_by        VARCHAR(100)  DEFAULT NULL,
+    created_at        TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                    ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_finance_id (finance_id),
+    KEY idx_bank_config_id (bank_config_id),
+    KEY idx_is_active (is_active),
+    CONSTRAINT fk_alcb_finance
+        FOREIGN KEY (finance_id)
+        REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_alcb_bank_config
+        FOREIGN KEY (bank_config_id)
+        REFERENCES acc_ledger_bank_config(id) ON DELETE CASCADE
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Cheque book ranges per bank ledger (Tally cheque book sub-screen)';
+
+-- ============================================================
+-- TABLE 12: acc_voucher_entries
+-- Purpose: Double-entry debit/credit lines for each voucher
+-- ============================================================
+CREATE TABLE acc_voucher_entries (
+    id              INT             NOT NULL AUTO_INCREMENT,
+    finance_id      INT             NOT NULL,
+    voucher_id      INT             NOT NULL,
+    ledger_id       INT             NOT NULL,
+    entry_type      ENUM('Dr','Cr') NOT NULL,
+    amount          DECIMAL(15,2)   NOT NULL,
+    narration       VARCHAR(500)    DEFAULT NULL,
+    tax_type        ENUM('None','CGST','SGST','IGST','TDS','TCS') DEFAULT 'None',
+    tax_rate        DECIMAL(5,2)    DEFAULT 0.00,
+    tax_amount      DECIMAL(15,2)   DEFAULT 0.00,
+    sort_order      SMALLINT        DEFAULT 0,
+    created_by      VARCHAR(100)    DEFAULT NULL,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_finance_id (finance_id),
+    KEY idx_voucher_id (voucher_id),
+    KEY idx_ledger_id (ledger_id),
+    KEY idx_entry_type (entry_type),
+    CONSTRAINT fk_ave_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ave_voucher FOREIGN KEY (voucher_id) REFERENCES acc_vouchers(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ave_ledger FOREIGN KEY (ledger_id) REFERENCES acc_ledgers(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Double-entry debit/credit lines for each voucher';
+
+-- ============================================================
+-- TABLE 13: acc_bill_references (FULLY ALTERED)
+-- Purpose: Bill-wise outstanding tracking per party
+-- ============================================================
+CREATE TABLE acc_bill_references (
+    id             INT          NOT NULL AUTO_INCREMENT,
+    finance_id     INT          NOT NULL,
+    ledger_id      INT          NOT NULL,
+    voucher_id     INT          DEFAULT NULL,
+    bill_number    VARCHAR(80)  NOT NULL,
+    bill_date      DATE         NOT NULL,
+    bill_amount    DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    pending_amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+    due_date       DATE         DEFAULT NULL,
+    is_settled     TINYINT(1)   DEFAULT 0,
+    settled_at     DATE         DEFAULT NULL,
+    ref_type       ENUM('New Ref','Agst Ref','On Account','Advance') DEFAULT 'New Ref',
+    is_opening_balance  TINYINT(1)  NOT NULL DEFAULT 0
+        COMMENT '1 = this row is part of opening balance bill-wise split',
+    narration      VARCHAR(500) DEFAULT NULL,
+    created_by     VARCHAR(100) DEFAULT NULL,
+    created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_bill_ledger_number (finance_id, ledger_id, bill_number),
+    KEY idx_finance_id (finance_id),
+    KEY idx_ledger_id (ledger_id),
+    KEY idx_voucher_id (voucher_id),
+    KEY idx_is_settled (is_settled),
+    KEY idx_due_date (due_date),
+    KEY idx_bill_date (bill_date),
+    CONSTRAINT fk_abr_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_abr_ledger FOREIGN KEY (ledger_id) REFERENCES acc_ledgers(id) ON DELETE CASCADE,
+    CONSTRAINT fk_abr_voucher FOREIGN KEY (voucher_id) REFERENCES acc_vouchers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Bill-wise outstanding tracking per party';
+
+-- ============================================================
+-- TABLE 14: acc_ledger_balances
+-- Purpose: Pre-aggregated ledger balances for fast reporting
+-- ============================================================
+CREATE TABLE acc_ledger_balances (
+    id              INT             NOT NULL AUTO_INCREMENT,
+    finance_id      INT             NOT NULL,
+    ledger_id       INT             NOT NULL,
+    financial_year  CHAR(9)         NOT NULL,
+    opening_dr      DECIMAL(15,2)   DEFAULT 0.00,
+    opening_cr      DECIMAL(15,2)   DEFAULT 0.00,
+    period_dr       DECIMAL(15,2)   DEFAULT 0.00,
+    period_cr       DECIMAL(15,2)   DEFAULT 0.00,
+    closing_dr      DECIMAL(15,2)   GENERATED ALWAYS AS (opening_dr + period_dr) STORED,
+    closing_cr      DECIMAL(15,2)   GENERATED ALWAYS AS (opening_cr + period_cr) STORED,
+    last_updated_at TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ledger_year (finance_id, ledger_id, financial_year),
+    KEY idx_finance_id (finance_id),
+    KEY idx_ledger_id (ledger_id),
+    KEY idx_financial_year (financial_year),
+    CONSTRAINT fk_alb_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_alb_ledger FOREIGN KEY (ledger_id) REFERENCES acc_ledgers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Pre-aggregated ledger balances for fast reporting';
+
+-- ============================================================
+-- TRIGGER: Enforce Debit = Credit for Posted Vouchers
+-- ============================================================
+DROP TRIGGER IF EXISTS trg_voucher_entry_balance_check;
+DELIMITER $$
+CREATE TRIGGER trg_voucher_entry_balance_check
+AFTER INSERT ON acc_voucher_entries
+FOR EACH ROW
+BEGIN
+    DECLARE v_status VARCHAR(20);
+    DECLARE v_total_dr DECIMAL(15,2);
+    DECLARE v_total_cr DECIMAL(15,2);
+    DECLARE v_diff DECIMAL(15,2);
+    
+    SELECT status INTO v_status FROM acc_vouchers WHERE id = NEW.voucher_id;
+    
+    IF v_status = 'Posted' THEN
+        SELECT COALESCE(SUM(CASE WHEN entry_type = 'Dr' THEN amount ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN entry_type = 'Cr' THEN amount ELSE 0 END), 0)
+        INTO v_total_dr, v_total_cr
+        FROM acc_voucher_entries WHERE voucher_id = NEW.voucher_id;
+        
+        SET v_diff = ABS(v_total_dr - v_total_cr);
+        
+        IF v_diff > 0.01 THEN
+            SIGNAL SQLSTATE '45000' 
+            SET MESSAGE_TEXT = 'Voucher imbalance: sum of Debit entries must equal sum of Credit entries';
+        END IF;
+    END IF;
+END$$
+DELIMITER ;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- ============================================================
+-- END OF LEDGER & RELATED TABLES
+-- ============================================================
+-- TABLE COUNT: 14 tables + 1 trigger
+-- 
+-- TABLES INCLUDED:
+--   1. acc_ledger_groups        - Chart of Accounts hierarchy
+--   2. acc_ledgers              - Individual ledger accounts (FULLY ALTERED)
+--   3. acc_ledger_mailing       - Postal addresses (FULLY ALTERED)
+--   4. acc_ledger_banking       - Multiple bank accounts (FULLY ALTERED)
+--   5. acc_ledger_banking_txn_types - Multi-select txn types (NEW)
+--   6. acc_ledger_tax           - PAN/GST registration (FULLY ALTERED)
+--   7. acc_ledger_billwise      - Credit limits & bill-wise (FULLY ALTERED)
+--   8. acc_ledger_tax_config    - GST rate configuration (FULLY ALTERED)
+--   9. acc_ledger_loan_config   - Loan/EMI configuration
+--  10. acc_ledger_bank_config   - Bank cheque/recon config (NEW)
+--  11. acc_ledger_cheque_books  - Cheque book ranges (NEW)
+--  12. acc_voucher_entries      - Double-entry lines
+--  13. acc_bill_references      - Bill-wise outstanding (FULLY ALTERED)
+--  14. acc_ledger_balances      - Cached balances for reporting
+-- ============================================================

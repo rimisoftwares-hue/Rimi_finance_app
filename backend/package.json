@@ -1,0 +1,46 @@
+{
+  "name": "rimi-backend",
+  "version": "1.0.0",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test src/**/*.test.js",
+    "build:exe": "pkg src/server.js --target node18-win-x64 --output backend.exe",
+    "build": "npm run build:exe",
+    "copy-to-tauri": "mkdir -p ..\\src-tauri\\bin && copy backend-x86_64-pc-windows-msvc.exe ..\\src-tauri\\bin\\backend-x86_64-pc-windows-msvc.exe"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.966.0",
+    "@aws-sdk/s3-request-presigner": "^3.966.0",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "jimp": "^0.22.12",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.2",
+    "pg": "^8.22.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9",
+    "pkg": "^5.8.1"
+  },
+  "pkg": {
+    "assets": [
+      ".env",
+      "node_modules/jimp/**/*",
+      "node_modules/@jimp/**/*"
+    ],
+    "scripts": [
+      "src/server.js",
+      "src/**/*.js"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+# backend/.dockerignore
+
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Don't copy local .env — it's injected via docker-compose env_file
+.env
+.env.local
+.env.*.local
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Build artifacts
+dist
+build
+*.exe
+
+# IDE
+.vscode
+.idea

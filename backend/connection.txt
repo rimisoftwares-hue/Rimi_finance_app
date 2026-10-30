@@ -1,0 +1,7 @@
+RimiAdmin
+Rimi2026rimi
+
+
+
+Endpoint
+rimi-finance-db.c5qayieu45ew.ap-south-1.rds.amazonaws.com
