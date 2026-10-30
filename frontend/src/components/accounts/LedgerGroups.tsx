@@ -27,7 +27,7 @@ import { useGroupConfig, GroupF12Config } from "@/components/lib/accounting/grou
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Nature = "Assets" | "Liabilities" | "Income" | "Expense";
+type Nature = "Assets" | "Liabilities" | "Income" | "Expense" | "Expenses";
 
 interface LedgerGroup {
   id: number;
@@ -91,6 +91,7 @@ const NATURE_COLORS: Record<Nature, string> = {
   Liabilities: "border-red-400/40 text-red-600 dark:text-red-400",
   Income: "border-green-400/40 text-green-600 dark:text-green-400",
   Expense: "border-amber-400/40 text-amber-600 dark:text-amber-400",
+  Expenses: "border-amber-400/40 text-amber-600 dark:text-amber-400",
 };
 
 // ─── Merge DB groups (system + custom) into the seed tree ────────────────────
@@ -472,7 +473,7 @@ export default function LedgerGroups() {
   const natureCounts = useMemo(() => {
     const map: Record<string, number> = { Assets: 0, Liabilities: 0, Income: 0, Expense: 0 };
     groups.forEach(g => {
-      const n = (g.nature === "Expenses" ? "Expense" : g.nature) as Nature;
+      const n = matchesNature(g.nature, "Expense") ? "Expense" : g.nature;
       map[n] = (map[n] || 0) + 1;
     });
     return map;
