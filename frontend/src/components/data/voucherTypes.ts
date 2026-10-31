@@ -22,7 +22,7 @@ export interface VoucherRuleLine {
 }
 
 export interface VoucherTypeMaster {
-  id: number;
+  id: number | string;
   name: string;
   code: string;            // short code used as prefix
   nature: VoucherNature;
@@ -35,6 +35,7 @@ export interface VoucherTypeMaster {
   /** Business module that auto-creates this voucher */
   auto_source?: "payments" | "loans" | "vehicle_expenses" | "office_expenses";
   description: string;
+  dbId?: string;
 }
 
 export const VOUCHER_TYPES: VoucherTypeMaster[] = [

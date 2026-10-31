@@ -121,12 +121,50 @@ export interface UnderDropdownItem {
 }
 
 export interface VoucherType {
-  id: number;
+  id: string | number;
   type_code: string;
   type_name: string;
   class: string;
   prefix: string;
   numbering_mode: string;
+  last_number?: number;
+  is_active?: boolean;
+}
+
+export interface VoucherEntryItem {
+  ledger_id: string | number;
+  ledger_name: string;
+  type: 'Dr' | 'Cr';
+  amount: number;
+  narration: string | null;
+}
+
+export interface VoucherListItem {
+  id: string;
+  voucher_number: string;
+  voucher_date: string;
+  type_id: string;
+  type_name: string;
+  type_class: string;
+  type_code: string;
+  financial_year: string;
+  narration: string | null;
+  total_amount: number;
+  status: 'Draft' | 'Posted' | 'Cancelled';
+  entries: VoucherEntryItem[];
+}
+
+export interface CreateVoucherPayload {
+  voucher_type_id: string | number;
+  voucher_number?: string;
+  date: string; // YYYY-MM-DD
+  narration?: string;
+  entries: Array<{
+    ledger_id: string | number;
+    type: 'Dr' | 'Cr';
+    amount: number;
+    narration?: string;
+  }>;
 }
 
 export interface LedgerStatement {
@@ -212,8 +250,34 @@ export const getGroupLedgers = (groupId: string | number, finance_id?: string | 
   );
 
 export const getVoucherTypes = (finance_id?: string | number) =>
-  apiClient.get<{ success: boolean; data: VoucherType[] }>('/ledger/voucher-types', {
-    params: finance_id ? { finance_id } : undefined
+  apiClient.get<{ success: boolean; data: VoucherType[] }>('/vouchers/types', {
+    params: finance_id ? { finance_id } : undefined,
+  });
+
+export const getNextVoucherNumber = (params: { type_id: string | number; date?: string }) =>
+  apiClient.get<{
+    success: boolean;
+    data: { voucher_number: string; sequence: number; financial_year: string; prefix: string };
+  }>('/vouchers/next-number', { params });
+
+export const createVoucher = (payload: CreateVoucherPayload) =>
+  apiClient.post<{
+    success: boolean;
+    data: { id: string; voucher_number: string; financial_year: string; total_amount: number };
+    message?: string;
+  }>('/vouchers/create', payload);
+
+export const listVouchers = (params?: {
+  from?: string;
+  to?: string;
+  type_id?: string;
+  status?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}) =>
+  apiClient.get<{ success: boolean; data: VoucherListItem[]; total: number }>('/vouchers/list', {
+    params,
   });
 
 export const getLedgerStatement = (ledger_id: string | number, finance_id: string | number, from: string, to: string) =>
