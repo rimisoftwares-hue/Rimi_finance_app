@@ -3,28 +3,46 @@ const svc = require('./ledger.service');
 
 function handleError(res, err, defaultMsg) {
   console.error(`${defaultMsg}:`, err);
+  if (err.statusCode === 404) {
+    return res.status(404).json({
+      success: false,
+      message: err.message || 'Ledger not found',
+    });
+  }
+  if (err.code === '22P02' || err.code === '22007' || err.code === '22008') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid id or date',
+    });
+  }
   if (err.code === '23505') {
     return res.status(409).json({
       success: false,
-      message: err.message || 'Ledger name already exists in this company',
+      message: err.isSafe ? err.message : 'Ledger name already exists in this company',
     });
   }
   if (err.code === '23503') {
     return res.status(400).json({
       success: false,
-      message: err.message || 'Referenced group or parent record does not exist',
-    });
-  }
-  if (err.code === '22P02') {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid ID or parameter format',
+      message: 'Referenced group or parent record does not exist',
     });
   }
   if (err.code === '23514') {
     return res.status(400).json({
       success: false,
-      message: err.message || 'Check constraint violation',
+      message: 'Check constraint violation',
+    });
+  }
+  if (err.statusCode) {
+    return res.status(err.statusCode).json({
+      success: false,
+      message: err.message || defaultMsg,
+    });
+  }
+  if (err.code && typeof err.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code)) {
+    return res.status(400).json({
+      success: false,
+      message: defaultMsg,
     });
   }
   return res.status(400).json({
@@ -35,7 +53,7 @@ function handleError(res, err, defaultMsg) {
 
 exports.createLedger = async (req, res) => {
   try {
-    const finance_id = req.financeId || req.body.finance_id;
+    const finance_id = req.financeId;
     if (!finance_id) {
       return res.status(400).json({ success: false, message: 'finance_id required' });
     }
@@ -49,7 +67,7 @@ exports.createLedger = async (req, res) => {
 exports.updateLedger = async (req, res) => {
   try {
     const { id } = req.params;
-    const finance_id = req.financeId || req.body.finance_id;
+    const finance_id = req.financeId;
     if (!finance_id) {
       return res.status(400).json({ success: false, message: 'finance_id required' });
     }
@@ -63,7 +81,7 @@ exports.updateLedger = async (req, res) => {
 exports.deleteLedger = async (req, res) => {
   try {
     const { id } = req.params;
-    const finance_id = req.financeId || req.query.finance_id;
+    const finance_id = req.financeId;
     if (!finance_id) {
       return res.status(400).json({ success: false, message: 'finance_id required' });
     }
@@ -77,7 +95,7 @@ exports.deleteLedger = async (req, res) => {
 exports.multiCreateLedger = async (req, res) => {
   try {
     const { ledgers } = req.body;
-    const finance_id = req.financeId || req.body.finance_id;
+    const finance_id = req.financeId;
     if (!finance_id || !Array.isArray(ledgers) || !ledgers.length) {
       return res.status(400).json({ success: false, message: 'finance_id and ledgers[] required' });
     }
@@ -90,12 +108,12 @@ exports.multiCreateLedger = async (req, res) => {
 
 exports.listLedgers = async (req, res) => {
   try {
-    const finance_id = req.financeId || req.query.finance_id;
-    const { financial_year } = req.query;
+    const finance_id = req.financeId;
+    const { from, to, financial_year } = req.query;
     if (!finance_id) {
       return res.status(400).json({ success: false, message: 'finance_id required' });
     }
-    const data = await svc.listLedgers(finance_id, financial_year);
+    const data = await svc.listLedgers(finance_id, { from, to, financial_year });
     res.json({ success: true, data });
   } catch (err) {
     handleError(res, err, 'listLedgers error');
@@ -104,7 +122,7 @@ exports.listLedgers = async (req, res) => {
 
 exports.listLedgerGroups = async (req, res) => {
   try {
-    const finance_id = req.financeId || req.query.finance_id;
+    const finance_id = req.financeId;
     if (!finance_id) {
       return res.status(400).json({ success: false, message: 'finance_id required' });
     }
@@ -118,7 +136,7 @@ exports.listLedgerGroups = async (req, res) => {
 exports.getGroupLedgers = async (req, res) => {
   try {
     const { id } = req.params;
-    const finance_id = req.financeId || req.query.finance_id;
+    const finance_id = req.financeId;
     if (!finance_id) {
       return res.status(400).json({ success: false, message: 'finance_id required' });
     }
@@ -131,7 +149,10 @@ exports.getGroupLedgers = async (req, res) => {
 
 exports.createLedgerGroup = async (req, res) => {
   try {
-    const finance_id = req.financeId || req.body.finance_id;
+    const finance_id = req.financeId;
+    if (!finance_id) {
+      return res.status(400).json({ success: false, message: 'finance_id required' });
+    }
     const id = await svc.createLedgerGroup({ ...req.body, finance_id });
     res.json({ success: true, id });
   } catch (err) {
@@ -141,12 +162,12 @@ exports.createLedgerGroup = async (req, res) => {
 
 exports.getLedgerSummary = async (req, res) => {
   try {
-    const finance_id = req.financeId || req.query.finance_id;
-    const { financial_year } = req.query;
+    const finance_id = req.financeId;
+    const { from, to, financial_year } = req.query;
     if (!finance_id) {
       return res.status(400).json({ success: false, message: 'finance_id required' });
     }
-    const data = await svc.getLedgerSummary(finance_id, financial_year);
+    const data = await svc.getLedgerSummary(finance_id, { from, to, financial_year });
     res.json({ success: true, data });
   } catch (err) {
     handleError(res, err, 'getLedgerSummary error');
@@ -155,7 +176,7 @@ exports.getLedgerSummary = async (req, res) => {
 
 exports.listVoucherTypes = async (req, res) => {
   try {
-    const finance_id = req.financeId || req.query.finance_id;
+    const finance_id = req.financeId;
     if (!finance_id) {
       return res.status(400).json({ success: false, message: 'finance_id required' });
     }
@@ -169,21 +190,49 @@ exports.listVoucherTypes = async (req, res) => {
 exports.getLedgerStatement = async (req, res) => {
   try {
     const { id } = req.params;
-    const finance_id = req.financeId || req.query.finance_id;
+    const finance_id = req.financeId;
     const { from, to } = req.query;
-    if (!finance_id || !from || !to) {
-      return res.status(400).json({ success: false, message: 'finance_id, from, to required' });
+    if (!finance_id) {
+      return res.status(400).json({ success: false, message: 'finance_id required' });
     }
-    const data = await svc.getLedgerStatement(id, finance_id, from, to);
+    const data = await svc.getLedgerStatement(id, finance_id, { from, to });
     res.json({ success: true, data });
   } catch (err) {
     handleError(res, err, 'getLedgerStatement error');
   }
 };
 
+exports.getLedgerMonthly = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const finance_id = req.financeId;
+    const { fy } = req.query;
+    if (!finance_id) {
+      return res.status(400).json({ success: false, message: 'finance_id required' });
+    }
+    const data = await svc.getLedgerMonthly(id, finance_id, fy);
+    res.json({ success: true, data });
+  } catch (err) {
+    handleError(res, err, 'getLedgerMonthly error');
+  }
+};
+
+exports.getLedgerViewDetails = async (req, res) => {
+  try {
+    const finance_id = req.financeId;
+    if (!finance_id) {
+      return res.status(400).json({ success: false, message: 'finance_id required' });
+    }
+    const data = await svc.getLedgerViewDetails(finance_id);
+    res.json({ success: true, data });
+  } catch (err) {
+    handleError(res, err, 'getLedgerViewDetails error');
+  }
+};
+
 exports.getRecentLedgers = async (req, res) => {
   try {
-    const finance_id = req.financeId || req.query.finance_id;
+    const finance_id = req.financeId;
     const limit = req.query.limit || 10;
     if (!finance_id) {
       return res.status(400).json({ success: false, message: 'finance_id required' });
@@ -197,7 +246,7 @@ exports.getRecentLedgers = async (req, res) => {
 
 exports.getLedgerDetails = async (req, res) => {
   try {
-    const finance_id = req.financeId || req.query.finance_id;
+    const finance_id = req.financeId;
     const { ledgerId } = req.params;
 
     if (!ledgerId) {

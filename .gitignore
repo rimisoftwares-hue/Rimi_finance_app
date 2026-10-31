@@ -7,3 +7,5 @@ target/
 .playwright-mcp/
 test_assets/
 .cargo/
+e2e/
+test_scripts/

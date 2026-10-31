@@ -2337,6 +2337,7 @@ CREATE TABLE IF NOT EXISTS customer_agent_assignments (
     status                assignment_status_enum NOT NULL DEFAULT 'pending',
     due_amount            DECIMAL(15,2)       NOT NULL DEFAULT 0.00,
     notes                 TEXT                DEFAULT NULL,
+    target_date           DATE                DEFAULT NULL,
     assigned_at           TIMESTAMP           NOT NULL DEFAULT CURRENT_TIMESTAMP,
     unassigned_at         TIMESTAMP           DEFAULT NULL,
     completed_at          TIMESTAMP           DEFAULT NULL,

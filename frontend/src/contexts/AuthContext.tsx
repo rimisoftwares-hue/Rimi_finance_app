@@ -172,6 +172,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           statsData = JSON.parse(storedStats);
         }
 
+        // Load cached finance list if present
+        const storedOwnerFinances = localStorage.getItem('ownerFinances');
+        if (storedOwnerFinances) {
+          try {
+            const parsedFinances = JSON.parse(storedOwnerFinances);
+            if (Array.isArray(parsedFinances) && parsedFinances.length > 0) {
+              setFinanceList(parsedFinances);
+            }
+          } catch { /* ignore */ }
+        }
+
         // Set state synchronously first
         setUser(userData);
         setCurrentFinance(financeData);

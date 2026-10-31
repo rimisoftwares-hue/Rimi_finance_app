@@ -1,5 +1,37 @@
 const { db } = require('../../../config/database.config');
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const FY_LABEL_REGEX = /^(\d{4})-(\d{4})$/;
+
+function createBadParamError(message = 'Invalid id or date') {
+  const err = new Error(message);
+  err.code = '22P02';
+  err.statusCode = 400;
+  return err;
+}
+
+function createNotFoundError(message = 'Ledger not found') {
+  const err = new Error(message);
+  err.statusCode = 404;
+  return err;
+}
+
+function isValidUUID(val) {
+  return typeof val === 'string' && UUID_REGEX.test(val.trim());
+}
+
+function isValidISODate(dateStr) {
+  if (typeof dateStr !== 'string' || !ISO_DATE_REGEX.test(dateStr)) return false;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() + 1 === m &&
+    dt.getUTCDate() === d
+  );
+}
+
 /**
  * Returns Indian financial year formatted as YYYY-YYYY (e.g. 2026-2027)
  */
@@ -14,10 +46,27 @@ function getFinancialYear(date = new Date()) {
   return `${startYear}-${endYear}`;
 }
 
+function fyLabelToDateRange(fyLabel) {
+  const match = typeof fyLabel === 'string' ? fyLabel.trim().match(FY_LABEL_REGEX) : null;
+  if (!match) return null;
+  const startYear = Number(match[1]);
+  const endYear = Number(match[2]);
+  if (endYear !== startYear + 1) return null;
+  return {
+    fyLabel: `${startYear}-${endYear}`,
+    from: `${startYear}-04-01`,
+    to: `${endYear}-03-31`,
+  };
+}
+
 // ─── Helper: resolve the active fiscal year for a finance company from DB ──
 async function resolveCurrentFinancialYear(client, finance_id) {
-  const res = await client.query(
-    `SELECT year_label, start_date, end_date, is_locked
+  const runner = client && typeof client.query === 'function' ? client : db;
+  const res = await runner.query(
+    `SELECT year_label,
+            TO_CHAR(start_date, 'YYYY-MM-DD') AS start_date,
+            TO_CHAR(end_date, 'YYYY-MM-DD') AS end_date,
+            is_locked
        FROM acc_financial_years
       WHERE finance_id = $1 AND is_current = true
       LIMIT 1`,
@@ -33,6 +82,80 @@ async function resolveCurrentFinancialYear(client, finance_id) {
   }
 
   return getFinancialYear(new Date());
+}
+
+/**
+ * Resolves a period { from, to, fyLabel } from options or defaults to the active FY.
+ * Validates YYYY-MM-DD dates and enforces from <= to.
+ */
+async function resolvePeriodRange(runner, finance_id, opts = {}) {
+  const normalizedOpts =
+    typeof opts === 'string' ? { financial_year: opts } : opts || {};
+  const { from, to, financial_year } = normalizedOpts;
+
+  if (from !== undefined || to !== undefined) {
+    if (!from || !to || !isValidISODate(String(from)) || !isValidISODate(String(to))) {
+      throw createBadParamError('Invalid id or date');
+    }
+    const fromStr = String(from);
+    const toStr = String(to);
+    if (fromStr > toStr) {
+      const err = new Error('from date must be on or before to date');
+      err.statusCode = 400;
+      throw err;
+    }
+    const [y, m] = fromStr.split('-').map(Number);
+    const fyStartYear = m >= 4 ? y : y - 1;
+    return {
+      from: fromStr,
+      to: toStr,
+      fyLabel: `${fyStartYear}-${fyStartYear + 1}`,
+      fyStart: `${fyStartYear}-04-01`,
+    };
+  }
+
+  if (financial_year) {
+    const parsed = fyLabelToDateRange(String(financial_year));
+    if (!parsed) {
+      throw createBadParamError('Invalid id or date');
+    }
+    return {
+      from: parsed.from,
+      to: parsed.to,
+      fyLabel: parsed.fyLabel,
+      fyStart: parsed.from,
+    };
+  }
+
+  const qRunner = runner && typeof runner.query === 'function' ? runner : db;
+  const res = await qRunner.query(
+    `SELECT year_label,
+            TO_CHAR(start_date, 'YYYY-MM-DD') AS start_date,
+            TO_CHAR(end_date, 'YYYY-MM-DD') AS end_date
+       FROM acc_financial_years
+      WHERE finance_id = $1 AND is_current = true
+      LIMIT 1`,
+    [finance_id]
+  );
+
+  const fy = res.rows[0];
+  if (fy && fy.start_date && fy.end_date) {
+    return {
+      from: fy.start_date,
+      to: fy.end_date,
+      fyLabel: fy.year_label,
+      fyStart: fy.start_date,
+    };
+  }
+
+  const fallbackFy = getFinancialYear(new Date());
+  const parsedFallback = fyLabelToDateRange(fallbackFy);
+  return {
+    from: parsedFallback.from,
+    to: parsedFallback.to,
+    fyLabel: parsedFallback.fyLabel,
+    fyStart: parsedFallback.from,
+  };
 }
 
 // ─── Helper: resolve "Under" selection into group_id / master_group_id ─────
@@ -835,64 +958,122 @@ exports.deleteLedger = async (id, finance_id) => {
   }
 };
 
-// ─── 5. List ledgers with group + balance ───────────────────────────────────
-exports.listLedgers = async (finance_id, financial_year) => {
-  const fy = financial_year || getFinancialYear(new Date());
+// ─── 5. List ledgers with group + period balances ───────────────────────────
+exports.listLedgers = async (finance_id, periodOpts = {}) => {
+  const { from, to } = await resolvePeriodRange(db, finance_id, periodOpts);
 
   const res = await db.query(
-    `SELECT
-      l.id,
-      l.finance_id,
-      l.ledger_name,
-      l.alias,
-      l.alias_regional,
-      l.group_id,
-      l.master_group_id,
-      l.reporting_under,
-      l.opening_balance,
-      l.ob_type,
-      l.effective_date,
-      l.freeze_balance,
-      l.inactive,
-      l.is_active,
+    `WITH v_agg AS (
+       SELECT
+         e.ledger_id,
+         COALESCE(SUM(CASE WHEN v.voucher_date < $2::date AND e.entry_type = 'Dr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS prior_dr,
+         COALESCE(SUM(CASE WHEN v.voucher_date < $2::date AND e.entry_type = 'Cr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS prior_cr,
+         COALESCE(SUM(CASE WHEN v.voucher_date BETWEEN $2::date AND $3::date AND e.entry_type = 'Dr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS period_dr,
+         COALESCE(SUM(CASE WHEN v.voucher_date BETWEEN $2::date AND $3::date AND e.entry_type = 'Cr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS period_cr
+       FROM acc_voucher_entries e
+       JOIN acc_vouchers v
+         ON v.id = e.voucher_id
+        AND v.finance_id = e.finance_id
+       WHERE e.finance_id = $1
+         AND v.status = 'Posted'
+         AND v.voucher_date <= $3::date
+       GROUP BY e.ledger_id
+     )
+     SELECT
+       l.id,
+       l.finance_id,
+       l.ledger_name,
+       l.alias,
+       l.alias_regional,
+       l.group_id,
+       l.master_group_id,
+       l.reporting_under,
+       l.opening_balance,
+       l.ob_type,
+       l.effective_date,
+       l.freeze_balance,
+       l.inactive,
+       l.is_active,
 
-      COALESCE(g.group_name, gm.group_name) AS group_name,
-      g.alias AS group_alias,
-      COALESCE(g.nature, gm.nature) AS nature,
-      g.custom_parent_id,
-      CASE WHEN l.master_group_id IS NOT NULL THEN 'system' ELSE 'custom' END AS group_source,
+       COALESCE(g.group_name, gm.group_name) AS group_name,
+       g.alias AS group_alias,
+       COALESCE(g.nature, gm.nature) AS nature,
+       g.custom_parent_id,
+       CASE WHEN l.master_group_id IS NOT NULL THEN 'system' ELSE 'custom' END AS group_source,
 
-      COALESCE(b.opening_dr, 0) AS opening_dr,
-      COALESCE(b.opening_cr, 0) AS opening_cr,
-      COALESCE(b.period_dr, 0)  AS period_dr,
-      COALESCE(b.period_cr, 0)  AS period_cr,
-      COALESCE(b.closing_dr, 0) AS closing_dr,
-      COALESCE(b.closing_cr, 0) AS closing_cr
+       ROUND(
+         (CASE WHEN l.ob_type = 'Cr' THEN -COALESCE(l.opening_balance, 0) ELSE COALESCE(l.opening_balance, 0) END)::numeric(18,2)
+         + COALESCE(va.prior_dr, 0) - COALESCE(va.prior_cr, 0),
+         2
+       ) AS opening_signed,
+       ROUND(COALESCE(va.period_dr, 0)::numeric(18,2), 2) AS period_dr_calc,
+       ROUND(COALESCE(va.period_cr, 0)::numeric(18,2), 2) AS period_cr_calc
 
-    FROM acc_ledgers l
-
-    LEFT JOIN acc_ledger_groups g
-          ON g.id = l.group_id
-
-    LEFT JOIN acc_group_master gm
-          ON gm.id = l.master_group_id
-
-    LEFT JOIN acc_ledger_balances b
-          ON b.ledger_id = l.id
-          AND b.finance_id = l.finance_id
-          AND b.financial_year = $1
-
-    WHERE l.finance_id = $2
-      AND NOT l.inactive
-      AND l.is_active = true
-
-    ORDER BY
-      COALESCE(g.group_name, gm.group_name),
-      l.ledger_name`,
-    [fy, finance_id]
+     FROM acc_ledgers l
+     LEFT JOIN acc_ledger_groups g
+            ON g.id = l.group_id
+           AND g.finance_id = l.finance_id
+     LEFT JOIN acc_group_master gm
+            ON gm.id = l.master_group_id
+     LEFT JOIN v_agg va
+            ON va.ledger_id = l.id
+     WHERE l.finance_id = $1
+       AND NOT l.inactive
+       AND l.is_active = true
+     ORDER BY
+       COALESCE(g.group_name, gm.group_name),
+       l.ledger_name`,
+    [finance_id, from, to]
   );
 
-  return res.rows;
+  return res.rows.map((row) => {
+    const openingPaise = Math.round(Number(row.opening_signed || 0) * 100);
+    const periodDrPaise = Math.round(Number(row.period_dr_calc || 0) * 100);
+    const periodCrPaise = Math.round(Number(row.period_cr_calc || 0) * 100);
+    const closingPaise = openingPaise + periodDrPaise - periodCrPaise;
+
+    const openingAbs = Number((Math.abs(openingPaise) / 100).toFixed(2));
+    const openingSide = openingPaise >= 0 ? 'Dr' : 'Cr';
+    const periodDr = Number((periodDrPaise / 100).toFixed(2));
+    const periodCr = Number((periodCrPaise / 100).toFixed(2));
+    const closingAbs = Number((Math.abs(closingPaise) / 100).toFixed(2));
+    const closingSide = closingPaise >= 0 ? 'Dr' : 'Cr';
+
+    return {
+      id: row.id,
+      finance_id: row.finance_id,
+      ledger_name: row.ledger_name,
+      alias: row.alias,
+      alias_regional: row.alias_regional,
+      group_id: row.group_id,
+      master_group_id: row.master_group_id,
+      reporting_under: row.reporting_under,
+      opening_balance: Number(parseFloat(row.opening_balance || 0).toFixed(2)),
+      ob_type: row.ob_type || 'Dr',
+      effective_date: row.effective_date,
+      freeze_balance: row.freeze_balance,
+      inactive: row.inactive,
+      is_active: row.is_active,
+      group_name: row.group_name,
+      group_alias: row.group_alias,
+      nature: row.nature,
+      custom_parent_id: row.custom_parent_id,
+      group_source: row.group_source,
+
+      opening: openingAbs,
+      opening_net: Number((openingPaise / 100).toFixed(2)),
+      opening_side: openingSide,
+      opening_dr: openingPaise > 0 ? openingAbs : 0,
+      opening_cr: openingPaise < 0 ? openingAbs : 0,
+      period_dr: periodDr,
+      period_cr: periodCr,
+      closing: closingAbs,
+      closing_net: Number((closingPaise / 100).toFixed(2)),
+      closing_side: closingSide,
+      closing_dr: closingPaise > 0 ? closingAbs : 0,
+      closing_cr: closingPaise < 0 ? closingAbs : 0,
+    };
+  });
 };
 
 // ─── 6. List ledger groups (flat summary) ───────────────────────────────────
@@ -969,37 +1150,85 @@ exports.createLedgerGroup = async (data) => {
   return res.rows[0].id;
 };
 
-// ─── 9. Ledger balance summary ──────────────────────────────────────────────
-exports.getLedgerSummary = async (finance_id, financial_year) => {
-  const fy = financial_year || getFinancialYear(new Date());
+// ─── 9. Ledger balance summary (set-based for active period) ────────────────
+exports.getLedgerSummary = async (finance_id, periodOpts = {}) => {
+  const { from, to } = await resolvePeriodRange(db, finance_id, periodOpts);
+
   const res = await db.query(
-    `SELECT
-       COALESCE(SUM(CASE WHEN l.ob_type = 'Dr' THEN l.opening_balance ELSE 0 END), 0) AS "totalDr",
-       COALESCE(SUM(CASE WHEN l.ob_type = 'Cr' THEN l.opening_balance ELSE 0 END), 0) AS "totalCr",
-       COALESCE(SUM(CASE WHEN l.ob_type = 'Dr' THEN l.opening_balance ELSE -l.opening_balance END), 0) AS "netBalance",
-       COALESCE(SUM(COALESCE(b.closing_dr, 0)), 0) AS "closingDr",
-       COALESCE(SUM(COALESCE(b.closing_cr, 0)), 0) AS "closingCr"
-     FROM acc_ledgers l
-     LEFT JOIN acc_ledger_balances b
-       ON b.ledger_id = l.id AND b.finance_id = l.finance_id AND b.financial_year = $1
-     WHERE l.finance_id = $2 AND l.is_active = true`,
-    [fy, finance_id]
+    `WITH v_agg AS (
+       SELECT
+         e.ledger_id,
+         COALESCE(SUM(CASE WHEN v.voucher_date < $2::date AND e.entry_type = 'Dr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS prior_dr,
+         COALESCE(SUM(CASE WHEN v.voucher_date < $2::date AND e.entry_type = 'Cr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS prior_cr,
+         COALESCE(SUM(CASE WHEN v.voucher_date BETWEEN $2::date AND $3::date AND e.entry_type = 'Dr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS period_dr,
+         COALESCE(SUM(CASE WHEN v.voucher_date BETWEEN $2::date AND $3::date AND e.entry_type = 'Cr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS period_cr
+       FROM acc_voucher_entries e
+       JOIN acc_vouchers v
+         ON v.id = e.voucher_id
+        AND v.finance_id = e.finance_id
+       WHERE e.finance_id = $1
+         AND v.status = 'Posted'
+         AND v.voucher_date <= $3::date
+       GROUP BY e.ledger_id
+     ),
+     ledger_calc AS (
+       SELECT
+         l.id,
+         (CASE WHEN l.ob_type = 'Cr' THEN -COALESCE(l.opening_balance, 0) ELSE COALESCE(l.opening_balance, 0) END)::numeric(18,2)
+           + COALESCE(va.prior_dr, 0) - COALESCE(va.prior_cr, 0) AS opening_signed,
+         COALESCE(va.period_dr, 0)::numeric(18,2) AS period_dr,
+         COALESCE(va.period_cr, 0)::numeric(18,2) AS period_cr,
+         (CASE WHEN l.ob_type = 'Cr' THEN -COALESCE(l.opening_balance, 0) ELSE COALESCE(l.opening_balance, 0) END)::numeric(18,2)
+           + COALESCE(va.prior_dr, 0) - COALESCE(va.prior_cr, 0)
+           + COALESCE(va.period_dr, 0) - COALESCE(va.period_cr, 0) AS closing_signed
+       FROM acc_ledgers l
+       LEFT JOIN v_agg va ON va.ledger_id = l.id
+       WHERE l.finance_id = $1
+         AND l.is_active = true
+         AND NOT l.inactive
+     )
+     SELECT
+       ROUND(COALESCE(SUM(CASE WHEN closing_signed > 0 THEN closing_signed ELSE 0 END), 0)::numeric(18,2), 2) AS total_dr_closing,
+       ROUND(COALESCE(SUM(CASE WHEN closing_signed < 0 THEN ABS(closing_signed) ELSE 0 END), 0)::numeric(18,2), 2) AS total_cr_closing,
+       ROUND(COALESCE(SUM(opening_signed), 0)::numeric(18,2), 2) AS opening_net,
+       ROUND(COALESCE(SUM(period_dr), 0)::numeric(18,2), 2) AS period_dr,
+       ROUND(COALESCE(SUM(period_cr), 0)::numeric(18,2), 2) AS period_cr
+     FROM ledger_calc`,
+    [finance_id, from, to]
   );
 
-  const summary = res.rows[0] || {};
-  const totalDr = parseFloat(summary.totalDr) || 0;
-  const totalCr = parseFloat(summary.totalCr) || 0;
-  const net = parseFloat(summary.netBalance) || 0;
-  const closingDr = parseFloat(summary.closingDr) || 0;
-  const closingCr = parseFloat(summary.closingCr) || 0;
+  const row = res.rows[0] || {};
+  const totalDrPaise = Math.round(Number(row.total_dr_closing || 0) * 100);
+  const totalCrPaise = Math.round(Number(row.total_cr_closing || 0) * 100);
+  const diffPaise = totalDrPaise - totalCrPaise;
+  const openingNetPaise = Math.round(Number(row.opening_net || 0) * 100);
+  const periodDrPaise = Math.round(Number(row.period_dr || 0) * 100);
+  const periodCrPaise = Math.round(Number(row.period_cr || 0) * 100);
+
+  const total_dr_closing = Number((totalDrPaise / 100).toFixed(2));
+  const total_cr_closing = Number((totalCrPaise / 100).toFixed(2));
+  const difference = Number((Math.abs(diffPaise) / 100).toFixed(2));
+  const difference_side = diffPaise >= 0 ? 'Dr' : 'Cr';
+  const opening_net = Number((openingNetPaise / 100).toFixed(2));
+  const period_dr = Number((periodDrPaise / 100).toFixed(2));
+  const period_cr = Number((periodCrPaise / 100).toFixed(2));
 
   return {
-    totalDr,
-    totalCr,
-    openingBalance: Math.abs(net),
-    openingType: net >= 0 ? 'Dr' : 'Cr',
-    closingBalance: Math.abs(closingDr - closingCr),
-    closingType: closingDr >= closingCr ? 'Dr' : 'Cr',
+    total_dr_closing,
+    total_cr_closing,
+    difference,
+    difference_side,
+    opening_net,
+    period_dr,
+    period_cr,
+    period: { from, to },
+    // Legacy compatibility aliases
+    totalDr: total_dr_closing,
+    totalCr: total_cr_closing,
+    openingBalance: Math.abs(opening_net),
+    openingType: opening_net >= 0 ? 'Dr' : 'Cr',
+    closingBalance: difference,
+    closingType: difference_side,
   };
 };
 
@@ -1016,52 +1245,341 @@ exports.listVoucherTypes = async (finance_id) => {
 };
 
 // ─── 11. Ledger statement (running balance) ─────────────────────────────────
-exports.getLedgerStatement = async (ledger_id, finance_id, from_date, to_date) => {
-  const obRes = await db.query(
-    `SELECT
-       COALESCE(SUM(CASE WHEN e.entry_type='Dr' THEN e.amount ELSE 0 END), 0) AS ob_dr,
-       COALESCE(SUM(CASE WHEN e.entry_type='Cr' THEN e.amount ELSE 0 END), 0) AS ob_cr
-     FROM acc_voucher_entries e
-     JOIN acc_vouchers v ON e.voucher_id = v.id
-     WHERE e.ledger_id = $1 AND e.finance_id = $2
-       AND v.voucher_date < $3 AND v.status = 'Posted'`,
-    [ledger_id, finance_id, from_date]
-  );
-  const ob = obRes.rows[0] || { ob_dr: 0, ob_cr: 0 };
+exports.getLedgerStatement = async (ledger_id, finance_id, fromOrOpts, maybeTo) => {
+  if (!isValidUUID(ledger_id)) {
+    throw createBadParamError('Invalid id or date');
+  }
 
-  const entriesRes = await db.query(
-    `SELECT
-       v.voucher_date,
-       v.voucher_number,
-       vt.type_name  AS voucher_type,
-       e.entry_type,
-       e.amount
-     FROM acc_voucher_entries e
-     JOIN acc_vouchers v  ON e.voucher_id = v.id
-     JOIN acc_voucher_types vt ON v.voucher_type_id = vt.id
-     WHERE e.ledger_id = $1 AND e.finance_id = $2
-       AND v.voucher_date BETWEEN $3 AND $4
-       AND v.status = 'Posted'
-     ORDER BY v.voucher_date, v.id`,
-    [ledger_id, finance_id, from_date, to_date]
-  );
+  const periodOpts =
+    typeof fromOrOpts === 'object' && fromOrOpts !== null
+      ? fromOrOpts
+      : { from: fromOrOpts, to: maybeTo };
 
+  const { from, to } = await resolvePeriodRange(db, finance_id, periodOpts);
+
+  // 1. Verify ledger belongs to finance_id
   const ledgerRes = await db.query(
-    `SELECT l.ledger_name, l.alias, l.opening_balance, l.ob_type,
+    `SELECT l.id,
+            l.ledger_name,
+            l.alias,
+            ROUND(COALESCE(l.opening_balance, 0)::numeric, 2) AS opening_balance,
+            l.ob_type,
             COALESCE(g.group_name, gm.group_name) AS group_name,
             COALESCE(g.nature, gm.nature) AS nature
-     FROM acc_ledgers l
-     LEFT JOIN acc_ledger_groups g ON l.group_id = g.id
-     LEFT JOIN acc_group_master gm ON l.master_group_id = gm.id
-     WHERE l.id = $1 AND l.finance_id = $2`,
+       FROM acc_ledgers l
+       LEFT JOIN acc_ledger_groups g
+              ON l.group_id = g.id
+             AND g.finance_id = l.finance_id
+       LEFT JOIN acc_group_master gm
+              ON l.master_group_id = gm.id
+      WHERE l.id = $1 AND l.finance_id = $2
+      LIMIT 1`,
     [ledger_id, finance_id]
   );
 
+  const ledgerRow = ledgerRes.rows[0];
+  if (!ledgerRow) {
+    throw createNotFoundError('Ledger not found');
+  }
+
+  // 2. Compute prior voucher totals, period voucher totals, and total count (Posted only)
+  const aggRes = await db.query(
+    `SELECT
+       COALESCE(SUM(CASE WHEN v.voucher_date < $3::date AND e.entry_type = 'Dr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS prior_dr,
+       COALESCE(SUM(CASE WHEN v.voucher_date < $3::date AND e.entry_type = 'Cr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS prior_cr,
+       COALESCE(SUM(CASE WHEN v.voucher_date BETWEEN $3::date AND $4::date AND e.entry_type = 'Dr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS period_dr,
+       COALESCE(SUM(CASE WHEN v.voucher_date BETWEEN $3::date AND $4::date AND e.entry_type = 'Cr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS period_cr,
+       COUNT(*) FILTER (WHERE v.voucher_date BETWEEN $3::date AND $4::date) AS total_entries
+     FROM acc_voucher_entries e
+     JOIN acc_vouchers v
+       ON v.id = e.voucher_id
+      AND v.finance_id = e.finance_id
+     WHERE e.ledger_id = $1
+       AND e.finance_id = $2
+       AND v.status = 'Posted'
+       AND v.voucher_date <= $4::date`,
+    [ledger_id, finance_id, from, to]
+  );
+
+  const agg = aggRes.rows[0] || {};
+  const baseObPaise =
+    Math.round(Number(ledgerRow.opening_balance || 0) * 100) *
+    (ledgerRow.ob_type === 'Cr' ? -1 : 1);
+  const priorDrPaise = Math.round(Number(agg.prior_dr || 0) * 100);
+  const priorCrPaise = Math.round(Number(agg.prior_cr || 0) * 100);
+  const openingNetPaise = baseObPaise + priorDrPaise - priorCrPaise;
+
+  const periodDrPaise = Math.round(Number(agg.period_dr || 0) * 100);
+  const periodCrPaise = Math.round(Number(agg.period_cr || 0) * 100);
+  const closingNetPaise = openingNetPaise + periodDrPaise - periodCrPaise;
+  const totalEntries = parseInt(agg.total_entries, 10) || 0;
+
+  // 3. Fetch up to 2000 entries in period with aggregated counter_ledgers
+  const entriesRes = await db.query(
+    `SELECT
+       v.id AS voucher_id,
+       TO_CHAR(v.voucher_date, 'YYYY-MM-DD') AS voucher_date,
+       v.voucher_number,
+       vt.type_name AS voucher_type,
+       e.entry_type,
+       ROUND(e.amount::numeric, 2) AS amount,
+       COALESCE(v.narration, e.narration) AS narration,
+       COALESCE(
+         (
+           SELECT ARRAY_AGG(cl.ledger_name ORDER BY ce.sort_order ASC, ce.id ASC)
+             FROM acc_voucher_entries ce
+             JOIN acc_ledgers cl
+               ON cl.id = ce.ledger_id
+              AND cl.finance_id = ce.finance_id
+            WHERE ce.voucher_id = v.id
+              AND ce.finance_id = v.finance_id
+              AND ce.id <> e.id
+              AND ce.ledger_id <> e.ledger_id
+         ),
+         ARRAY[]::text[]
+       ) AS counter_ledgers
+     FROM acc_voucher_entries e
+     JOIN acc_vouchers v
+       ON v.id = e.voucher_id
+      AND v.finance_id = e.finance_id
+     JOIN acc_voucher_types vt
+       ON vt.id = v.voucher_type_id
+      AND vt.finance_id = v.finance_id
+     WHERE e.ledger_id = $1
+       AND e.finance_id = $2
+       AND v.voucher_date BETWEEN $3::date AND $4::date
+       AND v.status = 'Posted'
+     ORDER BY v.voucher_date ASC, v.created_at ASC, v.voucher_number ASC, e.sort_order ASC
+     LIMIT 2000`,
+    [ledger_id, finance_id, from, to]
+  );
+
+  const entries = entriesRes.rows.map((r) => ({
+    voucher_id: r.voucher_id,
+    voucher_date: r.voucher_date,
+    voucher_number: r.voucher_number,
+    voucher_type: r.voucher_type,
+    entry_type: r.entry_type,
+    amount: Number(parseFloat(r.amount || 0).toFixed(2)),
+    narration: r.narration || null,
+    counter_ledgers: Array.isArray(r.counter_ledgers) ? r.counter_ledgers : [],
+  }));
+
   return {
-    ledger: ledgerRes.rows[0] || null,
-    opening: { dr: parseFloat(ob.ob_dr) || 0, cr: parseFloat(ob.ob_cr) || 0 },
-    entries: entriesRes.rows,
+    ledger: {
+      id: ledgerRow.id,
+      name: ledgerRow.ledger_name,
+      ledger_name: ledgerRow.ledger_name,
+      alias: ledgerRow.alias,
+      alias_name: ledgerRow.alias,
+      opening_balance: Number(parseFloat(ledgerRow.opening_balance || 0).toFixed(2)),
+      ob_type: ledgerRow.ob_type || 'Dr',
+      group_name: ledgerRow.group_name,
+      nature: ledgerRow.nature,
+    },
+    period: { from, to },
+    opening: {
+      dr: openingNetPaise > 0 ? Number((openingNetPaise / 100).toFixed(2)) : 0,
+      cr: openingNetPaise < 0 ? Number((Math.abs(openingNetPaise) / 100).toFixed(2)) : 0,
+      net: Number((openingNetPaise / 100).toFixed(2)),
+      side: openingNetPaise >= 0 ? 'Dr' : 'Cr',
+    },
+    entries,
+    period_total: {
+      dr: Number((periodDrPaise / 100).toFixed(2)),
+      cr: Number((periodCrPaise / 100).toFixed(2)),
+    },
+    closing: {
+      dr: closingNetPaise > 0 ? Number((closingNetPaise / 100).toFixed(2)) : 0,
+      cr: closingNetPaise < 0 ? Number((Math.abs(closingNetPaise) / 100).toFixed(2)) : 0,
+      net: Number((closingNetPaise / 100).toFixed(2)),
+      side: closingNetPaise >= 0 ? 'Dr' : 'Cr',
+    },
+    truncated: totalEntries > 2000,
+    total: totalEntries,
   };
+};
+
+// ─── 11b. Ledger monthly summary (12 months April..March) ───────────────────
+exports.getLedgerMonthly = async (ledger_id, finance_id, fyParam) => {
+  if (!isValidUUID(ledger_id)) {
+    throw createBadParamError('Invalid id or date');
+  }
+
+  let fyRange = null;
+  if (fyParam !== undefined && fyParam !== null && String(fyParam).trim() !== '') {
+    fyRange = fyLabelToDateRange(String(fyParam));
+    if (!fyRange) {
+      throw createBadParamError('Invalid id or date');
+    }
+  } else {
+    const resolved = await resolvePeriodRange(db, finance_id, {});
+    fyRange = fyLabelToDateRange(resolved.fyLabel) || {
+      fyLabel: resolved.fyLabel,
+      from: resolved.from,
+      to: resolved.to,
+    };
+  }
+
+  // 1. Verify ledger belongs to finance_id
+  const ledgerRes = await db.query(
+    `SELECT l.id,
+            l.ledger_name,
+            l.alias,
+            ROUND(COALESCE(l.opening_balance, 0)::numeric, 2) AS opening_balance,
+            l.ob_type,
+            COALESCE(g.group_name, gm.group_name) AS group_name,
+            COALESCE(g.nature, gm.nature) AS nature
+       FROM acc_ledgers l
+       LEFT JOIN acc_ledger_groups g
+              ON l.group_id = g.id
+             AND g.finance_id = l.finance_id
+       LEFT JOIN acc_group_master gm
+              ON l.master_group_id = gm.id
+      WHERE l.id = $1 AND l.finance_id = $2
+      LIMIT 1`,
+    [ledger_id, finance_id]
+  );
+
+  const ledgerRow = ledgerRes.rows[0];
+  if (!ledgerRow) {
+    throw createNotFoundError('Ledger not found');
+  }
+
+  // 2. Compute FY opening (ledger opening_balance + Posted entries prior to FY start)
+  const priorRes = await db.query(
+    `SELECT
+       COALESCE(SUM(CASE WHEN e.entry_type = 'Dr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS prior_dr,
+       COALESCE(SUM(CASE WHEN e.entry_type = 'Cr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS prior_cr
+     FROM acc_voucher_entries e
+     JOIN acc_vouchers v
+       ON v.id = e.voucher_id
+      AND v.finance_id = e.finance_id
+     WHERE e.ledger_id = $1
+       AND e.finance_id = $2
+       AND v.status = 'Posted'
+       AND v.voucher_date < $3::date`,
+    [ledger_id, finance_id, fyRange.from]
+  );
+
+  const priorRow = priorRes.rows[0] || {};
+  const baseObPaise =
+    Math.round(Number(ledgerRow.opening_balance || 0) * 100) *
+    (ledgerRow.ob_type === 'Cr' ? -1 : 1);
+  const priorDrPaise = Math.round(Number(priorRow.prior_dr || 0) * 100);
+  const priorCrPaise = Math.round(Number(priorRow.prior_cr || 0) * 100);
+  const fyOpeningPaise = baseObPaise + priorDrPaise - priorCrPaise;
+
+  // 3. Generate 12 months April..March and aggregate Posted vouchers
+  const monthsRes = await db.query(
+    `WITH months AS (
+       SELECT
+         gs::date AS month_start,
+         TO_CHAR(gs, 'YYYY-MM') AS month_key,
+         TO_CHAR(gs, 'Mon YYYY') AS month_label
+       FROM generate_series($3::date, $4::date, INTERVAL '1 month') AS gs
+     ),
+     m_agg AS (
+       SELECT
+         TO_CHAR(DATE_TRUNC('month', v.voucher_date), 'YYYY-MM') AS month_key,
+         COALESCE(SUM(CASE WHEN e.entry_type = 'Dr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS debit,
+         COALESCE(SUM(CASE WHEN e.entry_type = 'Cr' THEN e.amount ELSE 0 END), 0)::numeric(18,2) AS credit
+       FROM acc_voucher_entries e
+       JOIN acc_vouchers v
+         ON v.id = e.voucher_id
+        AND v.finance_id = e.finance_id
+       WHERE e.ledger_id = $1
+         AND e.finance_id = $2
+         AND v.status = 'Posted'
+         AND v.voucher_date BETWEEN $3::date AND $4::date
+       GROUP BY 1
+     )
+     SELECT
+       m.month_key AS month,
+       m.month_label,
+       ROUND(COALESCE(ma.debit, 0)::numeric(18,2), 2) AS debit,
+       ROUND(COALESCE(ma.credit, 0)::numeric(18,2), 2) AS credit
+     FROM months m
+     LEFT JOIN m_agg ma ON ma.month_key = m.month_key
+     ORDER BY m.month_key ASC`,
+    [ledger_id, finance_id, fyRange.from, fyRange.to]
+  );
+
+  let runningPaise = fyOpeningPaise;
+  const months = monthsRes.rows.map((r) => {
+    const monthOpeningPaise = runningPaise;
+    const drPaise = Math.round(Number(r.debit || 0) * 100);
+    const crPaise = Math.round(Number(r.credit || 0) * 100);
+    runningPaise = monthOpeningPaise + drPaise - crPaise;
+    return {
+      month: r.month,
+      month_label: r.month_label,
+      opening: Number((monthOpeningPaise / 100).toFixed(2)),
+      debit: Number((drPaise / 100).toFixed(2)),
+      credit: Number((crPaise / 100).toFixed(2)),
+      closing: Number((runningPaise / 100).toFixed(2)),
+      closing_abs: Number((Math.abs(runningPaise) / 100).toFixed(2)),
+      closing_side: runningPaise >= 0 ? 'Dr' : 'Cr',
+    };
+  });
+
+  return {
+    ledger: {
+      id: ledgerRow.id,
+      name: ledgerRow.ledger_name,
+      ledger_name: ledgerRow.ledger_name,
+      group_name: ledgerRow.group_name,
+      nature: ledgerRow.nature,
+      opening_balance: Number(parseFloat(ledgerRow.opening_balance || 0).toFixed(2)),
+      ob_type: ledgerRow.ob_type || 'Dr',
+    },
+    fy: fyRange.fyLabel,
+    opening: {
+      net: Number((fyOpeningPaise / 100).toFixed(2)),
+      abs: Number((Math.abs(fyOpeningPaise) / 100).toFixed(2)),
+      side: fyOpeningPaise >= 0 ? 'Dr' : 'Cr',
+    },
+    months,
+  };
+};
+
+// ─── 11c. GST and Contact view details (one-to-one LEFT JOINs) ──────────────
+exports.getLedgerViewDetails = async (finance_id) => {
+  const res = await db.query(
+    `SELECT
+       l.id,
+       l.ledger_name,
+       COALESCE(g.group_name, gm.group_name) AS group_name,
+       COALESCE(g.nature, gm.nature) AS nature,
+       tx.gstin,
+       tx.reg_type,
+       tx.pan_number,
+       lm.contact_person,
+       lm.mobile,
+       lm.primary_mobile,
+       lm.email,
+       lm.city,
+       lm.state
+     FROM acc_ledgers l
+     LEFT JOIN acc_ledger_groups g
+       ON g.id = l.group_id
+      AND g.finance_id = l.finance_id
+     LEFT JOIN acc_group_master gm
+       ON gm.id = l.master_group_id
+     LEFT JOIN acc_ledger_tax tx
+       ON tx.ledger_id = l.id
+      AND tx.finance_id = l.finance_id
+     LEFT JOIN acc_ledger_mailing lm
+       ON lm.ledger_id = l.id
+      AND lm.finance_id = l.finance_id
+     WHERE l.finance_id = $1
+       AND l.is_active = true
+       AND NOT l.inactive
+     ORDER BY l.ledger_name ASC`,
+    [finance_id]
+  );
+
+  return res.rows;
 };
 
 /**
@@ -1103,7 +1621,7 @@ exports.getRecentLedgers = async (finance_id, limit = 10) => {
       lg.nature AS custom_group_nature
     FROM acc_ledgers l
     LEFT JOIN acc_group_master gm ON gm.id = l.master_group_id
-    LEFT JOIN acc_ledger_groups lg ON lg.id = l.group_id
+    LEFT JOIN acc_ledger_groups lg ON lg.id = l.group_id AND lg.finance_id = l.finance_id
     WHERE l.finance_id = $1 AND l.is_active = true AND NOT l.inactive
     ORDER BY l.created_at DESC, l.id DESC
     LIMIT $2`,
@@ -1303,6 +1821,7 @@ exports.getLedgerDetails = async (ledgerId, finance_id) => {
 
     LEFT JOIN acc_ledger_groups lg
         ON lg.id = l.group_id
+        AND lg.finance_id = l.finance_id
 
     LEFT JOIN acc_ledger_balances lb
         ON lb.ledger_id = l.id

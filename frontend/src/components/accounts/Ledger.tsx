@@ -17,8 +17,30 @@ import { Skeleton } from "../ui/skeleton";
 import { toast } from "sonner";
 import { MultiLedger, MultiLedgerSelector, MultiRow, SelectorChoice } from "../multiCreation/MultiLedger";
 import { AdvancedLedgerFormPanel, AdvancedLedgerForm, UnderGroupOption } from "../accounts/AdvancedLedgerDialog";
-import { ConfigDialog, ConfigProvider } from "./ConfigDialog";
-import { getUnderDropdown, getLedgers as apiGetLedgers, createLedger as apiCreateLedger, updateLedger as apiUpdateLedger, multiCreateLedger as apiMultiCreateLedger, getRecentledgers, Recentledger, getLedgerDetails as apiGetLedgerDetails, LedgerDetails, UnderDropdownItem, type Ledger } from "../../api/accounting";
+import { ConfigDialog, ConfigProvider, useConfig } from "./ConfigDialog";
+import {
+  getUnderDropdown,
+  getLedgers as apiGetLedgers,
+  createLedger as apiCreateLedger,
+  updateLedger as apiUpdateLedger,
+  multiCreateLedger as apiMultiCreateLedger,
+  getRecentledgers,
+  Recentledger,
+  getLedgerDetails as apiGetLedgerDetails,
+  getLedgerStatement as apiGetLedgerStatement,
+  getLedgerSummary as apiGetLedgerSummary,
+  getLedgerMonthly as apiGetLedgerMonthly,
+  getLedgerViewDetails as apiGetLedgerViewDetails,
+  getCurrentFYRange,
+  getFinancialYear,
+  LedgerDetails,
+  LedgerStatement,
+  LedgerSummary,
+  LedgerMonthlyResponse,
+  LedgerViewDetailRow,
+  UnderDropdownItem,
+  type Ledger,
+} from "../../api/accounting";
 import { useAuth } from "@/contexts/AuthContext";
 import { RecentActivityCard, RecentActivityItem } from "./RecentActivityCard";
 import { RecentlyCreatedCard, RecentlyCreatedItem } from "./RecentlyCreatedCard";
@@ -27,12 +49,11 @@ import { RecentlyCreatedCard, RecentlyCreatedItem } from "./RecentlyCreatedCard"
  *  ledger API payload (DB column / form-comment names). The "Under" group
  *  is sent as { under_id, under_source } only — the backend resolves this
  *  into the mutually-exclusive group_id / master_group_id columns. */
-function ledgerFormToPayload(l: AdvancedLedgerForm, finance_id: number | string) {
+function ledgerFormToPayload(l: AdvancedLedgerForm) {
   if (!l.groupId || !l.groupSource) {
     throw new Error('Select a valid "Under" group before saving');
   }
   return {
-    finance_id,
     ledger_name: l.name.trim(),
     alias: l.alias || null,
     alias_regional: l.aliasRegional || null,
@@ -279,6 +300,12 @@ interface LedgerEntry {
   nature?: string;
   openingBalance: number;
   balanceType: "Dr" | "Cr";
+  opening?: number;
+  openingSide?: "Dr" | "Cr";
+  periodDr?: number;
+  periodCr?: number;
+  closing?: number;
+  closingSide?: "Dr" | "Cr";
   effectiveDate: string;
   billWise?: boolean;
   creditPeriod?: number;
@@ -295,19 +322,6 @@ const SAMPLE_RECENT_ACTIVITY: RecentActivityItem[] = [
   { id: "ra-3", name: "Rajesh Kumar", group: "Sundry Debtors", lastUsedAt: "2025-04-19T18:05:00", voucherType: "Receipt", entries: 9 },
   { id: "ra-4", name: "ABC Suppliers", group: "Sundry Creditors", lastUsedAt: "2025-04-19T11:20:00", voucherType: "Purchase", entries: 12 },
   { id: "ra-5", name: "Office Rent", group: "Indirect Expense", lastUsedAt: "2025-04-18T10:00:00", voucherType: "Payment", entries: 3 },
-];
-
-
-// ─── Ledger day-wise view data ───
-const LEDGER_ENTRIES = [
-  { date: "2025-04-02", particular: "Sales – Invoice #301", voucherType: "Receipt", debit: 0, credit: 15000 },
-  { date: "2025-04-05", particular: "Purchase – Bill #201", voucherType: "Payment", debit: 8000, credit: 0 },
-  { date: "2025-04-08", particular: "EMI Collection", voucherType: "Receipt", debit: 0, credit: 12000 },
-  { date: "2025-04-10", particular: "Salary Payment", voucherType: "Payment", debit: 18000, credit: 0 },
-  { date: "2025-04-12", particular: "Office Rent", voucherType: "Payment", debit: 25000, credit: 0 },
-  { date: "2025-04-15", particular: "Penalty Collection", voucherType: "Receipt", debit: 0, credit: 5000 },
-  { date: "2025-04-18", particular: "Vehicle Insurance", voucherType: "Journal", debit: 8500, credit: 0 },
-  { date: "2025-04-20", particular: "Interest Received", voucherType: "Receipt", debit: 0, credit: 20000 },
 ];
 
 
@@ -426,16 +440,31 @@ const RELATED_REPORTS = [
   "Monthly Summary",
 ];
 
-const COMPANIES = ["Rimi Software", "Branch – Coimbatore", "Branch – Madurai"];
+type ViewModeKey = "ledger" | "group" | "gst" | "contact" | "monthly";
+
+const VIEW_MODE_LABELS: Record<ViewModeKey, string> = {
+  ledger: "Ledger Wise",
+  group: "Group Wise",
+  gst: "Ledger GST Details",
+  contact: "Ledger Contact Details",
+  monthly: "Monthly Summary",
+};
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // ─── Helpers ───
 function fmtDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  } catch {
-    return iso;
+  if (!iso) return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso).trim());
+  if (m) {
+    const year = m[1];
+    const monthIdx = parseInt(m[2], 10) - 1;
+    const day = m[3];
+    if (monthIdx >= 0 && monthIdx < 12) {
+      return `${day} ${MONTH_NAMES[monthIdx]} ${year}`;
+    }
   }
+  return String(iso);
 }
 
 function loadPref<T>(key: string, fallback: T): T {
@@ -498,6 +527,15 @@ function getGroupCategory(
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Ledger() {
+  return (
+    <ConfigProvider>
+      <LedgerInner />
+    </ConfigProvider>
+  );
+}
+
+function LedgerInner() {
+  const { config } = useConfig();
   const [activeTab, setActiveTab] = useState<"create" | "view">("create");
   const [ledgers, setLedgers] = useState<LedgerEntry[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
@@ -515,28 +553,51 @@ export default function Ledger() {
   const [editingLedgerLoading, setEditingLedgerLoading] = useState(false);
 
   // ─── View-tab: real ledgers + groups fetched from the API ────────────────────
-  // `viewLedgers`  — raw rows from GET /ledger/list (includes group_id, master_group_id, group_source)
-  // `viewGroups`   — flat list from GET /ledger-groups/under-dropdown (system + custom, with parent ids)
-  // Both are fetched whenever the View tab becomes active or financeId changes.
   const [viewLedgers, setViewLedgers] = useState<LedgerEntry[]>([]);
   const [viewGroups, setViewGroups] = useState<UnderDropdownItem[]>([]);
+  const [viewDetails, setViewDetails] = useState<LedgerViewDetailRow[]>([]);
   const [viewDataLoading, setViewDataLoading] = useState(false);
+  const [summaryData, setSummaryData] = useState<LedgerSummary | null>(null);
 
-  // TODO: replace with real finance/company id from auth/company context
-  const { currentFinance } = useAuth();
-  const financeId = currentFinance?.id ?? 0;
+  const { currentFinance, financeList, switchFinance } = useAuth();
+  const financeId = currentFinance?.id ? String(currentFinance.id) : "";
+  const activeCompanyName =
+    currentFinance?.name || currentFinance?.finance_name || "Select Company";
+  const availableFinances = useMemo(
+    () =>
+      financeList && financeList.length > 0
+        ? financeList
+        : currentFinance
+        ? [currentFinance]
+        : [],
+    [financeList, currentFinance]
+  );
 
   const activeFinanceIdRef = useRef(financeId);
   useEffect(() => {
     activeFinanceIdRef.current = financeId;
   }, [financeId]);
 
-  // On mount: fetch all available parent groups (system + custom) from the DB
-  // and merge with DEFAULT_GROUPS so the "Under" autocomplete always includes
-  // both Tally predefined groups and any custom groups the user has created.
+  const recentReqIdRef = useRef(0);
+  const viewReqIdRef = useRef(0);
+  const summaryReqIdRef = useRef(0);
+
+  // Period — persisted, defaulting to current FY (Apr 1 – Mar 31)
+  const [period, setPeriod] = useState<PeriodState>(() => {
+    const saved = loadPref<PeriodState | null>("ledger:period", null);
+    if (saved && saved.from && saved.to && saved.from <= saved.to) {
+      return saved;
+    }
+    return getCurrentFYRange();
+  });
+
+  // On mount & finance switch: fetch all available parent groups (system + custom) from the DB
   useEffect(() => {
+    if (!financeId) return;
+    const reqFinanceId = financeId;
     getUnderDropdown()
       .then(res => {
+        if (activeFinanceIdRef.current !== reqFinanceId) return;
         if (res.data?.success && Array.isArray(res.data?.data)) {
           const opts: UnderGroupOption[] = res.data.data.map((g: UnderDropdownItem) => ({
             id: g.id,
@@ -552,7 +613,7 @@ export default function Ledger() {
         }
       })
       .catch(() => { /* silently fall back to DEFAULT_GROUPS */ });
-  }, []);
+  }, [financeId]);
 
   // Maps a backend Recentledger record onto the shape RecentlyCreatedCard expects
   const mapRecentLedger = (r: Recentledger): RecentlyCreatedItem => {
@@ -569,52 +630,78 @@ export default function Ledger() {
   const fetchRecentCreated = useCallback(() => {
     if (!financeId) return;
     const reqFinanceId = financeId;
+    const reqId = ++recentReqIdRef.current;
     setRecentCreatedLoading(true);
     getRecentledgers()
       .then(res => {
-        if (activeFinanceIdRef.current !== reqFinanceId) return;
+        if (activeFinanceIdRef.current !== reqFinanceId || recentReqIdRef.current !== reqId) return;
         if (res.data?.success && Array.isArray(res.data?.data)) {
           setRecentCreated(res.data.data.map(mapRecentLedger));
-          console.log('recentledgerCreation:', res.data.data);
         }
       })
       .catch(() => { /* silently keep whatever list we already have */ })
       .finally(() => {
-        if (activeFinanceIdRef.current === reqFinanceId) {
+        if (activeFinanceIdRef.current === reqFinanceId && recentReqIdRef.current === reqId) {
           setRecentCreatedLoading(false);
         }
       });
   }, [financeId]);
+
+  // Fetch header summary for active finance and period
+  const fetchSummary = useCallback(() => {
+    if (!financeId) return;
+    const reqFinanceId = financeId;
+    const reqId = ++summaryReqIdRef.current;
+    apiGetLedgerSummary({ from: period.from, to: period.to })
+      .then(res => {
+        if (activeFinanceIdRef.current !== reqFinanceId || summaryReqIdRef.current !== reqId) return;
+        if (res.data?.success && res.data?.data) {
+          setSummaryData(res.data.data);
+        }
+      })
+      .catch(() => {
+        if (activeFinanceIdRef.current === reqFinanceId && summaryReqIdRef.current === reqId) {
+          setSummaryData(null);
+        }
+      });
+  }, [financeId, period.from, period.to]);
 
   // On mount, and whenever the active company changes, refresh the "Recently Created" list
   useEffect(() => {
     fetchRecentCreated();
   }, [fetchRecentCreated]);
 
-  // ─── Fetch real ledger list + group tree for the View tab ────────────────────
-  // Runs whenever the view tab is opened or financeId changes.
+  // Refresh header summary whenever finance or period changes
+  useEffect(() => {
+    fetchSummary();
+  }, [fetchSummary]);
+
+  // ─── Fetch real ledger list + group tree + view details for the View tab ─────
   const fetchViewData = useCallback(async () => {
     if (!financeId) return;
     const reqFinanceId = financeId;
+    const reqId = ++viewReqIdRef.current;
     setViewDataLoading(true);
     try {
-      const [ledgersRes, groupsRes] = await Promise.all([
-        apiGetLedgers(financeId),
+      const [ledgersRes, groupsRes, detailsRes] = await Promise.all([
+        apiGetLedgers({ from: period.from, to: period.to }),
         getUnderDropdown(),
+        apiGetLedgerViewDetails(),
       ]);
 
-      if (activeFinanceIdRef.current !== reqFinanceId) return;
+      if (activeFinanceIdRef.current !== reqFinanceId || viewReqIdRef.current !== reqId) return;
 
       if (groupsRes.data?.success && Array.isArray(groupsRes.data?.data)) {
         setViewGroups(groupsRes.data.data);
       }
 
+      if (detailsRes.data?.success && Array.isArray(detailsRes.data?.data)) {
+        setViewDetails(detailsRes.data.data);
+      }
+
       if (ledgersRes.data?.success && Array.isArray(ledgersRes.data?.data)) {
-        // Map the raw API rows onto LedgerEntry so the rest of the view
-        // layer (flat table, hierarchy tree, day-wise drill-down) can
-        // consume a single unified shape.
         const mapped: LedgerEntry[] = ledgersRes.data.data.map((r: Ledger) => ({
-          id: r.id,
+          id: String(r.id),
           name: r.ledger_name,
           group: r.group_name || r.reporting_under || "—",
           groupId: r.master_group_id ?? r.group_id ?? null,
@@ -622,19 +709,25 @@ export default function Ledger() {
           nature: r.nature ?? undefined,
           openingBalance: Number(r.opening_balance) || 0,
           balanceType: (r.ob_type === "Cr" ? "Cr" : "Dr") as "Dr" | "Cr",
+          opening: Number(r.opening ?? (r.opening_dr || r.opening_cr || r.opening_balance || 0)),
+          openingSide: (r.opening_side ?? (Number(r.opening_cr) > 0 ? "Cr" : r.ob_type === "Cr" ? "Cr" : "Dr")) as "Dr" | "Cr",
+          periodDr: Number(r.period_dr) || 0,
+          periodCr: Number(r.period_cr) || 0,
+          closing: Number(r.closing ?? (r.closing_dr || r.closing_cr || 0)),
+          closingSide: (r.closing_side ?? (Number(r.closing_cr) > 0 ? "Cr" : "Dr")) as "Dr" | "Cr",
           effectiveDate: r.effective_date ? String(r.effective_date).slice(0, 10) : "",
           createdAt: 0,
         }));
         setViewLedgers(mapped);
       }
     } catch {
-      // silently keep stale data — toast is noisy for a background refresh
+      // silently keep state on transient error
     } finally {
-      if (activeFinanceIdRef.current === reqFinanceId) {
+      if (activeFinanceIdRef.current === reqFinanceId && viewReqIdRef.current === reqId) {
         setViewDataLoading(false);
       }
     }
-  }, [financeId]);
+  }, [financeId, period.from, period.to]);
 
   useEffect(() => {
     if (activeTab === "view") fetchViewData();
@@ -645,13 +738,13 @@ export default function Ledger() {
   const openLedgerForEdit = useCallback((ledgerId: string | number) => {
     if (!financeId) return;
     setEditingLedgerLoading(true);
-    apiGetLedgerDetails(ledgerId)
+    apiGetLedgerDetails(String(ledgerId))
       .then(res => {
         if (res.data?.success && res.data?.data) {
-          setCurrentIndex(-1); // this ledger isn't part of the local `ledgers` list
-          setEditingLedgerId(ledgerId);
+          setCurrentIndex(-1);
+          setEditingLedgerId(String(ledgerId));
           setEditingLedgerInitial(ledgerDetailsToForm(res.data.data));
-          setFormKey(k => k + 1); // remount AdvancedLedgerFormPanel with the new `initial`
+          setFormKey(k => k + 1);
           setActiveTab("create");
         } else {
           toast.error("Could not load ledger details");
@@ -683,20 +776,17 @@ export default function Ledger() {
   const [newGroupName, setNewGroupName] = useState("");
   const [showConfigDialog, setShowConfigDialog] = useState(false);
 
-  // View mode (Ledger or Group) — persisted; defaults to group view
-  const [viewMode, setViewMode] = useState<"ledger" | "group">(
-    () => loadPref<"ledger" | "group">("ledger:viewMode", "group")
-  );
+  // View mode — persisted; defaults to group view
+  const [viewMode, setViewMode] = useState<ViewModeKey>(() => {
+    const saved = loadPref<string>("ledger:viewMode", "group");
+    if (saved === "ledger" || saved === "group" || saved === "gst" || saved === "contact" || saved === "monthly") {
+      return saved;
+    }
+    return "group";
+  });
 
-  // Period — persisted
-  const [period, setPeriod] = useState<PeriodState>(
-    () => loadPref("ledger:period", { from: "2025-04-01", to: "2026-03-31" })
-  );
-
-  // Company — persisted
-  const [selectedCompany, setSelectedCompany] = useState<string>(
-    () => loadPref("ledger:company", "Rimi Software")
-  );
+  // Selected ledger for Monthly Summary view
+  const [monthlyLedgerId, setMonthlyLedgerId] = useState<string>("");
 
   // View search — persisted
   const [viewSearch, setViewSearch] = useState<string>(
@@ -733,8 +823,18 @@ export default function Ledger() {
 
   const isSundryGroup = group === "Sundry Debtors" || group === "Sundry Creditors";
 
-  const totalDr = useMemo(() => ledgers.filter(l => l.balanceType === "Dr").reduce((s, l) => s + l.openingBalance, 0), [ledgers]);
-  const totalCr = useMemo(() => ledgers.filter(l => l.balanceType === "Cr").reduce((s, l) => s + l.openingBalance, 0), [ledgers]);
+  // Header summary pills bound to getLedgerSummary(period)
+  const summaryTotalDr = Number.isFinite(summaryData?.total_dr_closing)
+    ? Number(summaryData!.total_dr_closing)
+    : 0;
+  const summaryTotalCr = Number.isFinite(summaryData?.total_cr_closing)
+    ? Number(summaryData!.total_cr_closing)
+    : 0;
+  const summaryDiff = Number.isFinite(summaryData?.difference)
+    ? Number(summaryData!.difference)
+    : 0;
+  const summaryDiffSide: "Dr" | "Cr" =
+    summaryData?.difference_side === "Cr" ? "Cr" : "Dr";
 
   const groupedLedgers = useMemo(() => {
     const map: Record<string, LedgerEntry[]> = {};
@@ -760,22 +860,54 @@ export default function Ledger() {
     return list;
   }, [viewLedgers, viewSearch, category, viewGroups]);
 
+  // Filtered view details for GST and Contact views
+  const filteredViewDetails = useMemo(() => {
+    const q = viewSearch.toLowerCase().trim();
+    let list = viewDetails;
+    if (q) {
+      list = list.filter(d => {
+        const hay = [
+          d.ledger_name,
+          d.group_name,
+          d.gstin,
+          d.pan_number,
+          d.reg_type,
+          d.contact_person,
+          d.mobile,
+          d.primary_mobile,
+          d.email,
+          d.city,
+          d.state,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
+    if (category !== "ALL") {
+      list = list.filter(
+        d => getGroupCategory(d.group_name || "", d.nature || undefined, viewGroups) === category
+      );
+    }
+    return list;
+  }, [viewDetails, viewSearch, category, viewGroups]);
+
   // ─── Persist view preferences ───────────────────────────────────────────────
   useEffect(() => { savePref("ledger:viewMode", viewMode); }, [viewMode]);
   useEffect(() => { savePref("ledger:period", period); }, [period]);
-  useEffect(() => { savePref("ledger:company", selectedCompany); }, [selectedCompany]);
   useEffect(() => { savePref("ledger:viewSearch", viewSearch); }, [viewSearch]);
 
   // ─── Trigger skeleton on company / period / viewMode change ────────────────
   const triggerViewLoading = useCallback(() => {
     setViewLoading(true);
-    const t = setTimeout(() => setViewLoading(false), 300);
+    const t = setTimeout(() => setViewLoading(false), 180);
     return () => clearTimeout(t);
   }, []);
 
   useEffect(() => {
     if (activeTab === "view") triggerViewLoading();
-  }, [selectedCompany, period, viewMode, category, activeTab, triggerViewLoading]);
+  }, [financeId, period, viewMode, category, activeTab, triggerViewLoading]);
 
   // ─── Load ledger into form ───────────────────────────────────────────────────
   const loadLedger = useCallback((index: number) => {
@@ -844,51 +976,105 @@ export default function Ledger() {
   // ─── Keyboard shortcuts ──────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Existing shortcuts (unchanged)
+      const target = e.target as HTMLElement | null;
+      const isEditable =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+
+      // Escape closes the topmost dialog/view only
+      if (e.key === "Escape") {
+        if (showConfigDialog) return; // ConfigDialog handles its own Escape
+        if (multiChoice) {
+          e.preventDefault();
+          setMultiChoice(null);
+          return;
+        }
+        if (multiSelector) {
+          e.preventDefault();
+          setMultiSelector(false);
+          return;
+        }
+        if (showNewGroup) {
+          e.preventDefault();
+          setShowNewGroup(false);
+          return;
+        }
+        if (showCompanyDlg) {
+          e.preventDefault();
+          setShowCompanyDlg(false);
+          return;
+        }
+        if (showPeriodDlg) {
+          e.preventDefault();
+          setShowPeriodDlg(false);
+          return;
+        }
+        if (showChangeView) {
+          e.preventDefault();
+          setShowChangeView(false);
+          return;
+        }
+        if (activeTab === "view" && viewLedger) {
+          e.preventDefault();
+          setViewLedger(null);
+          return;
+        }
+        return;
+      }
+
       if (e.altKey && e.key.toLowerCase() === "c") {
         e.preventDefault();
         setShowNewGroup(true);
+        return;
       }
       if (e.ctrlKey && e.key.toLowerCase() === "g") {
         e.preventDefault();
         setShowNewGroup(true);
-      }
-      if (e.key === "F12") {
-        e.preventDefault();
-        setShowConfigDialog(true);
-      }
-      if (e.ctrlKey && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        handleSave();
-      }
-      if (e.ctrlKey && e.key.toLowerCase() === "h") {
-        e.preventDefault();
-        setMultiSelector(true);
-      }
-      if (e.ctrlKey && e.key.toLowerCase() === "l") {
-        e.preventDefault();
-        setShowAdvLedger(true);
-      }
-      if (e.ctrlKey && e.key === "Enter") {
-        e.preventDefault();
-        if (ledgers.length) loadLedger(currentIndex >= 0 ? currentIndex : 0);
-      }
-      if (e.key === "PageUp") {
-        e.preventDefault();
-        const idx = currentIndex <= 0 ? ledgers.length - 1 : currentIndex - 1;
-        loadLedger(idx);
-      }
-      if (e.key === "PageDown") {
-        e.preventDefault();
-        const idx = currentIndex >= ledgers.length - 1 ? 0 : currentIndex + 1;
-        loadLedger(idx);
+        return;
       }
       if (e.key === "F12" || (e.altKey && e.key === "F12")) {
         e.preventDefault();
         setShowConfigDialog(true);
+        return;
+      }
+      if (e.ctrlKey && e.key.toLowerCase() === "a") {
+        if (showConfigDialog) return;
+        e.preventDefault();
+        handleSave();
+        return;
+      }
+      if (e.ctrlKey && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        setMultiSelector(true);
+        return;
+      }
+      if (e.ctrlKey && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        setShowAdvLedger(true);
+        return;
+      }
+      if (e.ctrlKey && e.key === "Enter") {
+        e.preventDefault();
+        if (ledgers.length) loadLedger(currentIndex >= 0 ? currentIndex : 0);
+        return;
+      }
+      if (!isEditable && e.key === "PageUp") {
+        e.preventDefault();
+        const idx = currentIndex <= 0 ? ledgers.length - 1 : currentIndex - 1;
+        loadLedger(idx);
+        return;
+      }
+      if (!isEditable && e.key === "PageDown") {
+        e.preventDefault();
+        const idx = currentIndex >= ledgers.length - 1 ? 0 : currentIndex + 1;
+        loadLedger(idx);
+        return;
       }
 
-      // ── New View-tab shortcuts ──────────────────────────────────────────────
+      // ── View-tab shortcuts ──────────────────────────────────────────────
       if (e.key === "F5") {
         e.preventDefault();
         setViewMode(prev => {
@@ -897,19 +1083,21 @@ export default function Ledger() {
           return next;
         });
         setViewLedger(null);
+        return;
       }
       if (e.key === "F2") {
         e.preventDefault();
         setPeriodFrom(period.from);
         setPeriodTo(period.to);
         setShowPeriodDlg(true);
+        return;
       }
       if (e.key === "F3") {
         e.preventDefault();
         setShowCompanyDlg(true);
+        return;
       }
       if (e.altKey && e.key.toLowerCase() === "h") {
-        // Only if not already intercepted by existing Alt+C
         if (!showNewGroup) {
           e.preventDefault();
           setShowChangeView(true);
@@ -918,7 +1106,22 @@ export default function Ledger() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleSave, currentIndex, ledgers.length, loadLedger, period, showNewGroup]);
+  }, [
+    handleSave,
+    currentIndex,
+    ledgers.length,
+    loadLedger,
+    period,
+    showNewGroup,
+    showConfigDialog,
+    multiChoice,
+    multiSelector,
+    showCompanyDlg,
+    showPeriodDlg,
+    showChangeView,
+    activeTab,
+    viewLedger,
+  ]);
 
   // Auto-open sundry dialog
   useEffect(() => {
@@ -961,48 +1164,72 @@ export default function Ledger() {
     } as Partial<AdvancedLedgerForm>;
   }, [currentIndex, ledgers, editingLedgerId, editingLedgerInitial]);
 
-  // ─── Period preset helpers ───────────────────────────────────────────────────
+  // ─── Period preset helpers (no UTC timezone shift) ───────────────────────────
   const applyPeriodPreset = (preset: "month" | "quarter" | "year" | "custom") => {
     setPeriodPreset(preset);
     const now = new Date();
     const y = now.getFullYear();
-    const m = now.getMonth();
-    // Indian fiscal year starts Apr 1
+    const m = now.getMonth(); // 0..11
+    const pad = (n: number) => String(n).padStart(2, "0");
     if (preset === "year") {
       const fy = m >= 3 ? y : y - 1;
       setPeriodFrom(`${fy}-04-01`);
       setPeriodTo(`${fy + 1}-03-31`);
     } else if (preset === "month") {
-      const start = new Date(y, m, 1);
-      const end = new Date(y, m + 1, 0);
-      setPeriodFrom(start.toISOString().slice(0, 10));
-      setPeriodTo(end.toISOString().slice(0, 10));
+      const lastDay = new Date(y, m + 1, 0).getDate();
+      setPeriodFrom(`${y}-${pad(m + 1)}-01`);
+      setPeriodTo(`${y}-${pad(m + 1)}-${pad(lastDay)}`);
     } else if (preset === "quarter") {
       const qStart = Math.floor(m / 3) * 3;
-      const start = new Date(y, qStart, 1);
-      const end = new Date(y, qStart + 3, 0);
-      setPeriodFrom(start.toISOString().slice(0, 10));
-      setPeriodTo(end.toISOString().slice(0, 10));
+      const qEnd = qStart + 2;
+      const lastDay = new Date(y, qEnd + 1, 0).getDate();
+      setPeriodFrom(`${y}-${pad(qStart + 1)}-01`);
+      setPeriodTo(`${y}-${pad(qEnd + 1)}-${pad(lastDay)}`);
     }
-    // custom: keep existing dates
   };
 
   const applyPeriod = () => {
+    if (!periodFrom || !periodTo) {
+      toast.error("Please select both From and To dates");
+      return;
+    }
+    if (periodFrom > periodTo) {
+      toast.error("From date must be on or before To date");
+      return;
+    }
     setPeriod({ from: periodFrom, to: periodTo });
     setShowPeriodDlg(false);
     toast.success(`Period set: ${fmtDate(periodFrom)} – ${fmtDate(periodTo)}`);
   };
 
-  // ─── Company switch ──────────────────────────────────────────────────────────
-  const switchCompany = (c: string) => {
-    setSelectedCompany(c);
-    setShowCompanyDlg(false);
-    toast.success(`Company: ${c}`);
+  // ─── Live Company switch (F3) ────────────────────────────────────────────────
+  const handleSwitchCompany = async (targetId: string | number, displayName: string) => {
+    if (String(targetId) === String(currentFinance?.id)) {
+      setShowCompanyDlg(false);
+      return;
+    }
+    try {
+      const ok = await switchFinance(String(targetId));
+      if (!ok) {
+        toast.error("Failed to switch company");
+        return;
+      }
+      setShowCompanyDlg(false);
+      setViewLedger(null);
+      setMonthlyLedgerId("");
+      setViewLedgers([]);
+      setViewDetails([]);
+      setSummaryData(null);
+      setRecentCreated([]);
+      toast.success(`Company: ${displayName}`);
+    } catch (err: unknown) {
+      const apiErr = err as { response?: { data?: { message?: string } }; message?: string };
+      toast.error(apiErr?.response?.data?.message || apiErr?.message || "Failed to switch company");
+    }
   };
 
   return (
-    <ConfigProvider>
-      <div className="space-y-4">
+    <div className="space-y-4">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
@@ -1012,14 +1239,14 @@ export default function Ledger() {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="dashboard-card !p-2 !rounded-lg flex items-center gap-3 text-xs">
               <span className="text-muted-foreground">Total Dr:</span>
-              <span className="font-bold text-foreground">₹{totalDr.toLocaleString()}</span>
+              <span className="font-bold text-foreground">₹{summaryTotalDr.toLocaleString("en-IN")}</span>
               <span className="text-muted-foreground">|</span>
               <span className="text-muted-foreground">Total Cr:</span>
-              <span className="font-bold text-foreground">₹{totalCr.toLocaleString()}</span>
+              <span className="font-bold text-foreground">₹{summaryTotalCr.toLocaleString("en-IN")}</span>
               <span className="text-muted-foreground">|</span>
               <span className="text-muted-foreground">Opening:</span>
-              <span className={`font-bold ${totalDr >= totalCr ? "text-foreground" : "text-expense"}`}>
-                ₹{Math.abs(totalDr - totalCr).toLocaleString()} {totalDr >= totalCr ? "Dr" : "Cr"}
+              <span className={`font-bold ${summaryDiffSide === "Dr" ? "text-foreground" : "text-expense"}`}>
+                ₹{summaryDiff.toLocaleString("en-IN")} {summaryDiffSide}
               </span>
             </div>
           </div>
@@ -1075,8 +1302,7 @@ export default function Ledger() {
                   onSave={async (l: AdvancedLedgerForm) => {
                     let payload;
                     try {
-                      payload = ledgerFormToPayload(l, financeId);
-                      console.log('Ledger Payload:', payload)
+                      payload = ledgerFormToPayload(l);
                     } catch (err: unknown) {
                       const msg = err instanceof Error ? err.message : "Select a valid Under group before saving";
                       toast.error(msg);
@@ -1088,7 +1314,7 @@ export default function Ledger() {
 
                     try {
                       if (targetId !== null) {
-                        await apiUpdateLedger(targetId, financeId, payload);
+                        await apiUpdateLedger(String(targetId), payload);
                       } else {
                         const res = await apiCreateLedger(payload);
                         if (!res.data?.success) throw new Error(res.data?.message || "Failed to create ledger");
@@ -1138,9 +1364,9 @@ export default function Ledger() {
                     }
 
                     toast.success(`Ledger "${l.name}" ${targetId !== null ? "updated" : "created"}`);
-                    // Refresh "Recently Created" so the change (new ledger, or an
-                    // edited name/group) is reflected immediately without a page reload.
                     fetchRecentCreated();
+                    fetchSummary();
+                    fetchViewData();
                     resetForm();
                   }}
                 />

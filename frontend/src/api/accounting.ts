@@ -25,6 +25,12 @@ export interface Ledger {
   period_cr: number;
   closing_dr: number;
   closing_cr: number;
+  opening?: number;
+  opening_net?: number;
+  opening_side?: 'Dr' | 'Cr';
+  closing?: number;
+  closing_net?: number;
+  closing_side?: 'Dr' | 'Cr';
 }
 
 export interface Recentledger {
@@ -167,34 +173,95 @@ export interface CreateVoucherPayload {
   }>;
 }
 
+export interface LedgerStatementEntry {
+  voucher_id: string;
+  voucher_date: string;
+  voucher_number: string;
+  voucher_type: string;
+  entry_type: 'Dr' | 'Cr';
+  amount: number;
+  narration: string | null;
+  counter_ledgers: string[];
+}
+
 export interface LedgerStatement {
   ledger: {
+    id: string;
+    name: string;
     ledger_name: string;
-    ledger_code: string;
+    ledger_code?: string;
+    alias?: string | null;
     alias_name: string | null;
     opening_balance: number;
     ob_type: string;
     group_name: string;
     nature: string;
   };
-  opening: { dr: number; cr: number };
-  entries: Array<{
-    voucher_date: string;
-    voucher_number: string;
-    voucher_type: string;
-    entry_type: 'Dr' | 'Cr';
-    amount: number;
-    narration: string | null;
-  }>;
+  period?: { from: string; to: string };
+  opening: { dr: number; cr: number; net: number; side?: 'Dr' | 'Cr' };
+  entries: LedgerStatementEntry[];
+  period_total: { dr: number; cr: number };
+  closing: { dr: number; cr: number; net: number; side?: 'Dr' | 'Cr' };
+  truncated: boolean;
+  total: number;
 }
 
 export interface LedgerSummary {
+  total_dr_closing: number;
+  total_cr_closing: number;
+  difference: number;
+  difference_side: 'Dr' | 'Cr';
+  opening_net: number;
+  period_dr: number;
+  period_cr: number;
   totalDr: number;
   totalCr: number;
   openingBalance: number;
   openingType: 'Dr' | 'Cr';
   closingBalance: number;
   closingType: 'Dr' | 'Cr';
+}
+
+export interface LedgerMonthlyRow {
+  month: string;
+  month_label: string;
+  opening: number;
+  debit: number;
+  credit: number;
+  closing: number;
+  closing_abs: number;
+  closing_side: 'Dr' | 'Cr';
+}
+
+export interface LedgerMonthlyResponse {
+  ledger: {
+    id: string;
+    name: string;
+    ledger_name: string;
+    group_name: string;
+    nature: string;
+    opening_balance: number;
+    ob_type: 'Dr' | 'Cr';
+  };
+  fy: string;
+  opening: { net: number; abs: number; side: 'Dr' | 'Cr' };
+  months: LedgerMonthlyRow[];
+}
+
+export interface LedgerViewDetailRow {
+  id: string;
+  ledger_name: string;
+  group_name: string | null;
+  nature: string | null;
+  gstin: string | null;
+  reg_type: string | null;
+  pan_number: string | null;
+  contact_person: string | null;
+  mobile: string | null;
+  primary_mobile: string | null;
+  email: string | null;
+  city: string | null;
+  state: string | null;
 }
 
 // Helper: derive financial year (Apr–Mar)
@@ -218,24 +285,31 @@ export function getCurrentFYRange(): { from: string; to: string } {
 
 // ─── LEDGER APIs ─────────────────────────────────────────────────────────────
 
-export const getLedgers = (finance_id: string | number, financial_year?: string) =>
-  apiClient.get<{ success: boolean; data: Ledger[] }>('/ledger/list', {
-    params: { finance_id, financial_year: financial_year || getFinancialYear() }
+export const getLedgers = (
+  paramsOrLegacyFinanceId?: { from?: string; to?: string; financial_year?: string } | string | number,
+  legacySecondArg?: string
+) => {
+  const params =
+    typeof paramsOrLegacyFinanceId === 'object' && paramsOrLegacyFinanceId !== null
+      ? paramsOrLegacyFinanceId
+      : legacySecondArg
+      ? { financial_year: legacySecondArg }
+      : undefined;
+  return apiClient.get<{ success: boolean; data: Ledger[] }>('/ledger/list', {
+    params,
   });
+};
 
 export const getRecentledgers = () =>
   apiClient.get<{ success: boolean; data: Recentledger[] }>('/ledger/recent-ledgers');
 
 export const getLedgerDetails = (ledgerId: string | number) =>
-  apiClient.get<{ success: boolean; data: LedgerDetails }>(`/ledger/${ledgerId}/details`);
+  apiClient.get<{ success: boolean; data: LedgerDetails }>(`/ledger/${String(ledgerId)}/details`);
 
-export const getLedgerGroups = (finance_id?: string | number) =>
-  apiClient.get<{ success: boolean; data: LedgerGroup[] }>('/ledger/groups', {
-    params: finance_id ? { finance_id } : undefined
-  });
+export const getLedgerGroups = (_legacyFinanceId?: string | number) =>
+  apiClient.get<{ success: boolean; data: LedgerGroup[] }>('/ledger/groups');
 
 export const createLedgerGroup = (payload: {
-  finance_id?: string | number;
   group_name: string;
   parent_group_id?: string | number | null;
   nature: string;
@@ -243,16 +317,13 @@ export const createLedgerGroup = (payload: {
   created_by?: number;
 }) => apiClient.post<{ success: boolean; id: string | number }>('/ledger/groups/create', payload);
 
-export const getGroupLedgers = (groupId: string | number, finance_id?: string | number) =>
+export const getGroupLedgers = (groupId: string | number) =>
   apiClient.get<{ success: boolean; data: { group: LedgerGroup; ledgers: Ledger[] } }>(
-    `/ledger/group/${groupId}`,
-    { params: finance_id ? { finance_id } : undefined }
+    `/ledger/group/${String(groupId)}`
   );
 
-export const getVoucherTypes = (finance_id?: string | number) =>
-  apiClient.get<{ success: boolean; data: VoucherType[] }>('/vouchers/types', {
-    params: finance_id ? { finance_id } : undefined,
-  });
+export const getVoucherTypes = () =>
+  apiClient.get<{ success: boolean; data: VoucherType[] }>('/vouchers/types');
 
 export const getNextVoucherNumber = (params: { type_id: string | number; date?: string }) =>
   apiClient.get<{
@@ -280,10 +351,32 @@ export const listVouchers = (params?: {
     params,
   });
 
-export const getLedgerStatement = (ledger_id: string | number, finance_id: string | number, from: string, to: string) =>
-  apiClient.get<{ success: boolean; data: LedgerStatement }>(`/ledger/${ledger_id}/statement`, {
-    params: { finance_id, from, to }
-  });
+export const getLedgerStatement = (
+  ledgerId: string | number,
+  paramsOrLegacyFinanceId?: { from?: string; to?: string } | string | number,
+  legacyFrom?: string,
+  legacyTo?: string
+) => {
+  const params =
+    typeof paramsOrLegacyFinanceId === 'object' && paramsOrLegacyFinanceId !== null
+      ? paramsOrLegacyFinanceId
+      : legacyFrom && legacyTo
+      ? { from: legacyFrom, to: legacyTo }
+      : undefined;
+  return apiClient.get<{ success: boolean; data: LedgerStatement }>(
+    `/ledger/${String(ledgerId)}/statement`,
+    { params }
+  );
+};
+
+export const getLedgerMonthly = (ledgerId: string, fy?: string) =>
+  apiClient.get<{ success: boolean; data: LedgerMonthlyResponse }>(
+    `/ledger/${String(ledgerId)}/monthly`,
+    { params: fy ? { fy } : undefined }
+  );
+
+export const getLedgerViewDetails = () =>
+  apiClient.get<{ success: boolean; data: LedgerViewDetailRow[] }>('/ledger/view-details');
 
 // payload must include exactly one Under selection via { under_id, under_source }
 // ('system' → acc_group_master, 'custom' → acc_ledger_groups). The backend
@@ -292,22 +385,45 @@ export const getLedgerStatement = (ledger_id: string | number, finance_id: strin
 export const createLedger = (payload: Record<string, unknown> & UnderSelection) =>
   apiClient.post<{ success: boolean; id: string | number; message?: string }>('/ledger/create', payload);
 
-export const updateLedger = (id: string | number, finance_id: string | number | undefined, payload: Record<string, unknown>) =>
-  apiClient.put<{ success: boolean; message?: string }>(`/ledger/update/${id}`, { ...payload, finance_id });
+export const updateLedger = (
+  id: string | number,
+  payloadOrLegacyFinanceId: Record<string, unknown> | string | number | undefined,
+  maybePayload?: Record<string, unknown>
+) => {
+  const body =
+    maybePayload !== undefined
+      ? maybePayload
+      : (payloadOrLegacyFinanceId as Record<string, unknown>) || {};
+  return apiClient.put<{ success: boolean; message?: string }>(
+    `/ledger/update/${String(id)}`,
+    body
+  );
+};
 
-export const deleteLedger = (id: string | number, finance_id?: string | number) =>
-  apiClient.delete<{ success: boolean; message?: string }>(`/ledger/delete/${id}`, {
-    params: finance_id ? { finance_id } : undefined
-  });
+export const deleteLedger = (id: string | number) =>
+  apiClient.delete<{ success: boolean; message?: string }>(`/ledger/delete/${String(id)}`);
 
 export const multiCreateLedger = (
-  finance_id: string | number,
-  ledgers: Array<Record<string, unknown> & UnderSelection>
-) => apiClient.post<{ success: boolean; ids: (string | number)[]; count?: number; message?: string }>('/ledger/multi-create', { finance_id, ledgers });
+  ledgersOrLegacyFinanceId:
+    | Array<Record<string, unknown> & UnderSelection>
+    | string
+    | number,
+  maybeLedgers?: Array<Record<string, unknown> & UnderSelection>
+) => {
+  const ledgers = Array.isArray(ledgersOrLegacyFinanceId)
+    ? ledgersOrLegacyFinanceId
+    : maybeLedgers || [];
+  return apiClient.post<{
+    success: boolean;
+    ids: (string | number)[];
+    count?: number;
+    message?: string;
+  }>('/ledger/multi-create', { ledgers });
+};
 
-export const getLedgerSummary = (finance_id?: string | number, financial_year?: string) =>
+export const getLedgerSummary = (params?: { from?: string; to?: string }) =>
   apiClient.get<{ success: boolean; data: LedgerSummary }>('/ledger/summary', {
-    params: { finance_id, financial_year: financial_year || getFinancialYear() }
+    params,
   });
 
 // ─── ACC LEDGER GROUP APIs (acc_ledger_groups table) ─────────────────────────
