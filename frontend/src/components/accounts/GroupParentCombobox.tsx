@@ -53,8 +53,10 @@ export function GroupParentCombobox({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [highlightIndex, setHighlightIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   // DB groups to display
   const dbOptions = useMemo(() => {
@@ -87,6 +89,29 @@ export function GroupParentCombobox({
 
   const hasResults = filteredDB.length > 0 || filteredPredefined.length > 0;
 
+  // Flatten options for arrow key navigation
+  type ComboOption =
+    | { kind: "primary" }
+    | { kind: "db"; item: AccLedgerGroup }
+    | { kind: "predefined"; item: PredefinedGroup };
+
+  const flatOptions = useMemo<ComboOption[]>(() => {
+    const opts: ComboOption[] = [{ kind: "primary" }];
+    filteredDB.forEach(g => opts.push({ kind: "db", item: g }));
+    filteredPredefined.forEach(p => opts.push({ kind: "predefined", item: p }));
+    return opts;
+  }, [filteredDB, filteredPredefined]);
+
+  useEffect(() => {
+    setHighlightIndex(0);
+  }, [query, open]);
+
+  useEffect(() => {
+    if (open && itemRefs.current[highlightIndex]) {
+      itemRefs.current[highlightIndex]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [highlightIndex, open]);
+
   // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -110,6 +135,7 @@ export function GroupParentCombobox({
     if (disabled) return;
     setOpen(true);
     setQuery("");
+    setHighlightIndex(0);
   };
 
   const selectDB = (g: AccLedgerGroup) => {
@@ -130,6 +156,39 @@ export function GroupParentCombobox({
     setQuery("");
   };
 
+  const chooseOption = (opt: ComboOption) => {
+    if (opt.kind === "primary") selectPrimary();
+    else if (opt.kind === "db") selectDB(opt.item);
+    else if (opt.kind === "predefined") selectPredefined(opt.item);
+  };
+
+  const onKeyDownInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      setQuery("");
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightIndex(prev => (prev + 1) % Math.max(1, flatOptions.length));
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightIndex(prev => (prev - 1 + flatOptions.length) % Math.max(1, flatOptions.length));
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (flatOptions[highlightIndex]) {
+        chooseOption(flatOptions[highlightIndex]);
+      }
+    }
+  };
+
   const displayLabel = value === "__none__" || !value ? placeholder : value;
   const isSet = value && value !== "__none__";
 
@@ -139,6 +198,12 @@ export function GroupParentCombobox({
       <button
         type="button"
         onClick={handleOpen}
+        onKeyDown={e => {
+          if (e.key === "ArrowDown" || e.key === "Enter") {
+            e.preventDefault();
+            handleOpen();
+          }
+        }}
         disabled={disabled}
         className={`
           w-full flex items-center justify-between
@@ -184,9 +249,7 @@ export function GroupParentCombobox({
               onChange={e => setQuery(e.target.value)}
               placeholder="Search groups..."
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              onKeyDown={e => {
-                if (e.key === "Escape") { setOpen(false); setQuery(""); }
-              }}
+              onKeyDown={onKeyDownInput}
             />
             {query && (
               <button onClick={() => setQuery("")} className="text-muted-foreground hover:text-foreground">
@@ -198,10 +261,13 @@ export function GroupParentCombobox({
           <div className="max-h-64 overflow-y-auto">
             {/* Primary option */}
             <div
+              ref={el => { itemRefs.current[0] = el; }}
+              onMouseEnter={() => setHighlightIndex(0)}
               className={`
                 flex items-center gap-2 px-3 py-2 text-sm cursor-pointer
-                hover:bg-secondary/60 transition-colors
-                ${!isSet ? "text-primary font-medium" : "text-muted-foreground"}
+                transition-colors
+                ${highlightIndex === 0 ? "bg-accent text-accent-foreground" : "hover:bg-secondary/60"}
+                ${!isSet ? "font-medium" : "text-muted-foreground"}
               `}
               onClick={selectPrimary}
             >
@@ -216,16 +282,20 @@ export function GroupParentCombobox({
                 <div className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold bg-secondary/20 border-y border-border/40">
                   <Database className="h-3 w-3" /> Your Groups
                 </div>
-                {filteredDB.map(g => {
+                {filteredDB.map((g, i) => {
+                  const idx = 1 + i;
+                  const isHighlighted = highlightIndex === idx;
                   const selected = isSet && value === g.group_name;
                   return (
                     <div
                       key={g.id}
+                      ref={el => { itemRefs.current[idx] = el; }}
+                      onMouseEnter={() => setHighlightIndex(idx)}
                       onClick={() => selectDB(g)}
                       className={`
                         flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer
-                        hover:bg-secondary/60 transition-colors
-                        ${selected ? "bg-primary/5 text-primary" : "text-foreground"}
+                        transition-colors
+                        ${isHighlighted ? "bg-accent text-accent-foreground" : selected ? "bg-primary/5 text-primary" : "text-foreground hover:bg-secondary/60"}
                       `}
                     >
                       <div className="flex items-center gap-2 min-w-0">
@@ -248,16 +318,20 @@ export function GroupParentCombobox({
                 <div className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold bg-secondary/20 border-y border-border/40">
                   <Sparkles className="h-3 w-3" /> Suggested Groups
                 </div>
-                {filteredPredefined.map(p => {
+                {filteredPredefined.map((p, i) => {
+                  const idx = 1 + filteredDB.length + i;
+                  const isHighlighted = highlightIndex === idx;
                   const selected = isSet && value === p.name;
                   return (
                     <div
                       key={p.name}
+                      ref={el => { itemRefs.current[idx] = el; }}
+                      onMouseEnter={() => setHighlightIndex(idx)}
                       onClick={() => selectPredefined(p)}
                       className={`
                         flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer
-                        hover:bg-secondary/60 transition-colors
-                        ${selected ? "bg-primary/5 text-primary" : "text-foreground"}
+                        transition-colors
+                        ${isHighlighted ? "bg-accent text-accent-foreground" : selected ? "bg-primary/5 text-primary" : "text-foreground hover:bg-secondary/60"}
                       `}
                     >
                       <div className="flex items-center gap-2 min-w-0">

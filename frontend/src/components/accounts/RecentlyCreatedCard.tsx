@@ -12,6 +12,7 @@ export interface RecentlyCreatedItem {
 interface Props {
   items: RecentlyCreatedItem[];
   onSelect: (item: RecentlyCreatedItem) => void;
+  onViewAll?: () => void;
   loading?: boolean;
 }
 
@@ -23,7 +24,8 @@ function formatDate(iso: string) {
   } catch { return iso; }
 }
 
-export function RecentlyCreatedCard({ items, onSelect, loading }: Props) {
+export function RecentlyCreatedCard({ items, onSelect, onViewAll, loading }: Props) {
+  const displayItems = items.slice(0, 6);
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -41,7 +43,18 @@ export function RecentlyCreatedCard({ items, onSelect, loading }: Props) {
             <p className="text-[11px] text-muted-foreground">Newly added ledgers</p>
           </div>
         </div>
-        <Badge className="text-[10px] bg-income/15 text-income border-transparent hover:bg-income/20">New</Badge>
+        <div className="flex items-center gap-2">
+          {onViewAll && (
+            <button
+              type="button"
+              onClick={onViewAll}
+              className="text-[11px] text-primary hover:underline font-medium cursor-pointer"
+            >
+              View All
+            </button>
+          )}
+          <Badge className="text-[10px] bg-income/15 text-income border-transparent hover:bg-income/20">New</Badge>
+        </div>
       </div>
       <div className="max-h-[420px] overflow-y-auto">
         {loading && (
@@ -51,10 +64,10 @@ export function RecentlyCreatedCard({ items, onSelect, loading }: Props) {
             ))}
           </div>
         )}
-        {!loading && items.length === 0 && (
+        {!loading && displayItems.length === 0 && (
           <p className="p-4 text-xs text-muted-foreground text-center">No newly created ledgers</p>
         )}
-        {!loading && items.map((it, i) => (
+        {!loading && displayItems.map((it, i) => (
           <motion.button
             key={it.id}
             initial={{ opacity: 0, x: -6 }}

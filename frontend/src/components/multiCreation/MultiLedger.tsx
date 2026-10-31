@@ -8,14 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
-  defaultDrCrFor, isSundryGroup, natureOf, dialogForGroup,
+  defaultDrCrFor, natureOf, dialogForGroup,
   type ConfigDialogKind, type FeatureFlags,
 } from "../lib/accounting/groupBehavior";
 
 export type MultiMode = "create" | "createCredit" | "alter";
 
 export interface MultiRow {
-  id: number;
+  id: number | string;
   name: string;
   group: string;
   opening: string;
@@ -27,7 +27,7 @@ export interface MultiRow {
   extras?: Record<string, unknown>;
 }
 
-const emptyRow = (id: number, group = ""): MultiRow => ({
+const emptyRow = (id: number | string, group = ""): MultiRow => ({
   id, name: "", group, opening: "",
   drCr: group ? defaultDrCrFor(group) : "Dr",
 });
@@ -35,7 +35,7 @@ const emptyRow = (id: number, group = ""): MultiRow => ({
 interface Props {
   mode: MultiMode;
   groups: string[];
-  existing?: { id: number; name: string; group: string; openingBalance: number; balanceType: "Dr" | "Cr" }[];
+  existing?: { id: number | string; name: string; group: string; openingBalance: number; balanceType: "Dr" | "Cr" }[];
   onClose: () => void;
   onSave: (rows: MultiRow[]) => void;
   presetGroup?: string;
@@ -63,7 +63,7 @@ export function MultiLedger({
     return Array.from({ length: 5 }, (_, i) => emptyRow(i + 1, presetGroup || ""));
   });
   const [filter, setFilter] = useState("");
-  const cellRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const cellRefs = useRef<Record<string, HTMLInputElement | HTMLButtonElement | null>>({});
   const topUnderRef = useRef<HTMLInputElement>(null);
 
   // ── Auto-suggest state for the top "Under" field ───────────────
@@ -173,7 +173,7 @@ export function MultiLedger({
     focusCell(nextRow, cols[0].key);
   };
 
-  const handleCellKey = (e: KeyboardEvent<HTMLInputElement>, rowIdx: number, colIdx: number) => {
+  const handleCellKey = (e: KeyboardEvent<HTMLInputElement | HTMLButtonElement>, rowIdx: number, colIdx: number) => {
     const col = cols[colIdx];
     const nextCol = cols[colIdx + 1];
     const prevCol = cols[colIdx - 1];
@@ -219,8 +219,8 @@ export function MultiLedger({
         cells.forEach((cell, ci) => {
           const c = cols[colIdx + ci];
           if (!c) return;
-          if (c.key === "drCr") (r as any)[c.key] = cell.toLowerCase().startsWith("c") ? "Cr" : "Dr";
-          else (r as any)[c.key] = cell.trim();
+          if (c.key === "drCr") (r as unknown as Record<string, unknown>)[c.key] = cell.toLowerCase().startsWith("c") ? "Cr" : "Dr";
+          else (r as unknown as Record<string, unknown>)[c.key] = cell.trim();
         });
         if (r.group) r.drCr = defaultDrCrFor(r.group);
         next[target] = r;
@@ -387,9 +387,9 @@ export function MultiLedger({
                       <td key={c.key} className="px-1 py-1 relative">
                         {c.key === "drCr" ? (
                           <button
-                            ref={el => (cellRefs.current[`${realIdx}-${c.key}`] = el as any)}
+                            ref={el => (cellRefs.current[`${realIdx}-${c.key}`] = el)}
                             onClick={() => setCell(realIdx, "drCr", row.drCr === "Dr" ? "Cr" : "Dr")}
-                            onKeyDown={(e: any) => {
+                            onKeyDown={(e: React.KeyboardEvent<HTMLButtonElement>) => {
                               if (e.key === " " || e.key === "Enter") {
                                 e.preventDefault();
                                 setCell(realIdx, "drCr", row.drCr === "Dr" ? "Cr" : "Dr");
@@ -414,13 +414,13 @@ export function MultiLedger({
                           <Input
                             ref={el => { cellRefs.current[`${realIdx}-${c.key}`] = el; }}
                             type={c.type || "text"}
-                            value={(row as any)[c.key]}
+                            value={String((row as unknown as Record<string, unknown>)[c.key] ?? "")}
                             onChange={e => setCell(realIdx, c.key, e.target.value)}
                             onKeyDown={e => handleCellKey(e, realIdx, cIdx)}
                             onPaste={e => handlePaste(e, realIdx, cIdx)}
                             placeholder={c.required ? "Required" : ""}
                             className={`h-8 text-sm border-transparent focus:border-primary focus:ring-1 focus:ring-primary/30 rounded-md ${c.type === "number" ? "font-mono tabular-nums text-right" : ""
-                              } ${c.required && !(row as any)[c.key] && row.name ? "border-expense/40" : ""}`}
+                              } ${c.required && !(row as unknown as Record<string, unknown>)[c.key] && row.name ? "border-expense/40" : ""}`}
                           />
                         )}
                       </td>
@@ -703,7 +703,7 @@ function BillwiseDialog({
   const [bills, setBills] = useState<BillRow[]>([
     { id: 1, date: today, reference: "", dueDays: "", amount: "", drCr: row.drCr },
   ]);
-  const refs = useRef<Record<string, HTMLInputElement | null>>({});
+  const refs = useRef<Record<string, HTMLInputElement | HTMLButtonElement | null>>({});
   const fieldOrder: (keyof BillRow)[] = ["date", "reference", "dueDays", "amount", "drCr"];
 
   useEffect(() => { setTimeout(() => refs.current["0-reference"]?.focus(), 30); }, []);
@@ -720,7 +720,7 @@ function BillwiseDialog({
   const focusBill = (i: number, k: keyof BillRow) =>
     setTimeout(() => refs.current[`${i}-${k}`]?.focus(), 0);
 
-  const handleKey = (e: KeyboardEvent<HTMLInputElement>, rowIdx: number, fIdx: number) => {
+  const handleKey = (e: KeyboardEvent<HTMLInputElement | HTMLButtonElement>, rowIdx: number, fIdx: number) => {
     if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
       e.preventDefault();
       const next = fieldOrder[fIdx + 1];
@@ -784,9 +784,9 @@ function BillwiseDialog({
                     <td key={k} className="p-1">
                       {k === "drCr" ? (
                         <button
-                          ref={el => (refs.current[`${i}-${k}`] = el as any)}
+                          ref={el => (refs.current[`${i}-${k}`] = el)}
                           onClick={() => setBill(i, "drCr", b.drCr === "Dr" ? "Cr" : "Dr")}
-                          onKeyDown={(e: any) => {
+                          onKeyDown={(e: React.KeyboardEvent<HTMLButtonElement>) => {
                             if (e.key === " " || e.key === "Enter") {
                               e.preventDefault();
                               setBill(i, "drCr", b.drCr === "Dr" ? "Cr" : "Dr");

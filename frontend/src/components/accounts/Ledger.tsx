@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus, Search, ChevronDown, ChevronRight, Settings, Save, Trash2,
-  Eye, ArrowLeft, ArrowRight, Keyboard, Building2, Calendar, LayoutList,
+  Search, ChevronDown, ChevronRight, Settings, Save,
+  Eye, ArrowLeft, ArrowRight, Building2, Calendar, LayoutList,
   TreePine, RefreshCw, FileText, Layers,
 } from "lucide-react";
 import { Input } from "../ui/input";
@@ -10,16 +10,15 @@ import { Button } from "../ui/button";
 import { DatePicker } from "../ui/date-picker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Switch } from "../ui/switch";
 import { Label } from "../ui/label";
 import { Badge } from "../ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Skeleton } from "../ui/skeleton";
 import { toast } from "sonner";
-import { MultiLedger, MultiLedgerSelector, MultiMode, MultiRow, SelectorChoice } from "../multiCreation/MultiLedger";
+import { MultiLedger, MultiLedgerSelector, MultiRow, SelectorChoice } from "../multiCreation/MultiLedger";
 import { AdvancedLedgerFormPanel, AdvancedLedgerForm, UnderGroupOption } from "../accounts/AdvancedLedgerDialog";
 import { ConfigDialog, ConfigProvider } from "./ConfigDialog";
-import { getUnderDropdown, getLedgers as apiGetLedgers, createLedger as apiCreateLedger, updateLedger as apiUpdateLedger, multiCreateLedger as apiMultiCreateLedger, getRecentledgers, Recentledger, getLedgerDetails as apiGetLedgerDetails, LedgerDetails, UnderDropdownItem } from "../../api/accounting";
+import { getUnderDropdown, getLedgers as apiGetLedgers, createLedger as apiCreateLedger, updateLedger as apiUpdateLedger, multiCreateLedger as apiMultiCreateLedger, getRecentledgers, Recentledger, getLedgerDetails as apiGetLedgerDetails, LedgerDetails, UnderDropdownItem, type Ledger } from "../../api/accounting";
 import { useAuth } from "@/contexts/AuthContext";
 import { RecentActivityCard, RecentActivityItem } from "./RecentActivityCard";
 import { RecentlyCreatedCard, RecentlyCreatedItem } from "./RecentlyCreatedCard";
@@ -46,23 +45,82 @@ function ledgerFormToPayload(l: AdvancedLedgerForm, finance_id: number | string)
     effective_date: l.effectiveDate || null,
     freeze_balance: l.freezeBalance ? 1 : 0,
     inv_values_affected: l.inventoryAffected ? 1 : 0,
+    type_of_ledger: l.typeOfLedger || "Not Applicable",
+    rounding_method: l.roundingMethod || "Not Applicable",
+    rounding_limit: parseFloat(l.roundingLimit) || 0,
+    method_to_allocate: l.methodToAllocate ? 1 : 0,
+    is_additional_cost: l.useAsAdditionalCost ? 1 : 0,
+    cost_centre_applicable: l.maintainCostCenters ? 1 : 0,
+    cost_centre_allocation: l.costCentreAllocation ? 1 : 0,
+    ledger_flushing_method: l.ledgerFlushingMethod || "Default",
+    include_in_buyer_ledger: l.includeInBuyerLedger ? 1 : 0,
+    include_in_seller_ledger: l.includeInSellerLedger ? 1 : 0,
+
+    // Bill-wise
     maintainBillWise: l.maintainBillWise,
     defaultCreditPeriod: l.defaultCreditPeriod,
     checkCreditDaysDuringEntry: l.checkCreditDaysDuringEntry,
+
+    // Mailing
+    showMailingDetails: l.showMailingDetails,
     mailingName: l.mailingName, addr1: l.addr1, addr2: l.addr2, addr3: l.addr3, addr4: l.addr4,
-    city: l.city, state: l.state, pincode: l.pincode, country: l.country,
+    city: l.city, district: l.district, state: l.state, pincode: l.pincode, country: l.country,
     provideContactDetails: l.provideContactDetails, contactPerson: l.contactPerson,
     telephone: l.telephone, mobile: l.mobile, primaryMobile: l.primaryMobile,
     email: l.email, website: l.website,
+
+    // Banking
     provideBankDetails: l.provideBankDetails, accountHolderName: l.accountHolderName,
     bankName: l.bankName, accountNumber: l.accountNumber, ifsc: l.ifsc, swift: l.swift,
     branch: l.branch, accountType: l.accountType,
+    bankTransactionTypes: l.bankTransactionTypes,
+    txnConfigs: l.txnConfigs,
+
+    // Tax Registration & Deductions
     panIt: l.panIt, gstin: l.gstin, registrationType: l.registrationType,
+    assesseeOtherTerritory: l.assesseeOtherTerritory,
+    territory: l.territory,
+    tanNumber: l.tanNumber,
+    deductorCategory: l.deductorCategory,
+    collectionAccountNo: l.collectionAccountNo,
     taxType: l.taxType,
+    deducteeType: l.deducteeType,
+    buyerType: l.buyerType,
+
+    // Statutory
     msmeRegistered: l.msmeRegistered, udyamNumber: l.udyamNumber,
     einvoiceApplicable: l.einvoiceApplicable, defaultSupplyType: l.defaultSupplyType,
     ewayBillApplicable: l.ewayBillApplicable, defaultTransportMode: l.defaultTransportMode,
     defaultDistance: l.defaultDistance,
+
+    // Tax Config (GST)
+    isGstApplicable: l.isGstApplicable,
+    setAlterGst: l.setAlterGst,
+    gstDescription: l.gstDescription,
+    gstApplicableFrom: l.gstApplicableFrom,
+    gstHsnSacCode: l.gstHsnSacCode,
+    gstTypeOfSupply: l.gstTypeOfSupply,
+    gstTaxability: l.gstTaxability,
+    gstIgstRate: l.gstIgstRate,
+    gstCgstRate: l.gstCgstRate,
+    gstSgstRate: l.gstSgstRate,
+    gstCessRate: l.gstCessRate,
+    gstCessType: l.gstCessType,
+    gstReverseCharge: l.gstReverseCharge,
+    includeInAssessable: l.includeInAssessable,
+    cessPerUnit: l.cessPerUnit,
+    cessUnit: l.cessUnit,
+    gstStatus: l.gstStatus,
+
+    // Bank Config (Reconciliation / Cheque printing)
+    effectiveDateForReconciliation: l.effectiveDateForReconciliation,
+    setAlterChequeBooks: l.setAlterChequeBooks,
+    chequeBookName: l.chequeBookName,
+    chequeFrom: l.chequeFrom,
+    chequeTo: l.chequeTo,
+    chequeNumberLength: l.chequeNumberLength,
+    enableChequePrinting: l.enableChequePrinting,
+    chequePrintBank: l.chequePrintBank,
   };
 }
 
@@ -79,6 +137,8 @@ function ledgerDetailsToForm(d: LedgerDetails): Partial<AdvancedLedgerForm> {
   const tx = d.tax || {};
   const st = d.statutory || {};
   const bw = d.billwise || {};
+  const tc = d.taxConfig || {};
+  const bc = d.bankConfig || {};
 
   const s = (v: unknown) => (v === null || v === undefined ? "" : String(v));
   const b = (v: unknown) => v === 1 || v === true;
@@ -88,7 +148,7 @@ function ledgerDetailsToForm(d: LedgerDetails): Partial<AdvancedLedgerForm> {
     alias: s(l.alias),
     aliasRegional: s(l.alias_regional),
     group: g ? s(g.group_name) : "",
-    groupId: g ? (g.group_id ?? null) : null,
+    groupId: g ? ((g.group_id as string | number | null | undefined) ?? null) : null,
     groupSource: g ? (g.source as "system" | "custom" | null) : null,
     reportingUnder: s(l.reporting_under),
     inactive: b(l.inactive),
@@ -146,6 +206,31 @@ function ledgerDetailsToForm(d: LedgerDetails): Partial<AdvancedLedgerForm> {
     maintainBillWise: b(bw.maintain_bill_wise),
     defaultCreditPeriod: s(bw.default_credit_period) || "30",
     checkCreditDaysDuringEntry: b(bw.check_credit_days_during_entry),
+
+    // Tax Config
+    isGstApplicable: (tc.gst_applicable as AdvancedLedgerForm["isGstApplicable"]) || "Undefined",
+    setAlterGst: b(tc.set_alter_gst_details),
+    gstDescription: s(tc.gst_description),
+    gstApplicableFrom: tc.applicable_from ? String(tc.applicable_from).slice(0, 10) : "",
+    gstHsnSacCode: s(tc.hsn_sac_code),
+    gstTypeOfSupply: (tc.type_of_supply as AdvancedLedgerForm["gstTypeOfSupply"]) || "Goods",
+    gstTaxability: (tc.taxability as AdvancedLedgerForm["gstTaxability"]) || "Taxable",
+    gstIgstRate: s(tc.igst_rate),
+    gstCgstRate: s(tc.cgst_rate),
+    gstSgstRate: s(tc.sgst_rate),
+    gstCessRate: s(tc.cess_rate),
+    gstCessType: (tc.cess_type as AdvancedLedgerForm["gstCessType"]) || "Valorem",
+    gstReverseCharge: b(tc.reverse_charge),
+    includeInAssessable: b(tc.include_in_assessable),
+    cessPerUnit: s(tc.cess_per_unit),
+    cessUnit: s(tc.cess_unit),
+    gstStatus: (tc.gst_status as AdvancedLedgerForm["gstStatus"]) || "Active",
+
+    // Bank Config
+    effectiveDateForReconciliation: bc.recon_effective_date ? String(bc.recon_effective_date).slice(0, 10) : "",
+    setAlterChequeBooks: b(bc.set_alter_cheque_books),
+    enableChequePrinting: b(bc.enable_cheque_printing),
+    chequePrintBank: s(bc.cheque_print_bank_name),
   };
 }
 
@@ -186,11 +271,12 @@ const DEFAULT_GROUPS = [
 
 // ─── Seed ledgers ───
 interface LedgerEntry {
-  id: number;
+  id: number | string;
   name: string;
   group: string;          // display name — used for flat/ledger view
   groupId: string | number | null;    // acc_group_master.id  OR  acc_ledger_groups.id
   groupSource: "system" | "custom" | null; // which table groupId refers to
+  nature?: string;
   openingBalance: number;
   balanceType: "Dr" | "Cr";
   effectiveDate: string;
@@ -198,7 +284,7 @@ interface LedgerEntry {
   creditPeriod?: number;
   address?: string;
   contact?: string;
-  createdAt: number;
+  createdAt: number | string;
 }
 
 
@@ -309,16 +395,6 @@ const HIER_NATURE_COLORS: Record<HierNature, string> = {
   Expense: "border-amber-400/40 text-amber-600 dark:text-amber-400",
 };
 
-// ─── Config options ───
-interface ConfigState {
-  billWise: boolean;
-  gst: boolean;
-  costCenters: boolean;
-  multipleAddresses: boolean;
-  bankDetails: boolean;
-  billByBill: boolean;
-}
-
 // ─── View period ───
 interface PeriodState {
   from: string;
@@ -376,7 +452,30 @@ function savePref(key: string, value: unknown) {
 }
 
 // Helper to find the top-level parent (root category) for any group
-function getGroupCategory(groupName: string): "ASSETS" | "LIABILITIES" | "INCOME" | "EXPENSES" | "OTHERS" {
+function getGroupCategory(
+  groupName: string,
+  knownNature?: string,
+  viewGroups?: UnderDropdownItem[]
+): "ASSETS" | "LIABILITIES" | "INCOME" | "EXPENSES" | "OTHERS" {
+  if (knownNature) {
+    const norm = knownNature.trim().toUpperCase();
+    if (norm === "ASSETS") return "ASSETS";
+    if (norm === "LIABILITIES") return "LIABILITIES";
+    if (norm === "INCOME") return "INCOME";
+    if (norm === "EXPENSES" || norm === "EXPENSE") return "EXPENSES";
+  }
+
+  if (viewGroups && viewGroups.length > 0) {
+    const vg = viewGroups.find(g => g.group_name.toLowerCase() === groupName.toLowerCase());
+    if (vg?.nature) {
+      const norm = vg.nature.trim().toUpperCase();
+      if (norm === "ASSETS") return "ASSETS";
+      if (norm === "LIABILITIES") return "LIABILITIES";
+      if (norm === "INCOME") return "INCOME";
+      if (norm === "EXPENSES" || norm === "EXPENSE") return "EXPENSES";
+    }
+  }
+
   const findNode = (name: string) => HIER_GROUPS.find(g => g.name.toLowerCase() === name.toLowerCase());
   let current = findNode(groupName);
   if (!current) return "OTHERS";
@@ -411,7 +510,7 @@ export default function Ledger() {
   // Ledger currently being edited via "Recently Created" (fetched by id from
   // GET /ledger/:id/details). Non-null => AdvancedLedgerFormPanel is in edit
   // mode: "Under" is locked and Save calls updateLedger instead of createLedger.
-  const [editingLedgerId, setEditingLedgerId] = useState<number | null>(null);
+  const [editingLedgerId, setEditingLedgerId] = useState<number | string | null>(null);
   const [editingLedgerInitial, setEditingLedgerInitial] = useState<Partial<AdvancedLedgerForm> | undefined>(undefined);
   const [editingLedgerLoading, setEditingLedgerLoading] = useState(false);
 
@@ -427,6 +526,11 @@ export default function Ledger() {
   const { currentFinance } = useAuth();
   const financeId = currentFinance?.id ?? 0;
 
+  const activeFinanceIdRef = useRef(financeId);
+  useEffect(() => {
+    activeFinanceIdRef.current = financeId;
+  }, [financeId]);
+
   // On mount: fetch all available parent groups (system + custom) from the DB
   // and merge with DEFAULT_GROUPS so the "Under" autocomplete always includes
   // both Tally predefined groups and any custom groups the user has created.
@@ -434,7 +538,7 @@ export default function Ledger() {
     getUnderDropdown()
       .then(res => {
         if (res.data?.success && Array.isArray(res.data?.data)) {
-          const opts: UnderGroupOption[] = res.data.data.map((g: any) => ({
+          const opts: UnderGroupOption[] = res.data.data.map((g: UnderDropdownItem) => ({
             id: g.id,
             group_name: g.group_name as string,
             source: g.source as "system" | "custom",
@@ -451,26 +555,35 @@ export default function Ledger() {
   }, []);
 
   // Maps a backend Recentledger record onto the shape RecentlyCreatedCard expects
-  const mapRecentLedger = (r: Recentledger): RecentlyCreatedItem => ({
-    id: r.id,
-    name: r.ledger_name,
-    group: r.reporting_under || (r.group as any)?.group_name || (r.group as any)?.name || "—",
-    createdAt: r.created_at || new Date().toISOString(),
-  });
+  const mapRecentLedger = (r: Recentledger): RecentlyCreatedItem => {
+    const grp = r.group as Record<string, string> | undefined;
+    return {
+      id: r.id,
+      name: r.ledger_name,
+      group: r.reporting_under || grp?.group_name || grp?.name || "—",
+      createdAt: r.created_at || new Date().toISOString(),
+    };
+  };
 
   // Fetches the most recently created ledgers for the active company from the DB
   const fetchRecentCreated = useCallback(() => {
     if (!financeId) return;
+    const reqFinanceId = financeId;
     setRecentCreatedLoading(true);
     getRecentledgers()
       .then(res => {
+        if (activeFinanceIdRef.current !== reqFinanceId) return;
         if (res.data?.success && Array.isArray(res.data?.data)) {
           setRecentCreated(res.data.data.map(mapRecentLedger));
-          console.log('recentledgerCreation:', res.data.data)
+          console.log('recentledgerCreation:', res.data.data);
         }
       })
       .catch(() => { /* silently keep whatever list we already have */ })
-      .finally(() => setRecentCreatedLoading(false));
+      .finally(() => {
+        if (activeFinanceIdRef.current === reqFinanceId) {
+          setRecentCreatedLoading(false);
+        }
+      });
   }, [financeId]);
 
   // On mount, and whenever the active company changes, refresh the "Recently Created" list
@@ -482,12 +595,15 @@ export default function Ledger() {
   // Runs whenever the view tab is opened or financeId changes.
   const fetchViewData = useCallback(async () => {
     if (!financeId) return;
+    const reqFinanceId = financeId;
     setViewDataLoading(true);
     try {
       const [ledgersRes, groupsRes] = await Promise.all([
         apiGetLedgers(financeId),
         getUnderDropdown(),
       ]);
+
+      if (activeFinanceIdRef.current !== reqFinanceId) return;
 
       if (groupsRes.data?.success && Array.isArray(groupsRes.data?.data)) {
         setViewGroups(groupsRes.data.data);
@@ -497,13 +613,14 @@ export default function Ledger() {
         // Map the raw API rows onto LedgerEntry so the rest of the view
         // layer (flat table, hierarchy tree, day-wise drill-down) can
         // consume a single unified shape.
-        const mapped: LedgerEntry[] = ledgersRes.data.data.map((r: any) => ({
+        const mapped: LedgerEntry[] = ledgersRes.data.data.map((r: Ledger) => ({
           id: r.id,
           name: r.ledger_name,
           group: r.group_name || r.reporting_under || "—",
           groupId: r.master_group_id ?? r.group_id ?? null,
           groupSource: r.group_source ?? (r.master_group_id ? "system" : r.group_id ? "custom" : null),
-          openingBalance: r.opening_balance ?? 0,
+          nature: r.nature ?? undefined,
+          openingBalance: Number(r.opening_balance) || 0,
           balanceType: (r.ob_type === "Cr" ? "Cr" : "Dr") as "Dr" | "Cr",
           effectiveDate: r.effective_date ? String(r.effective_date).slice(0, 10) : "",
           createdAt: 0,
@@ -513,7 +630,9 @@ export default function Ledger() {
     } catch {
       // silently keep stale data — toast is noisy for a background refresh
     } finally {
-      setViewDataLoading(false);
+      if (activeFinanceIdRef.current === reqFinanceId) {
+        setViewDataLoading(false);
+      }
     }
   }, [financeId]);
 
@@ -523,7 +642,7 @@ export default function Ledger() {
 
   // Fetches full details for a ledger by id and loads it into the Advanced
   // Ledger form for editing (used by RecentlyCreatedCard's onSelect).
-  const openLedgerForEdit = useCallback((ledgerId: number) => {
+  const openLedgerForEdit = useCallback((ledgerId: string | number) => {
     if (!financeId) return;
     setEditingLedgerLoading(true);
     apiGetLedgerDetails(ledgerId)
@@ -538,8 +657,8 @@ export default function Ledger() {
           toast.error("Could not load ledger details");
         }
       })
-      .catch((err: any) => {
-        toast.error(err?.response?.data?.message || "Could not load ledger details");
+      .catch((err: { response?: { data?: { message?: string } }; message?: string }) => {
+        toast.error(err?.response?.data?.message || err?.message || "Could not load ledger details");
       })
       .finally(() => setEditingLedgerLoading(false));
   }, [financeId]);
@@ -547,8 +666,7 @@ export default function Ledger() {
   // Form state
   const [name, setName] = useState("");
   const [group, setGroup] = useState("");
-  const [groupSearch, setGroupSearch] = useState("");
-  const [showGroupDropdown, setShowGroupDropdown] = useState(false);
+  const [, setGroupSearch] = useState("");
   const [openingBalance, setOpeningBalance] = useState("");
   const [balanceType, setBalanceType] = useState<"Dr" | "Cr">("Dr");
   const [effectiveDate, setEffectiveDate] = useState("2025-04-01");
@@ -560,9 +678,8 @@ export default function Ledger() {
   const [contact, setContact] = useState("");
 
   // Dialogs
-  const [showConfig, setShowConfig] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
-  const [showSundryDialog, setShowSundryDialog] = useState(false);
+  const [, setShowSundryDialog] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [showConfigDialog, setShowConfigDialog] = useState(false);
 
@@ -609,17 +726,12 @@ export default function Ledger() {
   // Multi-ledger
   const [multiSelector, setMultiSelector] = useState(false);
   const [multiChoice, setMultiChoice] = useState<SelectorChoice | null>(null);
-  const [showAdvLedger, setShowAdvLedger] = useState(false);
+  const [, setShowAdvLedger] = useState(false);
 
   // Refs
   const nameRef = useRef<HTMLInputElement>(null);
 
   const isSundryGroup = group === "Sundry Debtors" || group === "Sundry Creditors";
-
-  const filteredGroups = useMemo(() =>
-    groups.filter(g => g.toLowerCase().includes(groupSearch.toLowerCase())),
-    [groups, groupSearch]
-  );
 
   const totalDr = useMemo(() => ledgers.filter(l => l.balanceType === "Dr").reduce((s, l) => s + l.openingBalance, 0), [ledgers]);
   const totalCr = useMemo(() => ledgers.filter(l => l.balanceType === "Cr").reduce((s, l) => s + l.openingBalance, 0), [ledgers]);
@@ -643,10 +755,10 @@ export default function Ledger() {
       );
     }
     if (category !== "ALL") {
-      list = list.filter(l => getGroupCategory(l.group) === category);
+      list = list.filter(l => getGroupCategory(l.group, l.nature, viewGroups) === category);
     }
     return list;
-  }, [viewLedgers, viewSearch, category]);
+  }, [viewLedgers, viewSearch, category, viewGroups]);
 
   // ─── Persist view preferences ───────────────────────────────────────────────
   useEffect(() => { savePref("ledger:viewMode", viewMode); }, [viewMode]);
@@ -663,7 +775,7 @@ export default function Ledger() {
 
   useEffect(() => {
     if (activeTab === "view") triggerViewLoading();
-  }, [selectedCompany, period, viewMode, category, activeTab]);
+  }, [selectedCompany, period, viewMode, category, activeTab, triggerViewLoading]);
 
   // ─── Load ledger into form ───────────────────────────────────────────────────
   const loadLedger = useCallback((index: number) => {
@@ -826,8 +938,9 @@ export default function Ledger() {
         setTimeout(() => nameRef.current?.focus(), 100);
         toast.success(`Creating ledger under "${preset}"`);
       }
-    } catch { }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const selectedLedgerForForm = useMemo(() => {
@@ -964,8 +1077,9 @@ export default function Ledger() {
                     try {
                       payload = ledgerFormToPayload(l, financeId);
                       console.log('Ledger Payload:', payload)
-                    } catch (err: any) {
-                      toast.error(err.message || "Select a valid Under group before saving");
+                    } catch (err: unknown) {
+                      const msg = err instanceof Error ? err.message : "Select a valid Under group before saving";
+                      toast.error(msg);
                       return;
                     }
 
@@ -979,8 +1093,9 @@ export default function Ledger() {
                         const res = await apiCreateLedger(payload);
                         if (!res.data?.success) throw new Error(res.data?.message || "Failed to create ledger");
                       }
-                    } catch (err: any) {
-                      toast.error(err?.response?.data?.message || err.message || "Failed to save ledger");
+                    } catch (err: unknown) {
+                      const apiErr = err as { response?: { data?: { message?: string } }; message?: string };
+                      toast.error(apiErr?.response?.data?.message || apiErr?.message || "Failed to save ledger");
                       return;
                     }
 
@@ -1036,7 +1151,8 @@ export default function Ledger() {
                 <RecentlyCreatedCard
                   items={recentCreated}
                   loading={recentCreatedLoading || editingLedgerLoading}
-                  onSelect={(it) => openLedgerForEdit(Number(it.id))}
+                  onSelect={(it) => openLedgerForEdit(it.id)}
+                  onViewAll={() => setActiveTab("view")}
                 />
                 <RecentActivityCard
                   items={SAMPLE_RECENT_ACTIVITY}
@@ -1424,21 +1540,40 @@ export default function Ledger() {
             presetGroup={multiChoice.presetGroup}
             titleOverride={multiChoice.titleOverride}
             groups={groups}
-            existing={ledgers}
+            existing={viewLedgers.length ? viewLedgers : ledgers}
             onClose={() => setMultiChoice(null)}
             onSave={async (rows: MultiRow[]) => {
               if (multiChoice.mode === "alter") {
-                setLedgers(prev => prev.map(l => {
-                  const upd = rows.find(r => r.id === l.id);
-                  if (!upd) return l;
-                  return {
-                    ...l,
-                    name: upd.name.trim() || l.name,
-                    group: upd.group.trim() || l.group,
-                    openingBalance: parseFloat(upd.opening) || 0,
-                    balanceType: upd.drCr,
-                  };
-                }));
+                try {
+                  const updates = rows.filter(r => r.id && r.name.trim());
+                  for (const r of updates) {
+                    const groupName = (r.group.trim() || multiChoice.presetGroup || "").trim();
+                    const match = groupOptions.find(g => g.group_name.toLowerCase() === groupName.toLowerCase());
+                    const payload: Record<string, unknown> = {
+                      ledger_name: r.name.trim(),
+                      opening_balance: parseFloat(r.opening) || 0,
+                      ob_type: r.drCr,
+                    };
+                    if (match) {
+                      payload.under_id = match.id;
+                      payload.under_source = match.source;
+                    }
+                    if (r.creditLimit !== undefined) {
+                      payload.creditLimit = parseFloat(r.creditLimit) || null;
+                    }
+                    if (r.dueDays !== undefined) {
+                      payload.defaultCreditPeriod = r.dueDays;
+                    }
+                    await apiUpdateLedger(r.id, financeId, payload);
+                  }
+                  toast.success(`${updates.length} ledger(s) updated`);
+                  fetchViewData();
+                  fetchRecentCreated();
+                  setMultiChoice(null);
+                } catch (err: unknown) {
+                  const apiErr = err as { response?: { data?: { message?: string } }; message?: string };
+                  toast.error(apiErr?.response?.data?.message || apiErr?.message || "Failed to update ledgers");
+                }
               } else {
                 // Resolve each row's group name → { under_id, under_source } so the
                 // backend can apply the same mutually-exclusive group_id /
@@ -1454,6 +1589,9 @@ export default function Ledger() {
                     ob_type: r.drCr,
                     under_id: match?.id,
                     under_source: match?.source,
+                    creditLimit: r.creditLimit ? parseFloat(r.creditLimit) : undefined,
+                    creditDays: r.dueDays ? parseInt(r.dueDays, 10) : undefined,
+                    maintainBillWise: Boolean(r.creditLimit || r.dueDays),
                   };
                 });
 
@@ -1463,10 +1601,11 @@ export default function Ledger() {
                 }
 
                 try {
-                  const res = await apiMultiCreateLedger(financeId, apiRows as any);
+                  const res = await apiMultiCreateLedger(financeId, apiRows as unknown as Parameters<typeof apiMultiCreateLedger>[1]);
                   if (!res.data?.success) throw new Error(res.data?.message || "Failed to create ledgers");
-                } catch (err: any) {
-                  toast.error(err?.response?.data?.message || err.message || "Failed to create ledgers");
+                } catch (err: unknown) {
+                  const apiErr = err as { response?: { data?: { message?: string } }; message?: string };
+                  toast.error(apiErr?.response?.data?.message || apiErr?.message || "Failed to create ledgers");
                   return;
                 }
 
@@ -1488,6 +1627,8 @@ export default function Ledger() {
                 setLedgers(prev => [...prev, ...newOnes]);
                 toast.success(`${newOnes.length} ledger(s) created`);
                 fetchRecentCreated();
+                fetchViewData();
+                setMultiChoice(null);
               }
             }}
           />
@@ -1671,7 +1812,7 @@ export default function Ledger() {
 /** A single node in the live group tree */
 interface LiveGroup {
   key: string;                       // "<source>:<id>" — unique within the tree
-  id: number;
+  id: string | number;
   source: "system" | "custom";
   name: string;
   nature: HierNature;
@@ -1694,6 +1835,16 @@ function toLiveGroup(g: UnderDropdownItem): LiveGroup {
     parentKey,
   };
 }
+
+// Category-based root filter using nature field from the API
+const CAT_NATURE: Record<string, HierNature | null> = {
+  ASSETS: "Assets",
+  LIABILITIES: "Liabilities",
+  INCOME: "Income",
+  EXPENSES: "Expense",
+  OTHERS: null,
+  ALL: null,
+};
 
 function LedgerHierarchyView({
   ledgers,
@@ -1764,16 +1915,6 @@ function LedgerHierarchyView({
     return (childMap[key] || []).some(c => hasMatch(c.key));
   }, [q, liveGroups, ledgersByGroupKey, childMap]);
 
-  // Category-based root filter using nature field from the API
-  const catNature: Record<string, HierNature | null> = {
-    ASSETS: "Assets",
-    LIABILITIES: "Liabilities",
-    INCOME: "Income",
-    EXPENSES: "Expense",
-    OTHERS: null,
-    ALL: null,
-  };
-
   const visibleRoots = useMemo(() => {
     return roots.filter(r => {
       if (category === "ALL") return hasMatch(r.key);
@@ -1781,7 +1922,7 @@ function LedgerHierarchyView({
         const known: HierNature[] = ["Assets", "Liabilities", "Income", "Expense"];
         return !known.includes(r.nature) && hasMatch(r.key);
       }
-      const needed = catNature[category];
+      const needed = CAT_NATURE[category];
       return r.nature === needed && hasMatch(r.key);
     });
   }, [roots, category, hasMatch]);
@@ -1850,6 +1991,9 @@ function LedgerTreeNode({
   search: string;
   hasMatch: (key: string) => boolean;
 }) {
+  const [open, setOpen] = useState(level === 0 || !!search);
+  useEffect(() => { if (search) setOpen(true); }, [search]);
+
   const group = liveGroups[groupKey];
   if (!group) return null;
 
@@ -1863,9 +2007,6 @@ function LedgerTreeNode({
 
   const visibleChildren = children.filter(c => hasMatch(c.key));
   const hasContent = visibleChildren.length > 0 || allLedgers.length > 0;
-
-  const [open, setOpen] = useState(level === 0 || !!search);
-  useEffect(() => { if (search) setOpen(true); }, [search]);
 
   if (q && !hasMatch(groupKey)) return null;
 

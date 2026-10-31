@@ -115,11 +115,24 @@ db.execute = async function (text, params) {
 db.getConnection = async function () {
   const client = await db.connect();
   const origClientQuery = client.query.bind(client);
+  const origRelease = client.release.bind(client);
 
-  client.query = async function (text, params) {
+  client.query = function (text, params, callback) {
+    if (typeof params === 'function') {
+      callback = params;
+      params = undefined;
+    }
     const norm = normalizeQuery(text, params);
-    const res = await (norm.params !== undefined ? origClientQuery(norm.text, norm.params) : origClientQuery(norm.text));
-    return wrapQueryResult(res);
+    if (typeof callback === 'function') {
+      return origClientQuery(norm.text, norm.params, (err, res) => {
+        if (err) return callback(err);
+        return callback(null, wrapQueryResult(res));
+      });
+    }
+    return (async () => {
+      const res = await (norm.params !== undefined ? origClientQuery(norm.text, norm.params) : origClientQuery(norm.text));
+      return wrapQueryResult(res);
+    })();
   };
 
   client.execute = async function (text, params) {
@@ -138,6 +151,16 @@ db.getConnection = async function () {
 
   client.rollback = async function () {
     return origClientQuery('ROLLBACK');
+  };
+
+  client.release = function (destroy) {
+    client.query = origClientQuery;
+    client.release = origRelease;
+    delete client.execute;
+    delete client.beginTransaction;
+    delete client.commit;
+    delete client.rollback;
+    return origRelease(destroy);
   };
 
   return client;

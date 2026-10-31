@@ -1,23 +1,24 @@
 import apiClient from './apiClient';
 
 export interface Ledger {
-  id: number;
-  finance_id: number;
+  id: string | number;
+  finance_id: string | number;
   ledger_name: string;
   alias: string | null;
   alias_regional: string | null;
-  group_id: number | null;          // ← set when Under = custom group
-  master_group_id: number | null;   // ← set when Under = master/system group
+  group_id: string | number | null;          // ← set when Under = custom group
+  master_group_id: string | number | null;   // ← set when Under = master/system group
   group_source?: 'system' | 'custom';
   group_name?: string;
+  nature?: string | null;                    // ← COALESCE(g.nature, gm.nature) from listLedgers
   reporting_under?: string | null;
-  inactive: number;
+  inactive: boolean | number;
   opening_balance: number;
   ob_type: 'Dr' | 'Cr';
   effective_date?: string | null;
-  freeze_balance?: number;
-  is_active: number;
-  is_bank_account: number;
+  freeze_balance?: boolean | number;
+  is_active: boolean | number;
+  is_bank_account: boolean | number;
   opening_dr: number;
   opening_cr: number;
   period_dr: number;
@@ -27,8 +28,8 @@ export interface Ledger {
 }
 
 export interface Recentledger {
-  id: number;
-  finance_id: number;
+  id: string | number;
+  finance_id: string | number;
   ledger_name: string;
   alias: string | null;
   alias_regional: string | null;
@@ -41,21 +42,23 @@ export interface Recentledger {
   inactive: boolean;
   is_bank_account: boolean;
   is_system: boolean;
-  group: Record<string, any> | null;
+  group: Record<string, unknown> | null;
   created_by: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
 
 export interface LedgerDetails {
-  ledger: Record<string, any>;
-  group: Record<string, any> | null;
-  balance: Record<string, any> | null;
-  mailing: Record<string, any> | null;
-  banking: Record<string, any> | null;
-  tax: Record<string, any> | null;
-  statutory: Record<string, any> | null;
-  billwise: Record<string, any> | null;
+  ledger: Record<string, unknown>;
+  group: Record<string, unknown> | null;
+  balance: Record<string, unknown> | null;
+  mailing: Record<string, unknown> | null;
+  banking: Record<string, unknown> | null;
+  tax: Record<string, unknown> | null;
+  statutory: Record<string, unknown> | null;
+  billwise: Record<string, unknown> | null;
+  taxConfig?: Record<string, unknown> | null;
+  bankConfig?: Record<string, unknown> | null;
 }
 
 /** Identifies a single "Under" selection unambiguously for create/update payloads. */
@@ -185,35 +188,35 @@ export const getLedgers = (finance_id: string | number, financial_year?: string)
 export const getRecentledgers = () =>
   apiClient.get<{ success: boolean; data: Recentledger[] }>('/ledger/recent-ledgers');
 
-export const getLedgerDetails = (ledgerId: number) =>
+export const getLedgerDetails = (ledgerId: string | number) =>
   apiClient.get<{ success: boolean; data: LedgerDetails }>(`/ledger/${ledgerId}/details`);
 
-export const getLedgerGroups = (finance_id: number) =>
+export const getLedgerGroups = (finance_id?: string | number) =>
   apiClient.get<{ success: boolean; data: LedgerGroup[] }>('/ledger/groups', {
-    params: { finance_id }
+    params: finance_id ? { finance_id } : undefined
   });
 
 export const createLedgerGroup = (payload: {
-  finance_id: number;
+  finance_id?: string | number;
   group_name: string;
-  parent_group_id?: number | null;
+  parent_group_id?: string | number | null;
   nature: string;
   description?: string;
   created_by?: number;
-}) => apiClient.post<{ success: boolean; id: number }>('/ledger/groups/create', payload);
+}) => apiClient.post<{ success: boolean; id: string | number }>('/ledger/groups/create', payload);
 
-export const getGroupLedgers = (groupId: number, finance_id: number) =>
+export const getGroupLedgers = (groupId: string | number, finance_id?: string | number) =>
   apiClient.get<{ success: boolean; data: { group: LedgerGroup; ledgers: Ledger[] } }>(
     `/ledger/group/${groupId}`,
-    { params: { finance_id } }
+    { params: finance_id ? { finance_id } : undefined }
   );
 
-export const getVoucherTypes = (finance_id: number) =>
+export const getVoucherTypes = (finance_id?: string | number) =>
   apiClient.get<{ success: boolean; data: VoucherType[] }>('/ledger/voucher-types', {
-    params: { finance_id }
+    params: finance_id ? { finance_id } : undefined
   });
 
-export const getLedgerStatement = (ledger_id: number, finance_id: number, from: string, to: string) =>
+export const getLedgerStatement = (ledger_id: string | number, finance_id: string | number, from: string, to: string) =>
   apiClient.get<{ success: boolean; data: LedgerStatement }>(`/ledger/${ledger_id}/statement`, {
     params: { finance_id, from, to }
   });
@@ -223,22 +226,22 @@ export const getLedgerStatement = (ledger_id: number, finance_id: number, from: 
 // resolves this into the mutually-exclusive group_id / master_group_id
 // columns — never send group_id/master_group_id directly.
 export const createLedger = (payload: Record<string, unknown> & UnderSelection) =>
-  apiClient.post<{ success: boolean; id: number; message?: string }>('/ledger/create', payload);
+  apiClient.post<{ success: boolean; id: string | number; message?: string }>('/ledger/create', payload);
 
-export const updateLedger = (id: number, finance_id: number, payload: Record<string, unknown>) =>
-  apiClient.put<{ success: boolean }>(`/ledger/update/${id}`, { ...payload, finance_id });
+export const updateLedger = (id: string | number, finance_id: string | number | undefined, payload: Record<string, unknown>) =>
+  apiClient.put<{ success: boolean; message?: string }>(`/ledger/update/${id}`, { ...payload, finance_id });
 
-export const deleteLedger = (id: number, finance_id: number) =>
-  apiClient.delete<{ success: boolean }>(`/ledger/delete/${id}`, {
-    params: { finance_id }
+export const deleteLedger = (id: string | number, finance_id?: string | number) =>
+  apiClient.delete<{ success: boolean; message?: string }>(`/ledger/delete/${id}`, {
+    params: finance_id ? { finance_id } : undefined
   });
 
 export const multiCreateLedger = (
-  finance_id: number,
+  finance_id: string | number,
   ledgers: Array<Record<string, unknown> & UnderSelection>
-) => apiClient.post<{ success: boolean; ids: number[]; message?: string }>('/ledger/multi-create', { finance_id, ledgers });
+) => apiClient.post<{ success: boolean; ids: (string | number)[]; count?: number; message?: string }>('/ledger/multi-create', { finance_id, ledgers });
 
-export const getLedgerSummary = (finance_id: number, financial_year?: string) =>
+export const getLedgerSummary = (finance_id?: string | number, financial_year?: string) =>
   apiClient.get<{ success: boolean; data: LedgerSummary }>('/ledger/summary', {
     params: { finance_id, financial_year: financial_year || getFinancialYear() }
   });

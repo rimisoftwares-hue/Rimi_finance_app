@@ -739,6 +739,7 @@ export function LedgerAutocomplete({
   const [query, setQuery] = useState(value);
   const [hi, setHi] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => setQuery(value), [value]);
   useEffect(() => {
@@ -748,6 +749,12 @@ export function LedgerAutocomplete({
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, []);
+
+  useEffect(() => {
+    if (open && itemRefs.current[hi]) {
+      itemRefs.current[hi]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [hi, open]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -775,7 +782,9 @@ export function LedgerAutocomplete({
         pick(filtered[hi]);
       }
     } else if (e.key === "Escape") {
-      e.preventDefault(); setOpen(false);
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
     }
   };
 
@@ -807,7 +816,9 @@ export function LedgerAutocomplete({
           )}
           {filtered.map((o, i) => (
             <button
-              key={o} type="button"
+              key={o}
+              ref={(el) => { itemRefs.current[i] = el; }}
+              type="button"
               onMouseEnter={() => setHi(i)}
               onClick={() => pick(o)}
               className={`flex w-full items-center justify-between px-2.5 py-1.5 text-xs text-left transition-colors ${i === hi ? "bg-primary/10 text-primary" : "hover:bg-secondary"
