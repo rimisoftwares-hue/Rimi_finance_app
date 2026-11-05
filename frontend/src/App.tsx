@@ -6,14 +6,13 @@ import Navbar from './components/Navbar';
 // import { FinanceAuthProvider, useFinanceAuth } from './contexts/FinanceAuthContext';
 import { OwnerAuthProvider, useOwnerAuth } from './contexts/OwnerAuthContext'
 import { useAuth } from './contexts/AuthContext';
-import FinanceLogin from './pages/FinanceLogin';
+import apiClient from './api/apiClient';
 import OwnerLogin from './pages/OwnerLogin';
 import UserLogin from './pages/UserLogin';
 import Dashboard from './pages/Dashboard';
 import Customers from './pages/Customers';
 import AddCustomerConsultingFrom from './pages/AddCustomerConsultingFrom';
 import AddCustomerVehicleLoanForm from './pages/AddCustomerVehicleLoanForm'
-// import AgentCustomerDetails from './pages/AgentCustomerDetails';
 import AddCustomerForm from './pages/AddCustomerForm';
 import UpdateCustomerForm from './pages/UpdateCustomerForm';
 import UnpaidLoans from './pages/UnpaidLoans';
@@ -87,7 +86,7 @@ import CustomerLiveMap from './components/locator/LiveMap';
 // Other
 import Notices from './components/Notice/Notices';
 import LoanRequests from './pages/LoanRequests';
-import Loans from './pages/Loans';
+
 import StaffLocationReport from './components/agents/StaffLocationReport';
 
 //Masters
@@ -452,7 +451,6 @@ function AppContent() {
                 <Route path="/locator/live" element={<ProtectedRoute><CustomerLiveMap /></ProtectedRoute>} />
                 {/* Other */}
                 <Route path="/notices" element={<ProtectedRoute><Notices /></ProtectedRoute>} />
-                <Route path="/loans" element={<ProtectedRoute><Loans /></ProtectedRoute>} />
                 <Route path="/loanRequests" element={<ProtectedRoute><LoanRequests /></ProtectedRoute>} />
                 {/* Agent Management */}
                 {/* Owner-only routes */}

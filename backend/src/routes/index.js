@@ -67,6 +67,10 @@ router.use('/agent-assignments', enhancedCheckFinance, agentAssignmentRoutes);
 const areaAllocationRoutes = require('../modules/agents/areaAllocation.routes');
 router.use('/agents/area-allocations', enhancedCheckFinance, areaAllocationRoutes);
 
+// ─── Staff Login Report ────────────────────────────────────────────────────────
+const staffLoginReportRoutes = require('../modules/agents/staffLoginReport.routes');
+router.use('/agents/login-report', enhancedCheckFinance, staffLoginReportRoutes);
+
 module.exports = router;
 
 
