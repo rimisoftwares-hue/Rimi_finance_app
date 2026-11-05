@@ -5,6 +5,22 @@ const router = express.Router();
 const { db } = require('../../config/database.config');
 const crypto = require('crypto');
 const { authMiddleware, ownerOnly, checkFinance, enhancedCheckFinance } = require('../../middleware/auth.middleware');
+const { haversineKm, validCoords, getClientIp, lookupIp } = require('./loginLocation');
+
+const logoutAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, message: 'No token, authorization denied' });
+  }
+  try {
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET, { ignoreExpiration: true });
+    req.user = decoded.user;
+    next();
+  } catch (err) {
+    res.status(401).json({ success: false, message: 'Token is not valid' });
+  }
+};
 const path = require('path');
 const multer = require('multer');
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
@@ -203,7 +219,10 @@ const formatFinanceData = (financeRaw) => {
     district: financeRaw.district,
     state: financeRaw.state,
     pincode: financeRaw.pincode,
-    location: financeRaw.location
+    location: financeRaw.location,
+    office_lat: financeRaw.office_lat != null ? parseFloat(financeRaw.office_lat) : null,
+    office_lng: financeRaw.office_lng != null ? parseFloat(financeRaw.office_lng) : null,
+    office_geofence_m: financeRaw.office_geofence_m ? parseInt(financeRaw.office_geofence_m, 10) : 200
   };
 };
 
@@ -403,6 +422,13 @@ const isWithinLoginWindow = (loginTimeFrom, loginTimeTo) => {
   }
 };
 
+// ========== LOGIN POLICY ==========
+router.get('/login-policy', (req, res) => {
+  res.json({
+    locationPolicy: process.env.LOGIN_LOCATION_POLICY || 'prefer'
+  });
+});
+
 // ========== USER LOGIN WITH FINANCE SELECTION ==========
 router.post('/user-login', async (req, res) => {
   try {
@@ -595,6 +621,78 @@ router.post('/user-login', async (req, res) => {
 
     const financeData = formatFinanceData(financeRaw);
 
+    // 2. Evaluate location according to LOGIN_LOCATION_POLICY
+    const policy = process.env.LOGIN_LOCATION_POLICY || 'prefer';
+    const ip = getClientIp(req);
+    const ipGeo = lookupIp(ip);
+    const lat = parseFloat(req.body.latitude);
+    const lng = parseFloat(req.body.longitude);
+    const hasDevice = policy !== 'off' && validCoords(lat, lng);
+
+    if (policy === 'strict' && !hasDevice) {
+      return res.status(403).json({
+        success: false,
+        code: 'LOCATION_REQUIRED',
+        message: 'Location access is required to log in. Please enable location and try again.'
+      });
+    }
+
+    let source = 'none', useLat = null, useLng = null, accuracy = null;
+    if (hasDevice) {
+      source = 'device';
+      useLat = lat;
+      useLng = lng;
+      accuracy = Number.isFinite(+req.body.accuracyM) ? Math.round(+req.body.accuracyM) : null;
+    } else if (ipGeo) {
+      source = 'ip';
+      useLat = ipGeo.lat;
+      useLng = ipGeo.lng;
+    }
+
+    let distanceKm = null, flagged = false, flagReason = null;
+    if (useLat !== null && financeRaw?.office_lat != null && financeRaw?.office_lng != null) {
+      distanceKm = +haversineKm(useLat, useLng, +financeRaw.office_lat, +financeRaw.office_lng).toFixed(2);
+    }
+    if (source === 'device' && ipGeo && haversineKm(lat, lng, ipGeo.lat, ipGeo.lng) > 150) {
+      flagged = true;
+      flagReason = 'IP_DEVICE_MISMATCH';
+    } else if (source === 'device' && distanceKm !== null && distanceKm * 1000 > (financeRaw.office_geofence_m ?? 200)) {
+      // informational only; do not block login
+      flagged = true;
+      flagReason = 'OUTSIDE_OFFICE';
+    }
+
+    const validPermissions = ['granted', 'declined', 'blocked', 'unavailable', 'not_asked'];
+    const rawPermission = typeof req.body.locationPermission === 'string' ? req.body.locationPermission.toLowerCase().trim() : '';
+    const locationPermission = validPermissions.includes(rawPermission) ? rawPermission : 'not_asked';
+
+    const deviceName = (req.body.deviceName || req.headers['user-agent'] || '').slice(0, 150);
+    const platform = (req.body.platform || '').slice(0, 30);
+    const ipCity = ipGeo?.city ? String(ipGeo.city).slice(0, 100) : null;
+    const ipRegion = ipGeo?.region ? String(ipGeo.region).slice(0, 100) : null;
+    const ipCountry = ipGeo?.country ? String(ipGeo.country).slice(0, 10) : null;
+
+    const sessionInsert = await db.query(
+      `INSERT INTO agent_login_sessions (
+        user_id, device_name, platform, ip_address,
+        login_lat, login_lng, distance_from_office, location_label,
+        location_source, location_accuracy_m, location_permission,
+        ip_city, ip_region, ip_country, flagged, flag_reason, last_seen_at
+      ) VALUES (
+        $1::uuid, $2, $3, $4,
+        $5, $6, $7, $8,
+        $9, $10, $11,
+        $12, $13, $14, $15, $16, CURRENT_TIMESTAMP
+      ) RETURNING id`,
+      [
+        user.id, deviceName || null, platform || null, ip || null,
+        useLat, useLng, distanceKm, null,
+        source, accuracy, locationPermission,
+        ipCity, ipRegion, ipCountry, flagged, flagReason
+      ]
+    );
+    const sessionId = sessionInsert.rows[0].id;
+
     // PostgreSQL query for statistics
     const statsResult = await db.query(`
       SELECT 
@@ -607,6 +705,7 @@ router.post('/user-login', async (req, res) => {
       {
         user: {
           id: user.id,
+          sessionId: sessionId,
           email: user.email,
           username: user.username,
           role: companyRole,
@@ -627,9 +726,13 @@ router.post('/user-login', async (req, res) => {
 
     res.json({
       success: true,
+      sessionId: sessionId,
+      locationSource: source,
+      flagged: flagged,
       user: {
         id: user.id,
         user_id: user.id,
+        sessionId: sessionId,
         email: user.email,
         username: user.username,
         phone_no: user.phone_no,
@@ -651,6 +754,24 @@ router.post('/user-login', async (req, res) => {
       timestamp: new Date().toISOString()
     });
 
+    // Optional reverse-geocoding if GOOGLE_MAPS_SERVER_KEY is configured
+    if (process.env.GOOGLE_MAPS_SERVER_KEY && source === 'device' && useLat !== null && useLng !== null) {
+      setImmediate(async () => {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 3000);
+          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${useLat},${useLng}&key=${process.env.GOOGLE_MAPS_SERVER_KEY}`;
+          const geoRes = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeout);
+          const geoData = await geoRes.json();
+          const label = geoData?.results?.[0]?.formatted_address?.slice(0, 200);
+          if (label) {
+            await db.query('UPDATE agent_login_sessions SET location_label = $1 WHERE id = $2::uuid', [label, sessionId]);
+          }
+        } catch { }
+      });
+    }
+
   } catch (error) {
     console.error('User login error:', error);
     res.status(500).json({
@@ -659,6 +780,47 @@ router.post('/user-login', async (req, res) => {
       error_code: 'INTERNAL_ERROR',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  }
+});
+
+// ========== USER LOGOUT ==========
+router.post('/user-logout', logoutAuth, async (req, res) => {
+  try {
+    const sessionId = req.user?.sessionId;
+    const reason = ['manual', 'window_close'].includes(req.body?.reason) ? req.body.reason : 'manual';
+    if (sessionId) {
+      await db.query(
+        `UPDATE agent_login_sessions
+           SET logout_time = CURRENT_TIMESTAMP,
+               duration_seconds = EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - login_time))::int,
+               logout_reason = $2
+         WHERE id = $1::uuid AND user_id = $3::uuid AND logout_time IS NULL`,
+        [sessionId, reason, req.user.id]
+      );
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ========== SESSION HEARTBEAT ==========
+router.post('/session-heartbeat', authMiddleware, async (req, res) => {
+  try {
+    const sessionId = req.user?.sessionId;
+    if (!sessionId) {
+      return res.json({ active: false });
+    }
+    const r = await db.query(
+      `UPDATE agent_login_sessions SET last_seen_at = CURRENT_TIMESTAMP
+        WHERE id = $1::uuid AND user_id = $2::uuid AND logout_time IS NULL`,
+      [sessionId, req.user.id]
+    );
+    res.json({ active: r.rowCount > 0 });
+  } catch (err) {
+    console.error('Heartbeat error:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

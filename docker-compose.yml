@@ -1,0 +1,101 @@
+# version: "3.9"
+
+# services:
+#   backend:
+#     build:
+#       context: ./backend
+#     container_name: rimi_backend
+#     restart: unless-stopped
+#     env_file:
+#       - ./backend/.env
+#     ports:
+#       - "5000:5000"
+#     networks:
+#       - rimi_network
+
+#   frontend:
+#     build:
+#       context: ./frontend
+#     container_name: rimi_frontend
+#     restart: unless-stopped
+#     ports:
+#       - "5173:5173"
+#     volumes:
+#       - ./frontend:/app
+#       - /app/node_modules
+#     environment:
+#       - VITE_API_URL=http://localhost:5000
+#     depends_on:
+#       - backend
+#     networks:
+#       - rimi_network
+
+# networks:
+#   rimi_network:
+#     driver: bridge
+
+##############################################################################
+# docker-compose.yml
+# Rimi Finance App — Backend + Frontend (no local MySQL; uses AWS RDS)
+##############################################################################
+
+version: "3.9"
+
+services:
+
+  # ── Backend (Node.js / Express) ─────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rimi-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env          # DB credentials, JWT secrets, AWS keys etc.
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      CORS_ORIGIN: "https://autofinex-desktop.rimio.in,http://localhost:3003,http://localhost:5173,tauri://localhost"
+      FRONTEND_URL: "https://autofinex-desktop.rimio.in"
+      API_BASE_URL: "https://autofinex-desktop-api.rimio.in"
+    ports:
+      - "3004:3004"             # Expose to host for debugging; remove in prod
+    volumes:
+      # Persist uploaded files across container restarts
+      - uploads_data:/home/appuser/senthur_groups_uploads
+    networks:
+      - rimi-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Frontend (React + Nginx) ─────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Point the built JS bundle at the Cloudflare tunnel API
+        VITE_API_URL: https://autofinex-desktop-api.rimio.in
+        VITE_API_BASE_URL: https://autofinex-desktop-api.rimio.in/api
+        VITE_FRONTEND_URL: https://autofinex-desktop.rimio.in
+    container_name: rimi-frontend
+    restart: unless-stopped
+    ports:
+      - "3003:80"               # Access the app at http://localhost:3003 (or via Cloudflare Tunnel: https://autofinex-desktop.rimio.in)
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - rimi-net
+
+networks:
+  rimi-net:
+    driver: bridge
+
+volumes:
+  uploads_data:
+    driver: local

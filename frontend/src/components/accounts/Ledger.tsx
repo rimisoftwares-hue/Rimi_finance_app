@@ -574,6 +574,7 @@ function LedgerInner() {
   );
 
   const activeFinanceIdRef = useRef(financeId);
+  activeFinanceIdRef.current = financeId;
   useEffect(() => {
     activeFinanceIdRef.current = financeId;
   }, [financeId]);
@@ -1077,6 +1078,8 @@ function LedgerInner() {
       // ── View-tab shortcuts ──────────────────────────────────────────────
       if (e.key === "F5") {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         setViewMode(prev => {
           const next = prev === "ledger" ? "group" : "ledger";
           toast.info(`View Mode: ${next === "ledger" ? "Ledger Wise" : "Group Wise"}`);
@@ -1087,6 +1090,8 @@ function LedgerInner() {
       }
       if (e.key === "F2") {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         setPeriodFrom(period.from);
         setPeriodTo(period.to);
         setShowPeriodDlg(true);
@@ -1094,18 +1099,22 @@ function LedgerInner() {
       }
       if (e.key === "F3") {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         setShowCompanyDlg(true);
         return;
       }
       if (e.altKey && e.key.toLowerCase() === "h") {
         if (!showNewGroup) {
           e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
           setShowChangeView(true);
         }
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [
     handleSave,
     currentIndex,
@@ -1471,7 +1480,7 @@ function LedgerInner() {
                     className="text-sm font-semibold text-foreground hover:text-primary transition-colors"
                     title="Press F3 to change company"
                   >
-                    {selectedCompany}
+                    {activeCompanyName}
                   </button>
                   <Badge variant="outline" className="text-[9px] border-muted">F3</Badge>
                 </div>
@@ -1492,12 +1501,12 @@ function LedgerInner() {
 
                 {/* View mode badge */}
                 <div className="flex items-center gap-2">
-                  {viewMode === "ledger"
-                    ? <LayoutList className="h-4 w-4 text-primary shrink-0" />
-                    : <TreePine className="h-4 w-4 text-primary shrink-0" />
+                  {viewMode === "group"
+                    ? <TreePine className="h-4 w-4 text-primary shrink-0" />
+                    : <LayoutList className="h-4 w-4 text-primary shrink-0" />
                   }
                   <span className="text-xs font-semibold text-primary">
-                    View Mode : {viewMode === "ledger" ? "Ledger Wise" : "Group Wise"}
+                    View Mode : {VIEW_MODE_LABELS[viewMode]}
                   </span>
                   <Badge variant="outline" className="text-[9px] border-muted">F5</Badge>
                 </div>
@@ -1571,6 +1580,26 @@ function LedgerInner() {
                     </SelectContent>
                   </Select>
                 )}
+
+                {/* Ledger selector — in monthly summary view */}
+                {viewMode === "monthly" && !viewLedger && (
+                  <Select
+                    value={monthlyLedgerId || "__none__"}
+                    onValueChange={val => setMonthlyLedgerId(val === "__none__" ? "" : val)}
+                  >
+                    <SelectTrigger className="h-8 w-44 text-xs">
+                      <SelectValue placeholder="Select Ledger" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Select Ledger…</SelectItem>
+                      {filteredViewLedgers.map(l => (
+                        <SelectItem key={String(l.id)} value={String(l.id)}>
+                          {l.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
               {/* ── Main view area ─────────────────────────────────────────────────── */}
@@ -1611,7 +1640,12 @@ function LedgerInner() {
                     exit={{ opacity: 0, x: -20 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <LedgerDayView ledger={viewLedger} onBack={() => setViewLedger(null)} />
+                    <LedgerDayView
+                      ledger={viewLedger}
+                      period={period}
+                      financeId={financeId}
+                      onBack={() => setViewLedger(null)}
+                    />
                   </motion.div>
                 ) : viewMode === "ledger" ? (
                   /* ── LEDGER VIEW — flat Tally Prime table ── */
@@ -1623,76 +1657,357 @@ function LedgerInner() {
                     transition={{ duration: 0.2 }}
                     className="dashboard-card p-0 overflow-hidden"
                   >
-                    <div className="px-4 py-2.5 border-b border-border bg-secondary/50 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        List of Ledgers
-                        {viewGroupFilter !== "all" && (
-                          <span className="ml-2 text-primary">— {viewGroupFilter}</span>
-                        )}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {filteredViewLedgers.filter(l => viewGroupFilter === "all" || l.group === viewGroupFilter).length} entries
-                      </span>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-border bg-secondary/30">
-                            <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-14">Sl. No.</th>
-                            <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Name of Ledger</th>
-                            <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Under</th>
-                            <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Opening Balance</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredViewLedgers
-                            .filter(l => viewGroupFilter === "all" || l.group === viewGroupFilter)
-                            .map((l, i) => (
-                              <tr
-                                key={l.id}
-                                className="border-b border-border/40 hover:bg-secondary/30 transition-colors cursor-pointer"
-                                onClick={() => setViewLedger(l)}
-                              >
-                                <td className="px-4 py-2.5 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
-                                <td className="px-4 py-2.5 text-sm text-foreground font-medium">{l.name}</td>
-                                <td className="px-4 py-2.5 text-xs text-muted-foreground">{l.group}</td>
-                                <td className="px-4 py-2.5 text-sm font-mono tabular-nums text-right">
-                                  {l.openingBalance === 0 ? (
-                                    <span className="text-muted-foreground">—</span>
-                                  ) : (
-                                    <span className={l.balanceType === "Dr" ? "text-foreground" : "text-income"}>
-                                      ₹{l.openingBalance.toLocaleString()} {l.balanceType}
-                                    </span>
+                    {(() => {
+                      const rows = filteredViewLedgers.filter(
+                        l => viewGroupFilter === "all" || l.group === viewGroupFilter
+                      );
+                      const showObCol = config.generalDetails.provideOpeningBalances;
+                      const colCount = showObCol ? 7 : 6;
+
+                      const totalOpeningNet = rows.reduce((s, l) => {
+                        const ob = l.opening ?? l.openingBalance ?? 0;
+                        const side = l.openingSide ?? l.balanceType;
+                        return s + (side === "Cr" ? -ob : ob);
+                      }, 0);
+                      const totalPeriodDr = rows.reduce((s, l) => s + (l.periodDr ?? 0), 0);
+                      const totalPeriodCr = rows.reduce((s, l) => s + (l.periodCr ?? 0), 0);
+                      const totalClosingNet = rows.reduce((s, l) => {
+                        const cl = l.closing ?? l.openingBalance ?? 0;
+                        const side = l.closingSide ?? l.balanceType;
+                        return s + (side === "Cr" ? -cl : cl);
+                      }, 0);
+
+                      return (
+                        <>
+                          <div className="px-4 py-2.5 border-b border-border bg-secondary/50 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                              List of Ledgers
+                              {viewGroupFilter !== "all" && (
+                                <span className="ml-2 text-primary">— {viewGroupFilter}</span>
+                              )}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {rows.length} entries
+                            </span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full">
+                              <thead>
+                                <tr className="border-b border-border bg-secondary/30">
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-14">Sl. No.</th>
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Name of Ledger</th>
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Under</th>
+                                  {showObCol && (
+                                    <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Opening Balance</th>
                                   )}
-                                </td>
-                              </tr>
-                            ))}
-                          {filteredViewLedgers.filter(l => viewGroupFilter === "all" || l.group === viewGroupFilter).length === 0 && (
-                            <tr>
-                              <td colSpan={4} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                                No ledgers found{viewSearch ? ` for "${viewSearch}"` : ""}.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                        {/* Total row */}
-                        {filteredViewLedgers.filter(l => viewGroupFilter === "all" || l.group === viewGroupFilter).length > 0 && (
-                          <tfoot>
-                            <tr className="border-t-2 border-border bg-secondary/40">
-                              <td colSpan={3} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">
-                                Total
-                              </td>
-                              <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-right text-foreground">
-                                ₹{filteredViewLedgers
-                                  .filter(l => viewGroupFilter === "all" || l.group === viewGroupFilter)
-                                  .reduce((s, l) => s + (l.balanceType === "Dr" ? l.openingBalance : -l.openingBalance), 0)
-                                  .toLocaleString()}
-                              </td>
-                            </tr>
-                          </tfoot>
-                        )}
-                      </table>
-                    </div>
+                                  <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Debit</th>
+                                  <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Credit</th>
+                                  <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Closing Balance</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map((l, i) => {
+                                  const obVal = l.opening ?? l.openingBalance ?? 0;
+                                  const obSide = l.openingSide ?? l.balanceType;
+                                  const pDr = l.periodDr ?? 0;
+                                  const pCr = l.periodCr ?? 0;
+                                  const clVal = l.closing ?? l.openingBalance ?? 0;
+                                  const clSide = l.closingSide ?? l.balanceType;
+
+                                  return (
+                                    <tr
+                                      key={l.id}
+                                      className="border-b border-border/40 hover:bg-secondary/30 transition-colors cursor-pointer"
+                                      onClick={() => setViewLedger(l)}
+                                    >
+                                      <td className="px-4 py-2.5 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
+                                      <td className="px-4 py-2.5 text-sm text-foreground font-medium">{l.name}</td>
+                                      <td className="px-4 py-2.5 text-xs text-muted-foreground">{l.group}</td>
+                                      {showObCol && (
+                                        <td className="px-4 py-2.5 text-sm font-mono tabular-nums text-right">
+                                          {obVal === 0 ? (
+                                            <span className="text-muted-foreground">—</span>
+                                          ) : (
+                                            <span className={obSide === "Dr" ? "text-foreground" : "text-income"}>
+                                              ₹{obVal.toLocaleString("en-IN")} {obSide}
+                                            </span>
+                                          )}
+                                        </td>
+                                      )}
+                                      <td className="px-4 py-2.5 text-sm font-mono tabular-nums text-right">
+                                        {pDr === 0 ? (
+                                          <span className="text-muted-foreground">—</span>
+                                        ) : (
+                                          <span className="text-expense">₹{pDr.toLocaleString("en-IN")}</span>
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-sm font-mono tabular-nums text-right">
+                                        {pCr === 0 ? (
+                                          <span className="text-muted-foreground">—</span>
+                                        ) : (
+                                          <span className="text-income">₹{pCr.toLocaleString("en-IN")}</span>
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-sm font-mono tabular-nums text-right">
+                                        {clVal === 0 ? (
+                                          <span className="text-muted-foreground">—</span>
+                                        ) : (
+                                          <span className={clSide === "Dr" ? "text-foreground" : "text-income"}>
+                                            ₹{clVal.toLocaleString("en-IN")} {clSide}
+                                          </span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                                {rows.length === 0 && (
+                                  <tr>
+                                    <td colSpan={colCount} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                                      No ledgers found{viewSearch ? ` for "${viewSearch}"` : ""}.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                              {rows.length > 0 && (
+                                <tfoot>
+                                  <tr className="border-t-2 border-border bg-secondary/40">
+                                    <td colSpan={3} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">
+                                      Total
+                                    </td>
+                                    {showObCol && (
+                                      <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-right text-foreground">
+                                        ₹{Math.abs(totalOpeningNet).toLocaleString("en-IN")} {totalOpeningNet >= 0 ? "Dr" : "Cr"}
+                                      </td>
+                                    )}
+                                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-right text-foreground">
+                                      ₹{totalPeriodDr.toLocaleString("en-IN")}
+                                    </td>
+                                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-right text-foreground">
+                                      ₹{totalPeriodCr.toLocaleString("en-IN")}
+                                    </td>
+                                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-right text-foreground">
+                                      ₹{Math.abs(totalClosingNet).toLocaleString("en-IN")} {totalClosingNet >= 0 ? "Dr" : "Cr"}
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              )}
+                            </table>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </motion.div>
+                ) : viewMode === "gst" ? (
+                  /* ── GST DETAILS VIEW (Alt+H) ── */
+                  <motion.div
+                    key="gst-view"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.2 }}
+                    className="dashboard-card p-0 overflow-hidden"
+                  >
+                    {(() => {
+                      const showGstCols = config.partyTaxRegistrationDetails.gstRegistrationDetails;
+                      const colCount = showGstCols ? 6 : 4;
+                      return (
+                        <>
+                          <div className="px-4 py-2.5 border-b border-border bg-secondary/50 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                              Ledger GST Details
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {filteredViewDetails.length} entries
+                            </span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full">
+                              <thead>
+                                <tr className="border-b border-border bg-secondary/30">
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-14">Sl. No.</th>
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Name of Ledger</th>
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Under</th>
+                                  {showGstCols && (
+                                    <>
+                                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">GSTIN/UIN</th>
+                                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Registration Type</th>
+                                    </>
+                                  )}
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">PAN / IT No.</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {filteredViewDetails.map((d, i) => (
+                                  <tr
+                                    key={d.id}
+                                    className="border-b border-border/40 hover:bg-secondary/30 transition-colors cursor-pointer"
+                                    onClick={() => {
+                                      const found = viewLedgers.find(l => String(l.id) === String(d.id));
+                                      if (found) setViewLedger(found);
+                                    }}
+                                  >
+                                    <td className="px-4 py-2.5 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
+                                    <td className="px-4 py-2.5 text-sm text-foreground font-medium">{d.ledger_name}</td>
+                                    <td className="px-4 py-2.5 text-xs text-muted-foreground">{d.group_name || "—"}</td>
+                                    {showGstCols && (
+                                      <>
+                                        <td className="px-4 py-2.5 text-sm font-mono tabular-nums">
+                                          {d.gstin ? (
+                                            <span className="text-foreground">{d.gstin}</span>
+                                          ) : (
+                                            <span className="text-muted-foreground">—</span>
+                                          )}
+                                        </td>
+                                        <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                                          {d.reg_type ? (
+                                            <Badge variant="outline" className="text-[10px]">{d.reg_type}</Badge>
+                                          ) : (
+                                            <span className="text-muted-foreground">—</span>
+                                          )}
+                                        </td>
+                                      </>
+                                    )}
+                                    <td className="px-4 py-2.5 text-sm font-mono tabular-nums">
+                                      {d.pan_number ? (
+                                        <span className="text-foreground">{d.pan_number}</span>
+                                      ) : (
+                                        <span className="text-muted-foreground">—</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                                {filteredViewDetails.length === 0 && (
+                                  <tr>
+                                    <td colSpan={colCount} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                                      No ledgers found{viewSearch ? ` for "${viewSearch}"` : ""}.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </motion.div>
+                ) : viewMode === "contact" ? (
+                  /* ── CONTACT DETAILS VIEW (Alt+H) ── */
+                  <motion.div
+                    key="contact-view"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.2 }}
+                    className="dashboard-card p-0 overflow-hidden"
+                  >
+                    {(() => {
+                      const showMailing = config.partyDetails.provideMailingDetails;
+                      const colCount = showMailing ? 7 : 6;
+                      return (
+                        <>
+                          <div className="px-4 py-2.5 border-b border-border bg-secondary/50 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                              Ledger Contact Details
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {filteredViewDetails.length} entries
+                            </span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full">
+                              <thead>
+                                <tr className="border-b border-border bg-secondary/30">
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-14">Sl. No.</th>
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Name of Ledger</th>
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Under</th>
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Contact Person</th>
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Mobile</th>
+                                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Email</th>
+                                  {showMailing && (
+                                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">City / State</th>
+                                  )}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {filteredViewDetails.map((d, i) => {
+                                  const phone = d.mobile || d.primary_mobile || null;
+                                  const cityState = [d.city, d.state].filter(Boolean).join(", ");
+                                  return (
+                                    <tr
+                                      key={d.id}
+                                      className="border-b border-border/40 hover:bg-secondary/30 transition-colors cursor-pointer"
+                                      onClick={() => {
+                                        const found = viewLedgers.find(l => String(l.id) === String(d.id));
+                                        if (found) setViewLedger(found);
+                                      }}
+                                    >
+                                      <td className="px-4 py-2.5 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
+                                      <td className="px-4 py-2.5 text-sm text-foreground font-medium">{d.ledger_name}</td>
+                                      <td className="px-4 py-2.5 text-xs text-muted-foreground">{d.group_name || "—"}</td>
+                                      <td className="px-4 py-2.5 text-sm">
+                                        {d.contact_person ? (
+                                          <span className="text-foreground">{d.contact_person}</span>
+                                        ) : (
+                                          <span className="text-muted-foreground">—</span>
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-sm font-mono tabular-nums">
+                                        {phone ? (
+                                          <span className="text-foreground">{phone}</span>
+                                        ) : (
+                                          <span className="text-muted-foreground">—</span>
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-xs">
+                                        {d.email ? (
+                                          <span className="text-foreground">{d.email}</span>
+                                        ) : (
+                                          <span className="text-muted-foreground">—</span>
+                                        )}
+                                      </td>
+                                      {showMailing && (
+                                        <td className="px-4 py-2.5 text-xs">
+                                          {cityState ? (
+                                            <span className="text-foreground">{cityState}</span>
+                                          ) : (
+                                            <span className="text-muted-foreground">—</span>
+                                          )}
+                                        </td>
+                                      )}
+                                    </tr>
+                                  );
+                                })}
+                                {filteredViewDetails.length === 0 && (
+                                  <tr>
+                                    <td colSpan={colCount} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                                      No ledgers found{viewSearch ? ` for "${viewSearch}"` : ""}.
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </motion.div>
+                ) : viewMode === "monthly" ? (
+                  /* ── MONTHLY SUMMARY VIEW (Alt+H) ── */
+                  <motion.div
+                    key="monthly-view"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <LedgerMonthlyView
+                      ledgers={filteredViewLedgers}
+                      allLedgers={viewLedgers}
+                      selectedLedgerId={monthlyLedgerId}
+                      onSelectLedgerId={setMonthlyLedgerId}
+                      period={period}
+                      financeId={financeId}
+                    />
                   </motion.div>
                 ) : (
                   /* ── GROUP VIEW — hierarchical tree (like LedgerGroups.tsx) ── */
@@ -1790,10 +2105,11 @@ function LedgerInner() {
                     if (r.dueDays !== undefined) {
                       payload.defaultCreditPeriod = r.dueDays;
                     }
-                    await apiUpdateLedger(r.id, financeId, payload);
+                    await apiUpdateLedger(String(r.id), payload);
                   }
                   toast.success(`${updates.length} ledger(s) updated`);
                   fetchViewData();
+                  fetchSummary();
                   fetchRecentCreated();
                   setMultiChoice(null);
                 } catch (err: unknown) {
@@ -1801,9 +2117,6 @@ function LedgerInner() {
                   toast.error(apiErr?.response?.data?.message || apiErr?.message || "Failed to update ledgers");
                 }
               } else {
-                // Resolve each row's group name → { under_id, under_source } so the
-                // backend can apply the same mutually-exclusive group_id /
-                // master_group_id mapping used for single-ledger creation.
                 const unresolved: string[] = [];
                 const apiRows = rows.map(r => {
                   const groupName = (r.group.trim() || multiChoice.presetGroup || "").trim();
@@ -1827,7 +2140,7 @@ function LedgerInner() {
                 }
 
                 try {
-                  const res = await apiMultiCreateLedger(financeId, apiRows as unknown as Parameters<typeof apiMultiCreateLedger>[1]);
+                  const res = await apiMultiCreateLedger(apiRows as unknown as Parameters<typeof apiMultiCreateLedger>[0]);
                   if (!res.data?.success) throw new Error(res.data?.message || "Failed to create ledgers");
                 } catch (err: unknown) {
                   const apiErr = err as { response?: { data?: { message?: string } }; message?: string };
@@ -1853,6 +2166,7 @@ function LedgerInner() {
                 setLedgers(prev => [...prev, ...newOnes]);
                 toast.success(`${newOnes.length} ledger(s) created`);
                 fetchRecentCreated();
+                fetchSummary();
                 fetchViewData();
                 setMultiChoice(null);
               }
@@ -1878,11 +2192,24 @@ function LedgerInner() {
                   <button
                     key={v.key}
                     onClick={() => {
-                      if (v.key === "ledger" || v.key === "group") {
-                        setViewMode(v.key as "ledger" | "group");
+                      setActiveTab("view");
+                      if (v.key === "monthly") {
+                        if (viewLedger) {
+                          setMonthlyLedgerId(String(viewLedger.id));
+                        }
+                        setViewMode("monthly");
+                        setViewLedger(null);
+                      } else if (
+                        v.key === "ledger" ||
+                        v.key === "group" ||
+                        v.key === "gst" ||
+                        v.key === "contact"
+                      ) {
+                        setViewMode(v.key as ViewModeKey);
                         setViewLedger(null);
                       } else {
-                        toast.info(`${v.label} — coming soon`);
+                        setViewMode("ledger");
+                        setViewLedger(null);
                       }
                       setShowChangeView(false);
                     }}
@@ -1901,7 +2228,16 @@ function LedgerInner() {
                 {SAVED_VIEWS.map(sv => (
                   <button
                     key={sv}
-                    onClick={() => { toast.info(`${sv} — custom view`); setShowChangeView(false); }}
+                    onClick={() => {
+                      setActiveTab("view");
+                      setViewLedger(null);
+                      if (sv.toLowerCase().includes("chart")) {
+                        setViewMode("group");
+                      } else {
+                        setViewMode("ledger");
+                      }
+                      setShowChangeView(false);
+                    }}
                     className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-secondary/50 text-foreground border border-transparent transition-colors"
                   >
                     <Save className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -1916,7 +2252,21 @@ function LedgerInner() {
                 {RELATED_REPORTS.map(rr => (
                   <button
                     key={rr}
-                    onClick={() => { toast.info(`${rr} — opening report`); setShowChangeView(false); }}
+                    onClick={() => {
+                      setActiveTab("view");
+                      if (rr === "Ledger Contact Details") {
+                        setViewLedger(null);
+                        setViewMode("contact");
+                      } else if (rr === "Monthly Summary") {
+                        if (viewLedger) setMonthlyLedgerId(String(viewLedger.id));
+                        setViewLedger(null);
+                        setViewMode("monthly");
+                      } else {
+                        setViewLedger(null);
+                        setViewMode("ledger");
+                      }
+                      setShowChangeView(false);
+                    }}
                     className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-secondary/50 text-foreground border border-transparent transition-colors"
                   >
                     <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -2006,26 +2356,29 @@ function LedgerInner() {
               <DialogDescription>Switching company refreshes ledger data. View, filters, and search are preserved.</DialogDescription>
             </DialogHeader>
             <div className="space-y-2 pt-2">
-              {COMPANIES.map(c => (
-                <button
-                  key={c}
-                  onClick={() => switchCompany(c)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border text-sm transition-colors
-                    ${selectedCompany === c ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border hover:bg-secondary/50 text-foreground"}`}
-                >
-                  <Building2 className={`h-4 w-4 shrink-0 ${selectedCompany === c ? "text-primary" : "text-muted-foreground"}`} />
-                  {c}
-                  {selectedCompany === c && <Badge className="ml-auto text-[10px]">Active</Badge>}
-                </button>
-              ))}
+              {availableFinances.map(f => {
+                const isSelected = String(currentFinance?.id) === String(f.id);
+                const displayName = f.name || f.finance_name || `Company ${f.id}`;
+                return (
+                  <button
+                    key={String(f.id)}
+                    onClick={() => handleSwitchCompany(f.id, displayName)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border text-sm transition-colors
+                      ${isSelected ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border hover:bg-secondary/50 text-foreground"}`}
+                  >
+                    <Building2 className={`h-4 w-4 shrink-0 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
+                    {displayName}
+                    {isSelected && <Badge className="ml-auto text-[10px]">Active</Badge>}
+                  </button>
+                );
+              })}
             </div>
             <div className="flex justify-end pt-2 border-t border-border">
               <Button variant="outline" size="sm" onClick={() => setShowCompanyDlg(false)}>Close (Esc)</Button>
             </div>
           </DialogContent>
         </Dialog>
-      </div>
-    </ConfigProvider>
+    </div>
   );
 }
 
@@ -2207,6 +2560,7 @@ function LedgerTreeNode({
   level,
   search,
   hasMatch,
+  ancestorMatched = false,
 }: {
   groupKey: string;
   liveGroups: Record<string, LiveGroup>;
@@ -2216,6 +2570,7 @@ function LedgerTreeNode({
   level: number;
   search: string;
   hasMatch: (key: string) => boolean;
+  ancestorMatched?: boolean;
 }) {
   const [open, setOpen] = useState(level === 0 || !!search);
   useEffect(() => { if (search) setOpen(true); }, [search]);
@@ -2226,18 +2581,36 @@ function LedgerTreeNode({
   const children = (childMap[groupKey] || []);
   const allLedgers = ledgersByGroupKey[groupKey] || [];
   const q = search.toLowerCase().trim();
+  const selfOrAncestorMatched = ancestorMatched || (!!q && group.name.toLowerCase().includes(q));
 
   const visibleLedgers = q
-    ? allLedgers.filter(l => l.name.toLowerCase().includes(q) || group.name.toLowerCase().includes(q))
+    ? selfOrAncestorMatched
+      ? allLedgers
+      : allLedgers.filter(l => l.name.toLowerCase().includes(q))
     : allLedgers;
 
-  const visibleChildren = children.filter(c => hasMatch(c.key));
+  const visibleChildren = q
+    ? selfOrAncestorMatched
+      ? children
+      : children.filter(c => hasMatch(c.key))
+    : children;
   const hasContent = visibleChildren.length > 0 || allLedgers.length > 0;
 
-  if (q && !hasMatch(groupKey)) return null;
+  if (q && !selfOrAncestorMatched && !hasMatch(groupKey)) return null;
 
-  const totalDr = allLedgers.filter(l => l.balanceType === "Dr").reduce((s, l) => s + l.openingBalance, 0);
-  const totalCr = allLedgers.filter(l => l.balanceType === "Cr").reduce((s, l) => s + l.openingBalance, 0);
+  // Group-level totals across the entire subtree (direct ledgers + child groups)
+  const collectSubtreeLedgers = (k: string): LedgerEntry[] => {
+    const direct = ledgersByGroupKey[k] || [];
+    const sub = (childMap[k] || []).flatMap(c => collectSubtreeLedgers(c.key));
+    return [...direct, ...sub];
+  };
+  const subtreeLedgers = collectSubtreeLedgers(groupKey);
+  const totalDr = subtreeLedgers
+    .filter(l => (l.closingSide ?? l.balanceType) === "Dr")
+    .reduce((s, l) => s + (l.closing ?? l.openingBalance ?? 0), 0);
+  const totalCr = subtreeLedgers
+    .filter(l => (l.closingSide ?? l.balanceType) === "Cr")
+    .reduce((s, l) => s + (l.closing ?? l.openingBalance ?? 0), 0);
 
   return (
     <div style={{ marginLeft: level * 16 }}>
@@ -2266,8 +2639,8 @@ function LedgerTreeNode({
           </div>
           <div className="flex items-center gap-3">
             <div className="flex gap-3 text-xs font-mono tabular-nums">
-              {totalDr > 0 && <span className="text-foreground">Dr ₹{totalDr.toLocaleString()}</span>}
-              {totalCr > 0 && <span className="text-income">Cr ₹{totalCr.toLocaleString()}</span>}
+              {totalDr > 0 && <span className="text-foreground">Dr ₹{totalDr.toLocaleString("en-IN")}</span>}
+              {totalCr > 0 && <span className="text-income">Cr ₹{totalCr.toLocaleString("en-IN")}</span>}
             </div>
             <Badge variant="outline" className={`text-[9px] ${HIER_NATURE_COLORS[group.nature]}`}>
               {group.nature}
@@ -2297,6 +2670,7 @@ function LedgerTreeNode({
                 level={level + 1}
                 search={search}
                 hasMatch={hasMatch}
+                ancestorMatched={selfOrAncestorMatched}
               />
             ))}
 
@@ -2308,27 +2682,31 @@ function LedgerTreeNode({
               >
                 {visibleLedgers
                   .sort((a, b) => a.name.localeCompare(b.name))
-                  .map(l => (
-                    <button
-                      key={l.id}
-                      onClick={() => onSelectLedger(l)}
-                      className="w-full flex items-center justify-between px-3 py-1.5 rounded-md text-xs hover:bg-secondary/50 transition-colors group/leaf"
-                    >
-                      <span className="flex items-center gap-2 text-muted-foreground group-hover/leaf:text-foreground">
-                        <FileText className="h-3 w-3 opacity-50" />
-                        {l.name}
-                      </span>
-                      <span className="font-mono tabular-nums">
-                        {l.openingBalance > 0 ? (
-                          <span className={l.balanceType === "Dr" ? "text-foreground" : "text-income"}>
-                            {l.balanceType} ₹{l.openingBalance.toLocaleString()}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </span>
-                    </button>
-                  ))}
+                  .map(l => {
+                    const bal = l.closing ?? l.openingBalance ?? 0;
+                    const side = l.closingSide ?? l.balanceType;
+                    return (
+                      <button
+                        key={l.id}
+                        onClick={() => onSelectLedger(l)}
+                        className="w-full flex items-center justify-between px-3 py-1.5 rounded-md text-xs hover:bg-secondary/50 transition-colors group/leaf"
+                      >
+                        <span className="flex items-center gap-2 text-muted-foreground group-hover/leaf:text-foreground">
+                          <FileText className="h-3 w-3 opacity-50" />
+                          {l.name}
+                        </span>
+                        <span className="font-mono tabular-nums">
+                          {bal > 0 ? (
+                            <span className={side === "Dr" ? "text-foreground" : "text-income"}>
+                              {side} ₹{bal.toLocaleString("en-IN")}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
               </div>
             )}
           </motion.div>
@@ -2338,54 +2716,418 @@ function LedgerTreeNode({
   );
 }
 
+// ─── Monthly Summary View (Alt+H) ────────────────────────────────────────────
+function LedgerMonthlyView({
+  ledgers,
+  allLedgers,
+  selectedLedgerId,
+  onSelectLedgerId,
+  period,
+  financeId,
+}: {
+  ledgers: LedgerEntry[];
+  allLedgers: LedgerEntry[];
+  selectedLedgerId: string;
+  onSelectLedgerId: (id: string) => void;
+  period: PeriodState;
+  financeId: string;
+}) {
+  const [monthlyData, setMonthlyData] = useState<LedgerMonthlyResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const reqIdRef = useRef(0);
+
+  // Derive FY label from period.from (Apr–Mar)
+  const fyLabel = useMemo(() => {
+    const m = /^(\d{4})-(\d{2})/.exec(period.from || "");
+    if (m) {
+      const y = parseInt(m[1], 10);
+      const mo = parseInt(m[2], 10);
+      const startY = mo >= 4 ? y : y - 1;
+      return `${startY}-${startY + 1}`;
+    }
+    return getFinancialYear();
+  }, [period.from]);
+
+  useEffect(() => {
+    if (!selectedLedgerId || !financeId) {
+      setMonthlyData(null);
+      return;
+    }
+    const reqId = ++reqIdRef.current;
+    setLoading(true);
+    setMonthlyData(null);
+    apiGetLedgerMonthly(selectedLedgerId, fyLabel)
+      .then(res => {
+        if (reqIdRef.current !== reqId) return;
+        if (res.data?.success && res.data?.data) {
+          setMonthlyData(res.data.data);
+        }
+      })
+      .catch((err: { response?: { data?: { message?: string } }; message?: string }) => {
+        if (reqIdRef.current !== reqId) return;
+        toast.error(err?.response?.data?.message || err?.message || "Failed to load monthly summary");
+      })
+      .finally(() => {
+        if (reqIdRef.current === reqId) {
+          setLoading(false);
+        }
+      });
+  }, [selectedLedgerId, fyLabel, financeId]);
+
+  const selectedLedger = useMemo(
+    () => allLedgers.find(l => String(l.id) === String(selectedLedgerId)) || null,
+    [allLedgers, selectedLedgerId]
+  );
+
+  if (!selectedLedgerId) {
+    return (
+      <div className="dashboard-card p-0 overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-border bg-secondary/50 flex items-center justify-between">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Monthly Summary — Select a Ledger ({fyLabel})
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {ledgers.length} ledgers
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-secondary/30">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-14">Sl. No.</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Name of Ledger</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Under</th>
+                <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Closing Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledgers.map((l, i) => {
+                const cl = l.closing ?? l.openingBalance ?? 0;
+                const side = l.closingSide ?? l.balanceType;
+                return (
+                  <tr
+                    key={l.id}
+                    className="border-b border-border/40 hover:bg-secondary/30 transition-colors cursor-pointer"
+                    onClick={() => onSelectLedgerId(String(l.id))}
+                  >
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
+                    <td className="px-4 py-2.5 text-sm text-foreground font-medium">{l.name}</td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground">{l.group}</td>
+                    <td className="px-4 py-2.5 text-sm font-mono tabular-nums text-right">
+                      {cl === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <span className={side === "Dr" ? "text-foreground" : "text-income"}>
+                          ₹{cl.toLocaleString("en-IN")} {side}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {ledgers.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                    No ledgers found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  const months = monthlyData?.months || [];
+  const totalDr = months.reduce((s, m) => s + (m.debit || 0), 0);
+  const totalCr = months.reduce((s, m) => s + (m.credit || 0), 0);
+  const lastMonth = months[months.length - 1];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <Button variant="outline" size="sm" onClick={() => onSelectLedgerId("")}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div>
+          <h3 className="text-lg font-bold text-foreground">
+            {monthlyData?.ledger?.ledger_name || selectedLedger?.name || "Monthly Summary"}
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            {monthlyData?.ledger?.group_name || selectedLedger?.group || "—"} • FY {fyLabel} • Opening: ₹
+            {(monthlyData?.opening?.abs ?? 0).toLocaleString("en-IN")} {monthlyData?.opening?.side ?? "Dr"}
+          </p>
+        </div>
+      </div>
+
+      <div className="dashboard-card p-0 overflow-hidden">
+        {loading ? (
+          <div className="divide-y divide-border/50">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="flex items-center gap-4 px-4 py-3">
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-3 w-24 ml-auto" />
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border bg-secondary/50 sticky top-0">
+                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Month</th>
+                  <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Debit</th>
+                  <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Credit</th>
+                  <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Closing Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {months.map(m => (
+                  <tr key={m.month} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+                    <td className="px-4 py-2 text-sm text-foreground font-medium">{m.month_label || m.month}</td>
+                    <td className="px-4 py-2 text-sm font-mono tabular-nums text-right">
+                      {m.debit > 0 ? <span className="text-expense">₹{m.debit.toLocaleString("en-IN")}</span> : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-sm font-mono tabular-nums text-right">
+                      {m.credit > 0 ? <span className="text-income">₹{m.credit.toLocaleString("en-IN")}</span> : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-sm font-mono tabular-nums font-semibold text-right">
+                      {m.closing_abs > 0 ? (
+                        <span className={m.closing_side === "Dr" ? "text-foreground" : "text-income"}>
+                          ₹{m.closing_abs.toLocaleString("en-IN")} {m.closing_side}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {months.length > 0 && (
+                <tfoot>
+                  <tr className="border-t-2 border-border bg-secondary/40">
+                    <td className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">Total / Closing</td>
+                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-right text-foreground">
+                      ₹{totalDr.toLocaleString("en-IN")}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-right text-foreground">
+                      ₹{totalCr.toLocaleString("en-IN")}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-right text-foreground">
+                      ₹{(lastMonth?.closing_abs ?? 0).toLocaleString("en-IN")} {lastMonth?.closing_side ?? "Dr"}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Day-wise Ledger View ─────────────────────────────────────────────────────
-function LedgerDayView({ ledger, onBack }: { ledger: LedgerEntry; onBack: () => void }) {
-  let running = ledger.openingBalance * (ledger.balanceType === "Dr" ? 1 : -1);
-  const rows = LEDGER_ENTRIES.map(e => {
-    running += (e.debit - e.credit);
-    return { ...e, balance: Math.abs(running), type: running >= 0 ? "Dr" as const : "Cr" as const };
-  });
+function LedgerDayView({
+  ledger,
+  period,
+  financeId,
+  onBack,
+}: {
+  ledger: LedgerEntry;
+  period: PeriodState;
+  financeId: string;
+  onBack: () => void;
+}) {
+  const [statement, setStatement] = useState<LedgerStatement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const reqIdRef = useRef(0);
+
+  useEffect(() => {
+    const ledgerId = String(ledger.id || "");
+    if (!ledgerId || ledgerId === "-1" || !financeId) {
+      setStatement(null);
+      setLoading(false);
+      return;
+    }
+    const reqId = ++reqIdRef.current;
+    setLoading(true);
+    setStatement(null);
+
+    apiGetLedgerStatement(ledgerId, { from: period.from, to: period.to })
+      .then(res => {
+        if (reqIdRef.current !== reqId) return;
+        if (res.data?.success && res.data?.data) {
+          setStatement(res.data.data);
+        }
+      })
+      .catch((err: { response?: { data?: { message?: string } }; message?: string }) => {
+        if (reqIdRef.current !== reqId) return;
+        toast.error(err?.response?.data?.message || err?.message || "Failed to load ledger statement");
+      })
+      .finally(() => {
+        if (reqIdRef.current === reqId) {
+          setLoading(false);
+        }
+      });
+  }, [ledger.id, period.from, period.to, financeId]);
+
+  const openingDr = statement?.opening?.dr ?? 0;
+  const openingCr = statement?.opening?.cr ?? 0;
+  const openingNet = statement?.opening?.net ?? (openingDr - openingCr);
+  const openingAbs = Math.abs(openingNet);
+  const openingSide: "Dr" | "Cr" = openingNet >= 0 ? "Dr" : "Cr";
+
+  const computedRows = useMemo(() => {
+    const entries = statement?.entries || [];
+    let runningPaise = Math.round(openingNet * 100);
+    return entries.map(e => {
+      const amt = Number(e.amount) || 0;
+      const amtPaise = Math.round(amt * 100);
+      const debit = e.entry_type === "Dr" ? amt : 0;
+      const credit = e.entry_type === "Cr" ? amt : 0;
+      runningPaise += e.entry_type === "Dr" ? amtPaise : -amtPaise;
+      const balance = Number((Math.abs(runningPaise) / 100).toFixed(2));
+      const side: "Dr" | "Cr" = runningPaise >= 0 ? "Dr" : "Cr";
+      const particulars =
+        e.counter_ledgers && e.counter_ledgers.length > 1
+          ? "As per Details"
+          : e.counter_ledgers && e.counter_ledgers.length === 1
+          ? e.counter_ledgers[0]
+          : e.narration || "—";
+
+      return {
+        voucherId: e.voucher_id,
+        date: e.voucher_date,
+        particular: particulars,
+        voucherType: e.voucher_type,
+        voucherNumber: e.voucher_number,
+        debit,
+        credit,
+        balance,
+        type: side,
+      };
+    });
+  }, [statement, openingNet]);
+
+  const periodTotalDr = statement?.period_total?.dr ?? 0;
+  const periodTotalCr = statement?.period_total?.cr ?? 0;
+  const closingDr = statement?.closing?.dr ?? 0;
+  const closingCr = statement?.closing?.cr ?? 0;
+  const closingNet = statement?.closing?.net ?? (closingDr - closingCr);
+  const closingAbs = Math.abs(closingNet);
+  const closingSide: "Dr" | "Cr" = closingNet >= 0 ? "Dr" : "Cr";
+
+  const displayName = statement?.ledger?.ledger_name || ledger.name;
+  const displayGroup = statement?.ledger?.group_name || ledger.group;
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
       <div className="flex items-center gap-3">
         <Button variant="outline" size="sm" onClick={onBack}><ArrowLeft className="h-4 w-4" /></Button>
         <div>
-          <h3 className="text-lg font-bold text-foreground">{ledger.name}</h3>
-          <p className="text-xs text-muted-foreground">{ledger.group} • Opening: ₹{ledger.openingBalance.toLocaleString()} {ledger.balanceType}</p>
+          <h3 className="text-lg font-bold text-foreground">{displayName}</h3>
+          <p className="text-xs text-muted-foreground">
+            {displayGroup} • Opening: ₹{openingAbs.toLocaleString("en-IN")} {openingSide} • Closing: ₹{closingAbs.toLocaleString("en-IN")} {closingSide}
+          </p>
         </div>
       </div>
       <div className="dashboard-card p-0 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-secondary/50 sticky top-0">
-                {["Date", "Particulars", "Voucher Type", "Debit", "Credit", "Balance"].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-border/50 bg-secondary/20">
-                <td className="px-4 py-2 text-sm text-muted-foreground">{ledger.effectiveDate}</td>
-                <td className="px-4 py-2 text-sm font-medium text-foreground" colSpan={2}>Opening Balance</td>
-                <td className="px-4 py-2 text-sm font-mono tabular-nums">{ledger.balanceType === "Dr" ? `₹${ledger.openingBalance.toLocaleString()}` : "—"}</td>
-                <td className="px-4 py-2 text-sm font-mono tabular-nums">{ledger.balanceType === "Cr" ? `₹${ledger.openingBalance.toLocaleString()}` : "—"}</td>
-                <td className="px-4 py-2 text-sm font-mono tabular-nums font-semibold">₹{ledger.openingBalance.toLocaleString()} {ledger.balanceType}</td>
-              </tr>
-              {rows.map((r, i) => (
-                <tr key={i} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
-                  <td className="px-4 py-2 text-sm text-muted-foreground">{r.date}</td>
-                  <td className="px-4 py-2 text-sm text-foreground">{r.particular}</td>
-                  <td className="px-4 py-2"><Badge variant="outline" className="text-[10px]">{r.voucherType}</Badge></td>
-                  <td className="px-4 py-2 text-sm font-mono tabular-nums">{r.debit > 0 ? <span className="text-expense">₹{r.debit.toLocaleString()}</span> : "—"}</td>
-                  <td className="px-4 py-2 text-sm font-mono tabular-nums">{r.credit > 0 ? <span className="text-income">₹{r.credit.toLocaleString()}</span> : "—"}</td>
-                  <td className="px-4 py-2 text-sm font-mono tabular-nums font-semibold">₹{r.balance.toLocaleString()} {r.type}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {loading ? (
+          <div className="divide-y divide-border/50">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="flex items-center gap-4 px-4 py-3">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-3 flex-1 max-w-[200px]" />
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-3 w-24 ml-auto" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/50 sticky top-0">
+                    {["Date", "Particulars", "Voucher Type", "Voucher No.", "Debit", "Credit", "Balance"].map(h => (
+                      <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-border/50 bg-secondary/20">
+                    <td className="px-4 py-2 text-sm text-muted-foreground">{fmtDate(period.from)}</td>
+                    <td className="px-4 py-2 text-sm font-medium text-foreground" colSpan={3}>Opening Balance</td>
+                    <td className="px-4 py-2 text-sm font-mono tabular-nums">{openingDr > 0 ? `₹${openingDr.toLocaleString("en-IN")}` : "—"}</td>
+                    <td className="px-4 py-2 text-sm font-mono tabular-nums">{openingCr > 0 ? `₹${openingCr.toLocaleString("en-IN")}` : "—"}</td>
+                    <td className="px-4 py-2 text-sm font-mono tabular-nums font-semibold">₹{openingAbs.toLocaleString("en-IN")} {openingSide}</td>
+                  </tr>
+                  {computedRows.length === 0 ? (
+                    <tr className="border-b border-border/50">
+                      <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                        No transactions found for this period.
+                      </td>
+                    </tr>
+                  ) : (
+                    computedRows.map((r, i) => (
+                      <tr key={`${r.voucherId}-${i}`} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+                        <td className="px-4 py-2 text-sm text-muted-foreground">{fmtDate(r.date)}</td>
+                        <td className="px-4 py-2 text-sm text-foreground">{r.particular}</td>
+                        <td className="px-4 py-2"><Badge variant="outline" className="text-[10px]">{r.voucherType}</Badge></td>
+                        <td className="px-4 py-2 text-sm font-mono tabular-nums text-muted-foreground">{r.voucherNumber}</td>
+                        <td className="px-4 py-2 text-sm font-mono tabular-nums">{r.debit > 0 ? <span className="text-expense">₹{r.debit.toLocaleString("en-IN")}</span> : "—"}</td>
+                        <td className="px-4 py-2 text-sm font-mono tabular-nums">{r.credit > 0 ? <span className="text-income">₹{r.credit.toLocaleString("en-IN")}</span> : "—"}</td>
+                        <td className="px-4 py-2 text-sm font-mono tabular-nums font-semibold">₹{r.balance.toLocaleString("en-IN")} {r.type}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-border bg-secondary/40">
+                    <td colSpan={4} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">
+                      Period Total
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-foreground">
+                      {periodTotalDr > 0 ? `₹${periodTotalDr.toLocaleString("en-IN")}` : "₹0"}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-foreground">
+                      {periodTotalCr > 0 ? `₹${periodTotalCr.toLocaleString("en-IN")}` : "₹0"}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-muted-foreground">
+                      —
+                    </td>
+                  </tr>
+                  <tr className="border-t border-border bg-secondary/30">
+                    <td className="px-4 py-2.5 text-sm text-muted-foreground">{fmtDate(period.to)}</td>
+                    <td colSpan={3} className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">
+                      Closing Balance
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-foreground">
+                      {closingDr > 0 ? `₹${closingDr.toLocaleString("en-IN")}` : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-foreground">
+                      {closingCr > 0 ? `₹${closingCr.toLocaleString("en-IN")}` : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm font-bold font-mono tabular-nums text-foreground">
+                      ₹{closingAbs.toLocaleString("en-IN")} {closingSide}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            {statement?.truncated && (
+              <div className="px-4 py-2 border-t border-border bg-secondary/30 text-center">
+                <span className="text-xs text-muted-foreground">
+                  Showing only the first 2000 entries (of {statement.total}).
+                </span>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </motion.div>
   );

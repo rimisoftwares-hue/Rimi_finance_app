@@ -2,58 +2,162 @@
 const { db } = require('../../../config/database.config');
 
 // â”€â”€â”€ Trial Balance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-exports.getTrialBalance = async (finance_id, financial_year) => {
-  const [rows] = await db.query(
-    `SELECT
-       g.nature,
-       g.group_name,
-       g.sort_order    AS group_sort,
-       l.id            AS ledger_id,
-       l.ledger_name,
-       COALESCE(b.opening_dr, 0)  AS opening_dr,
-       COALESCE(b.opening_cr, 0)  AS opening_cr,
-       COALESCE(b.period_dr,  0)  AS period_dr,
-       COALESCE(b.period_cr,  0)  AS period_cr,
-       COALESCE(b.closing_dr, 0)  AS closing_dr,
-       COALESCE(b.closing_cr, 0)  AS closing_cr
-     FROM acc_ledgers l
-     JOIN acc_ledger_groups g ON g.id = l.group_id
-     LEFT JOIN acc_ledger_balances b
-       ON b.ledger_id = l.id
-      AND b.finance_id = l.finance_id
-      AND b.financial_year = ?
-     WHERE l.finance_id = ? AND l.is_active = 1
-       AND (COALESCE(b.closing_dr,0) > 0 OR COALESCE(b.closing_cr,0) > 0)
-     ORDER BY g.sort_order, g.group_name, l.ledger_name`,
-    [financial_year, finance_id]
-  );
-
-  // Group by nature â†’ group_name
-  const grouped = {};
-  let totalDr = 0, totalCr = 0;
-
-  rows.forEach(r => {
-    if (!grouped[r.group_name]) {
-      grouped[r.group_name] = {
-        group_name: r.group_name,
-        nature: r.nature,
-        ledgers: [],
-        group_dr: 0,
-        group_cr: 0,
-      };
+exports.getTrialBalance = async (financeId, options = {}) => {
+  let fromDate, toDate;
+  if (typeof options === 'string') {
+    if (/^\d{4}-\d{4}$/.test(options)) {
+      const [y1, y2] = options.split('-');
+      fromDate = `${y1}-04-01`;
+      toDate = `${y2}-03-31`;
+    } else {
+      fromDate = '2026-04-01';
+      toDate = '2026-10-31';
     }
-    grouped[r.group_name].ledgers.push(r);
-    grouped[r.group_name].group_dr += parseFloat(r.closing_dr);
-    grouped[r.group_name].group_cr += parseFloat(r.closing_cr);
-    totalDr += parseFloat(r.closing_dr);
-    totalCr += parseFloat(r.closing_cr);
-  });
+  } else {
+    fromDate = options.from;
+    toDate = options.to;
+  }
+
+  const query = `
+    WITH fy_info AS (
+      SELECT
+        $2::date AS from_date,
+        $3::date AS to_date,
+        MAKE_DATE(
+          CASE WHEN EXTRACT(MONTH FROM $2::date)::int >= 4 
+               THEN EXTRACT(YEAR FROM $2::date)::int 
+               ELSE EXTRACT(YEAR FROM $2::date)::int - 1 
+          END, 4, 1
+        ) AS fy_start_date
+    ),
+    prior_mov AS (
+      SELECT
+        ve.ledger_id,
+        COALESCE(SUM(CASE WHEN ve.entry_type = 'Dr' THEN ve.amount ELSE 0 END), 0) AS prior_dr,
+        COALESCE(SUM(CASE WHEN ve.entry_type = 'Cr' THEN ve.amount ELSE 0 END), 0) AS prior_cr
+      FROM acc_voucher_entries ve
+      JOIN acc_vouchers v ON v.id = ve.voucher_id
+      CROSS JOIN fy_info fi
+      JOIN acc_ledgers l ON l.id = ve.ledger_id
+      LEFT JOIN acc_group_master gm ON gm.id = l.master_group_id
+      LEFT JOIN acc_ledger_groups lg ON lg.id = l.group_id
+      WHERE ve.finance_id = $1
+        AND v.status != 'Cancelled'
+        AND v.voucher_date < fi.from_date
+        AND (
+          COALESCE(gm.nature, lg.nature) IN ('Assets', 'Liabilities')
+          OR (
+            COALESCE(gm.nature, lg.nature) IN ('Income', 'Expenses')
+            AND v.voucher_date >= fi.fy_start_date
+          )
+        )
+      GROUP BY ve.ledger_id
+    ),
+    period_mov AS (
+      SELECT
+        ve.ledger_id,
+        COALESCE(SUM(CASE WHEN ve.entry_type = 'Dr' THEN ve.amount ELSE 0 END), 0) AS period_dr,
+        COALESCE(SUM(CASE WHEN ve.entry_type = 'Cr' THEN ve.amount ELSE 0 END), 0) AS period_cr
+      FROM acc_voucher_entries ve
+      JOIN acc_vouchers v ON v.id = ve.voucher_id
+      CROSS JOIN fy_info fi
+      WHERE ve.finance_id = $1
+        AND v.status != 'Cancelled'
+        AND v.voucher_date >= fi.from_date
+        AND v.voucher_date <= fi.to_date
+      GROUP BY ve.ledger_id
+    )
+    SELECT
+      l.id AS ledger_id,
+      l.ledger_name,
+      COALESCE(gm.nature, lg.nature) AS nature,
+      COALESCE(gm.group_name, lg.group_name) AS group_name,
+      COALESCE(gm.id, lg.id) AS group_id,
+      CASE 
+        WHEN COALESCE(gm.nature, lg.nature) IN ('Income', 'Expenses') THEN 0
+        WHEN l.ob_type = 'Cr' THEN -l.opening_balance
+        ELSE l.opening_balance
+      END AS master_opening,
+      COALESCE(pm.prior_dr, 0) - COALESCE(pm.prior_cr, 0) AS prior_net,
+      COALESCE(cur.period_dr, 0) AS period_dr,
+      COALESCE(cur.period_cr, 0) AS period_cr
+    FROM acc_ledgers l
+    LEFT JOIN acc_group_master gm ON gm.id = l.master_group_id
+    LEFT JOIN acc_ledger_groups lg ON lg.id = l.group_id
+    LEFT JOIN prior_mov pm ON pm.ledger_id = l.id
+    LEFT JOIN period_mov cur ON cur.ledger_id = l.id
+    WHERE l.finance_id = $1
+      AND l.is_active = true
+      AND l.inactive = false
+    ORDER BY 
+      CASE COALESCE(gm.nature, lg.nature)
+        WHEN 'Assets' THEN 1
+        WHEN 'Liabilities' THEN 2
+        WHEN 'Income' THEN 3
+        WHEN 'Expenses' THEN 4
+        ELSE 5
+      END,
+      COALESCE(gm.group_name, lg.group_name),
+      l.ledger_name;
+  `;
+
+  const { rows } = await db.query(query, [financeId, fromDate, toDate]);
+
+  const groupsMap = new Map();
+
+  for (const r of rows) {
+    const groupName = r.group_name || 'Unassigned';
+    const nature = r.nature || 'Assets';
+    const groupId = r.group_id ? String(r.group_id) : groupName;
+
+    if (!groupsMap.has(groupName)) {
+      groupsMap.set(groupName, {
+        id: groupId,
+        name: groupName,
+        nature,
+        gDebit: 0,
+        gCredit: 0,
+        ledgers: [],
+      });
+    }
+
+    const g = groupsMap.get(groupName);
+
+    // closingNet = masterOpening + priorNet + periodDr - periodCr
+    const masterOpening = Number(r.master_opening) || 0;
+    const priorNet = Number(r.prior_net) || 0;
+    const periodDr = Number(r.period_dr) || 0;
+    const periodCr = Number(r.period_cr) || 0;
+    const closingNet = Math.round((masterOpening + priorNet + periodDr - periodCr) * 100) / 100;
+
+    const debit = closingNet > 0 ? closingNet : 0;
+    const credit = closingNet < 0 ? Math.abs(closingNet) : 0;
+
+    g.ledgers.push({
+      id: r.ledger_id,
+      name: r.ledger_name,
+      debit,
+      credit,
+    });
+
+    g.gDebit = Math.round((g.gDebit + debit) * 100) / 100;
+    g.gCredit = Math.round((g.gCredit + credit) * 100) / 100;
+  }
+
+  const groups = Array.from(groupsMap.values());
+  const totalDebit = Math.round(groups.reduce((s, g) => s + g.gDebit, 0) * 100) / 100;
+  const totalCredit = Math.round(groups.reduce((s, g) => s + g.gCredit, 0) * 100) / 100;
+  const difference = Math.round(Math.abs(totalDebit - totalCredit) * 100) / 100;
+  const isBalanced = difference < 0.01;
 
   return {
-    groups: Object.values(grouped),
-    totalDr,
-    totalCr,
-    isBalanced: Math.abs(totalDr - totalCr) < 0.01,
+    from: fromDate,
+    to: toDate,
+    isBalanced,
+    difference,
+    totalDebit,
+    totalCredit,
+    groups,
   };
 };
 
@@ -123,112 +227,364 @@ exports.getDayBook = async (finance_id, from_date, to_date) => {
   return { byDate, totalDr, totalCr };
 };
 
-// â”€â”€â”€ Profit & Loss â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-exports.getPnL = async (finance_id, financial_year) => {
-  const [rows] = await db.query(
-    `SELECT
-       g.nature,
-       g.group_name,
-       g.affects_gross_profit,
-       g.sort_order,
-       l.id            AS ledger_id,
-       l.ledger_name,
-       COALESCE(b.closing_dr, 0)  AS closing_dr,
-       COALESCE(b.closing_cr, 0)  AS closing_cr
-     FROM acc_ledgers l
-     JOIN acc_ledger_groups g ON g.id = l.group_id
-     LEFT JOIN acc_ledger_balances b
-       ON b.ledger_id = l.id
-      AND b.finance_id = l.finance_id
-      AND b.financial_year = ?
-     WHERE l.finance_id = ?
-       AND g.nature IN ('Income','Expenses')
-       AND l.is_active = 1
-     ORDER BY g.nature DESC, g.sort_order, l.ledger_name`,
-    [financial_year, finance_id]
-  );
-
-  const income   = { groups: {}, total: 0 };
-  const expenses = { groups: {}, total: 0 };
-
-  rows.forEach(r => {
-    const amount = r.nature === 'Income'
-      ? parseFloat(r.closing_cr) - parseFloat(r.closing_dr)   // income = net credit
-      : parseFloat(r.closing_dr) - parseFloat(r.closing_cr);  // expense = net debit
-
-    const bucket = r.nature === 'Income' ? income : expenses;
-    if (!bucket.groups[r.group_name]) {
-      bucket.groups[r.group_name] = {
-        group_name: r.group_name,
-        nature: r.nature,
-        ledgers: [],
-        total: 0,
-      };
+// ─── Profit & Loss ─────────────────────────────────────────────────────────────
+exports.getPnL = async (financeId, options = {}) => {
+  let fromDate, toDate;
+  if (typeof options === 'string') {
+    if (/^\d{4}-\d{4}$/.test(options)) {
+      const [y1, y2] = options.split('-');
+      fromDate = `${y1}-04-01`;
+      toDate = `${y2}-03-31`;
+    } else {
+      fromDate = '2026-04-01';
+      toDate = '2026-10-31';
     }
-    bucket.groups[r.group_name].ledgers.push({ ...r, amount });
-    bucket.groups[r.group_name].total += amount;
-    bucket.total += amount;
+  } else {
+    fromDate = options.from;
+    toDate = options.to;
+  }
+
+  const query = `
+    WITH mov AS (
+      SELECT
+        e.ledger_id,
+        SUM(CASE WHEN e.entry_type = 'Dr' THEN e.amount ELSE 0 END) AS period_dr,
+        SUM(CASE WHEN e.entry_type = 'Cr' THEN e.amount ELSE 0 END) AS period_cr
+      FROM acc_voucher_entries e
+      JOIN acc_vouchers v ON v.id = e.voucher_id
+      WHERE v.finance_id = $1
+        AND v.status != 'Cancelled'
+        AND v.voucher_date >= $2::date
+        AND v.voucher_date <= $3::date
+      GROUP BY e.ledger_id
+    )
+    SELECT
+      l.id AS id,
+      l.ledger_name AS name,
+      COALESCE(gm.group_name, lg.group_name, 'General') AS group_name,
+      COALESCE(gm.nature, lg.nature) AS nature,
+      COALESCE(gm.affects_gross_profit, lg.affects_gross_profit, false) AS affects_gross_profit,
+      COALESCE(gm.sequence_order, 999) AS sort_order,
+      COALESCE(m.period_dr, 0) AS period_dr,
+      COALESCE(m.period_cr, 0) AS period_cr
+    FROM acc_ledgers l
+    LEFT JOIN acc_group_master gm ON gm.id = l.master_group_id
+    LEFT JOIN acc_ledger_groups lg ON lg.id = l.group_id
+    LEFT JOIN mov m ON m.ledger_id = l.id
+    WHERE l.finance_id = $1
+      AND l.is_active = true
+      AND l.inactive = false
+      AND COALESCE(gm.nature, lg.nature) IN ('Income', 'Expenses')
+      AND (COALESCE(m.period_dr, 0) != 0 OR COALESCE(m.period_cr, 0) != 0)
+    ORDER BY l.ledger_name ASC;
+  `;
+
+  const { rows } = await db.query(query, [financeId, fromDate, toDate]);
+
+  const expenses = [];
+  const incomes = [];
+  const expenseGroups = {};
+  const incomeGroups = {};
+
+  let totalExpense = 0;
+  let totalIncome = 0;
+  let directExpense = 0;
+  let directIncome = 0;
+
+  rows.forEach((r) => {
+    const dr = parseFloat(r.period_dr) || 0;
+    const cr = parseFloat(r.period_cr) || 0;
+    const isIncome = r.nature === 'Income';
+    const amount = isIncome ? cr - dr : dr - cr;
+    const isDirect = Boolean(r.affects_gross_profit);
+
+    if (amount === 0) return;
+
+    const item = {
+      id: r.id,
+      name: r.name,
+      group: r.group_name,
+      isDirect,
+      amount: Math.round(amount * 100) / 100,
+    };
+
+    if (isIncome) {
+      incomes.push(item);
+      totalIncome += amount;
+      if (isDirect) directIncome += amount;
+
+      if (!incomeGroups[r.group_name]) {
+        incomeGroups[r.group_name] = {
+          group_name: r.group_name,
+          nature: 'Income',
+          ledgers: [],
+          total: 0,
+        };
+      }
+      incomeGroups[r.group_name].ledgers.push(item);
+      incomeGroups[r.group_name].total = Math.round((incomeGroups[r.group_name].total + amount) * 100) / 100;
+    } else {
+      expenses.push(item);
+      totalExpense += amount;
+      if (isDirect) directExpense += amount;
+
+      if (!expenseGroups[r.group_name]) {
+        expenseGroups[r.group_name] = {
+          group_name: r.group_name,
+          nature: 'Expenses',
+          ledgers: [],
+          total: 0,
+        };
+      }
+      expenseGroups[r.group_name].ledgers.push(item);
+      expenseGroups[r.group_name].total = Math.round((expenseGroups[r.group_name].total + amount) * 100) / 100;
+    }
   });
 
-  const netProfit = income.total - expenses.total;
+  totalExpense = Math.round(totalExpense * 100) / 100;
+  totalIncome = Math.round(totalIncome * 100) / 100;
+  directExpense = Math.round(directExpense * 100) / 100;
+  directIncome = Math.round(directIncome * 100) / 100;
+
+  const grossProfit = Math.round((directIncome - directExpense) * 100) / 100;
+  const netProfit = Math.round((totalIncome - totalExpense) * 100) / 100;
+  const marginPct = totalIncome !== 0 ? parseFloat(((netProfit / totalIncome) * 100).toFixed(1)) : 0;
 
   return {
-    income:   { groups: Object.values(income.groups),   total: income.total },
-    expenses: { groups: Object.values(expenses.groups), total: expenses.total },
+    from: fromDate,
+    to: toDate,
+    expenses,
+    incomes,
+    totalExpense,
+    totalIncome,
+    grossProfit,
     netProfit,
+    marginPct,
     isProfit: netProfit >= 0,
+    income: { groups: Object.values(incomeGroups), total: totalIncome },
+    expensesGroups: { groups: Object.values(expenseGroups), total: totalExpense },
   };
 };
 
-// â”€â”€â”€ Balance Sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-exports.getBalanceSheet = async (finance_id, financial_year) => {
-  const [rows] = await db.query(
-    `SELECT
-       g.nature,
-       g.group_name,
-       g.sort_order,
-       l.id            AS ledger_id,
-       l.ledger_name,
-       COALESCE(b.closing_dr, 0)  AS closing_dr,
-       COALESCE(b.closing_cr, 0)  AS closing_cr
-     FROM acc_ledgers l
-     JOIN acc_ledger_groups g ON g.id = l.group_id
-     LEFT JOIN acc_ledger_balances b
-       ON b.ledger_id = l.id
-      AND b.finance_id = l.finance_id
-      AND b.financial_year = ?
-     WHERE l.finance_id = ?
-       AND g.nature IN ('Assets','Liabilities')
-       AND l.is_active = 1
-     ORDER BY g.sort_order, l.ledger_name`,
-    [financial_year, finance_id]
-  );
-
-  const assets      = { groups: {}, total: 0 };
-  const liabilities = { groups: {}, total: 0 };
-
-  rows.forEach(r => {
-    const amount = r.nature === 'Assets'
-      ? parseFloat(r.closing_dr) - parseFloat(r.closing_cr)  // assets = net debit
-      : parseFloat(r.closing_cr) - parseFloat(r.closing_dr); // liabilities = net credit
-
-    const bucket = r.nature === 'Assets' ? assets : liabilities;
-    if (!bucket.groups[r.group_name]) {
-      bucket.groups[r.group_name] = {
-        group_name: r.group_name,
-        nature: r.nature,
-        ledgers: [],
-        total: 0,
-      };
+// ─── Balance Sheet ─────────────────────────────────────────────────────────────
+exports.getBalanceSheet = async (financeId, options = {}) => {
+  let asOfDate;
+  if (typeof options === 'string') {
+    if (/^\d{4}-\d{4}$/.test(options)) {
+      const [y1, y2] = options.split('-');
+      asOfDate = `${y2}-03-31`;
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(options)) {
+      asOfDate = options;
+    } else {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      asOfDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     }
-    bucket.groups[r.group_name].ledgers.push({ ...r, amount });
-    bucket.groups[r.group_name].total += amount;
-    bucket.total += amount;
+  } else if (options && typeof options === 'object') {
+    asOfDate = options.as_of_date || options.as_on_date || options.date || options.asOf;
+    if (!asOfDate) {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      asOfDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    }
+  } else {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    asOfDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  }
+
+  // Determine local Indian FY start date for asOfDate
+  const d = new Date(asOfDate + 'T00:00:00');
+  const m = d.getMonth() + 1; // 1-12
+  const y = d.getFullYear();
+  const fyStartYear = m >= 4 ? y : y - 1;
+  const fyStart = `${fyStartYear}-04-01`;
+
+  // 1. Ledger balances and period P&L movements
+  const query = `
+    WITH mov AS (
+      SELECT
+        e.ledger_id,
+        SUM(CASE WHEN e.entry_type = 'Dr' THEN e.amount ELSE 0 END) AS total_dr,
+        SUM(CASE WHEN e.entry_type = 'Cr' THEN e.amount ELSE 0 END) AS total_cr,
+        SUM(CASE WHEN v.voucher_date >= $3::date AND e.entry_type = 'Dr' THEN e.amount ELSE 0 END) AS cur_dr,
+        SUM(CASE WHEN v.voucher_date >= $3::date AND e.entry_type = 'Cr' THEN e.amount ELSE 0 END) AS cur_cr,
+        SUM(CASE WHEN v.voucher_date < $3::date AND e.entry_type = 'Dr' THEN e.amount ELSE 0 END) AS pri_dr,
+        SUM(CASE WHEN v.voucher_date < $3::date AND e.entry_type = 'Cr' THEN e.amount ELSE 0 END) AS pri_cr
+      FROM acc_voucher_entries e
+      JOIN acc_vouchers v ON v.id = e.voucher_id
+      WHERE v.finance_id = $1
+        AND v.status != 'Cancelled'
+        AND v.voucher_date <= $2::date
+      GROUP BY e.ledger_id
+    )
+    SELECT
+      l.id AS id,
+      l.ledger_name AS name,
+      COALESCE(gm.group_name, lg.group_name, 'General') AS group_name,
+      COALESCE(gm.nature, lg.nature) AS nature,
+      COALESCE(gm.sequence_order, 999) AS seq_order,
+      l.opening_balance,
+      l.ob_type,
+      CASE 
+        WHEN l.ob_type = 'Cr' THEN -l.opening_balance 
+        ELSE l.opening_balance 
+      END AS signed_ob,
+      COALESCE(m.total_dr, 0) AS total_dr,
+      COALESCE(m.total_cr, 0) AS total_cr,
+      COALESCE(m.cur_dr, 0) AS cur_dr,
+      COALESCE(m.cur_cr, 0) AS cur_cr,
+      COALESCE(m.pri_dr, 0) AS pri_dr,
+      COALESCE(m.pri_cr, 0) AS pri_cr
+    FROM acc_ledgers l
+    LEFT JOIN acc_group_master gm ON gm.id = l.master_group_id
+    LEFT JOIN acc_ledger_groups lg ON lg.id = l.group_id
+    LEFT JOIN mov m ON m.ledger_id = l.id
+    WHERE l.finance_id = $1
+      AND l.is_active = true
+      AND l.inactive = false
+    ORDER BY COALESCE(gm.sequence_order, 999), group_name, l.ledger_name;
+  `;
+
+  const { rows } = await db.query(query, [financeId, asOfDate, fyStart]);
+
+  let currentPeriodIncome = 0;
+  let currentPeriodExpense = 0;
+  let priorPeriodIncome = 0;
+  let priorPeriodExpense = 0;
+  let nominalOpeningProfit = 0;
+
+  const liabGroupsMap = {};
+  const assetGroupsMap = {};
+
+  let totalLiabilities = 0;
+  let totalAssets = 0;
+
+  rows.forEach((r) => {
+    const ob = parseFloat(r.signed_ob) || 0;
+    const totalDr = parseFloat(r.total_dr) || 0;
+    const totalCr = parseFloat(r.total_cr) || 0;
+    const net = ob + totalDr - totalCr; // net debit
+
+    if (r.nature === 'Income' || r.nature === 'Expenses') {
+      const curDr = parseFloat(r.cur_dr) || 0;
+      const curCr = parseFloat(r.cur_cr) || 0;
+      const priDr = parseFloat(r.pri_dr) || 0;
+      const priCr = parseFloat(r.pri_cr) || 0;
+
+      if (r.nature === 'Income') {
+        currentPeriodIncome += (curCr - curDr);
+        priorPeriodIncome += (priCr - priDr);
+        nominalOpeningProfit += (r.ob_type === 'Cr' ? parseFloat(r.opening_balance) : -parseFloat(r.opening_balance));
+      } else {
+        currentPeriodExpense += (curDr - curCr);
+        priorPeriodExpense += (priDr - priCr);
+        nominalOpeningProfit += (r.ob_type === 'Cr' ? parseFloat(r.opening_balance) : -parseFloat(r.opening_balance));
+      }
+      return;
+    }
+
+    if (r.nature === 'Assets') {
+      const amount = Math.round(net * 100) / 100;
+      if (amount === 0) return;
+      totalAssets += amount;
+      if (!assetGroupsMap[r.group_name]) {
+        assetGroupsMap[r.group_name] = { group: r.group_name, seq: r.seq_order, items: [] };
+      }
+      assetGroupsMap[r.group_name].items.push({ id: r.id, name: r.name, amount, drillable: true });
+    } else if (r.nature === 'Liabilities') {
+      const amount = Math.round((-net) * 100) / 100;
+      if (amount === 0) return;
+      totalLiabilities += amount;
+      if (!liabGroupsMap[r.group_name]) {
+        liabGroupsMap[r.group_name] = { group: r.group_name, seq: r.seq_order, items: [] };
+      }
+      liabGroupsMap[r.group_name].items.push({ id: r.id, name: r.name, amount, drillable: true });
+    }
   });
 
+  const currentPeriodProfit = Math.round((currentPeriodIncome - currentPeriodExpense) * 100) / 100;
+  const priorPeriodProfit = Math.round((priorPeriodIncome - priorPeriodExpense) * 100) / 100;
+  const openingProfit = Math.round((priorPeriodProfit + nominalOpeningProfit) * 100) / 100;
+
+  // Add the two P&L items into Reserves & Surplus per Section 2.2
+  const reservesItems = [];
+  if (openingProfit !== 0) {
+    reservesItems.push({
+      name: openingProfit < 0 ? 'Profit & Loss A/c (Opening / Brought Forward Loss)' : 'Profit & Loss A/c (Opening / Brought Forward)',
+      amount: openingProfit,
+      drillable: false,
+    });
+    totalLiabilities += openingProfit;
+  }
+
+  if (currentPeriodProfit !== 0) {
+    reservesItems.push({
+      name: currentPeriodProfit < 0 ? 'Profit & Loss A/c (Current Period Net Loss)' : 'Profit & Loss A/c (Current Period)',
+      amount: currentPeriodProfit,
+      drillable: false,
+    });
+    totalLiabilities += currentPeriodProfit;
+  }
+
+  if (reservesItems.length > 0) {
+    if (!liabGroupsMap['Reserves & Surplus']) {
+      liabGroupsMap['Reserves & Surplus'] = { group: 'Reserves & Surplus', seq: 2, items: [] };
+    }
+    liabGroupsMap['Reserves & Surplus'].items.unshift(...reservesItems);
+  }
+
+  totalAssets = Math.round(totalAssets * 100) / 100;
+  totalLiabilities = Math.round(totalLiabilities * 100) / 100;
+  const difference = Math.round(Math.abs(totalLiabilities - totalAssets) * 100) / 100;
+  const isBalanced = difference < 0.01;
+
+  // Diagnostics per Section 2.3
+  const diagObRes = await db.query(
+    `SELECT COALESCE(SUM(CASE WHEN l.ob_type = 'Cr' THEN -l.opening_balance ELSE l.opening_balance END), 0) AS net_master_ob
+     FROM acc_ledgers l
+     WHERE l.finance_id = $1 AND l.is_active = true AND l.inactive = false`,
+    [financeId]
+  );
+  const netMasterOpeningBalance = Math.round(parseFloat(diagObRes.rows[0]?.net_master_ob || 0) * 100) / 100;
+
+  const diagInvalidNaturesRes = await db.query(
+    `SELECT l.id, l.ledger_name
+     FROM acc_ledgers l
+     LEFT JOIN acc_group_master gm ON gm.id = l.master_group_id
+     LEFT JOIN acc_ledger_groups lg ON lg.id = l.group_id
+     WHERE l.finance_id = $1
+       AND (COALESCE(gm.nature, lg.nature) IS NULL 
+            OR COALESCE(gm.nature, lg.nature) NOT IN ('Assets', 'Liabilities', 'Income', 'Expenses'))
+       AND l.is_active = true AND l.inactive = false`,
+    [financeId]
+  );
+  const invalidNatureLedgersCount = diagInvalidNaturesRes.rows.length;
+
+  const diagnostics = {
+    invalidNatureLedgersCount,
+    netMasterOpeningBalance,
+    openingProfit,
+    currentPeriodProfit,
+    unbalancedDifference: difference,
+  };
+
+  const liabilitiesList = Object.values(liabGroupsMap).sort((a, b) => a.seq - b.seq || a.group.localeCompare(b.group));
+  const assetsList = Object.values(assetGroupsMap).sort((a, b) => a.seq - b.seq || a.group.localeCompare(b.group));
+
   return {
-    assets:      { groups: Object.values(assets.groups),      total: assets.total },
-    liabilities: { groups: Object.values(liabilities.groups), total: liabilities.total },
+    asOfDate,
+    fyStart,
+    liabilities: liabilitiesList,
+    assets: assetsList,
+    totalLiabilities,
+    totalAssets,
+    difference,
+    isBalanced,
+    netProfit: currentPeriodProfit,
+    diagnostics,
+    liabilitiesGroups: { groups: liabilitiesList, total: totalLiabilities },
+    assetsGroups: { groups: assetsList, total: totalAssets },
   };
 };
 

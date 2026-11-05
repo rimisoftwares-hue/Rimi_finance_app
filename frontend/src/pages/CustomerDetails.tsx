@@ -51,7 +51,7 @@ const CustomerDetails = () => {
     if (owner?.username) return owner.username;
     if ((owner as any)?.name) return (owner as any).name;
     try {
-      const stored = localStorage.getItem('userData');
+      const stored = sessionStorage.getItem('userData') || localStorage.getItem('userData');
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed.username) return parsed.username;
@@ -71,7 +71,7 @@ const CustomerDetails = () => {
     if (user?.role === 'owner' || user?.role === 'admin') return true;
     if (owner) return true;
     try {
-      const storedUserData = localStorage.getItem('userData');
+      const storedUserData = sessionStorage.getItem('userData') || localStorage.getItem('userData');
       if (storedUserData) {
         const parsed = JSON.parse(storedUserData);
         if (parsed.role === 'owner' || parsed.role === 'admin') return true;

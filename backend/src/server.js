@@ -10,9 +10,32 @@ require('dotenv').config({
 
 const WebSocket = require('ws');
 const { app } = require('./app');
-const { isConnected } = require('./config/database.config');
+const { isConnected, db } = require('./config/database.config');
 
 const PORT = process.env.PORT || 3004;
+
+// ─── Stale Session Closer (every 2 minutes) ──────────────────────────────────
+async function closeStaleSessions() {
+  try {
+    const res = await db.query(`
+      UPDATE agent_login_sessions
+         SET logout_time = last_seen_at,
+             duration_seconds = EXTRACT(EPOCH FROM (last_seen_at - login_time))::int,
+             logout_reason = 'timeout'
+       WHERE logout_time IS NULL
+         AND last_seen_at < CURRENT_TIMESTAMP - INTERVAL '3 minutes'
+    `);
+    if (res.rowCount > 0) {
+      console.log(`[SessionCloser] Closed ${res.rowCount} stale session(s) due to timeout.`);
+    }
+  } catch (err) {
+    console.error('[SessionCloser] Error closing stale sessions:', err.message);
+  }
+}
+
+// Run once at boot and then every 2 minutes
+closeStaleSessions();
+setInterval(closeStaleSessions, 2 * 60 * 1000);
 
 // ─── WebSocket setup ──────────────────────────────────────────────────────────
 let wss;

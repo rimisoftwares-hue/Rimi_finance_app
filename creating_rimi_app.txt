@@ -1,0 +1,71 @@
+
+
+To open new laptop
+
+# 1. Install Docker Desktop on the new laptop
+#    → https://www.docker.com/products/docker-desktop
+
+# 2. Navigate to project folder
+cd Rimi_finance_app
+
+# 3. Run — Docker builds everything automatically
+docker compose up --build
+
+
+============================================================
+//file Strucure
+
+Rimi_finance_app/
+│
+├── backend/            # Node + Express
+│   ├── index.js
+│   ├── db.js
+│   └── package.json
+│
+├── frontend/           # React app
+│   ├── src/
+│   ├── App.tsx
+│   └── package.json
+│
+└── src-tauri/          # Tauri (Rust)
+
+//instaling tauri
+C:\Users\prate>cargo install tauri-cli
+
+C:\Users\prate>cargo tauri --version
+tauri-cli 2.9.6
+
+C:\Users\prate>rustc --version
+rustc 1.92.0 (ded5c06cf 2025-12-08)
+
+C:\Users\prate>node -v
+v20.17.0
+
+//convert react js and backend project to tauri app
+C:\SENTHUR  CONSLITING\Rimi_finance_app>cargo tauri init --force
+✔ What is your app name? · Rimi Finance
+✔ What should the window title be? · Rimi Finance
+? Where are your web assets (HTML/CSS/JS) located, relative to the "<current dir>/src-tauri/tauri.conf.json" file that w✔ Where are your web assets (HTML/CSS/JS) located, relative to the "<current dir>/src-tauri/tauri.conf.json" file that will be created? · ../frontend/dist
+✔ What is the url of your dev server? · http://localhost:5173
+✔ What is your frontend dev command? · npm run dev
+✔ What is your frontend build command? · npm run build
+
+C:\SENTHUR  CONSLITING\Rimi_finance_app>
+
+==========================================================================================
+to converting .tar file
+
+// backend
+PS E:\SENTHUR_CONSLITING\Rimi_finance_app> docker save rimi_finance_app-backend -o backend.tar
+
+// frontend
+PS E:\SENTHUR_CONSLITING\Rimi_finance_app> docker save rimi_finance_app-frontend -o frontend.tar
+
+# Load images (no build needed, no internet needed)
+docker load -i backend.tar
+docker load -i frontend.tar
+
+# Run without --build flag
+docker compose up
+
+================================================================================

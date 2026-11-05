@@ -160,6 +160,34 @@ function AppContent() {
     return cleanup;
   }, []);
 
+  // Tauri window close session cleanup
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      try {
+        if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          unlisten = await getCurrentWindow().onCloseRequested(async (event) => {
+            if (!sessionStorage.getItem('authToken')) return; // nothing to close; let it exit
+            event.preventDefault();
+            try {
+              await Promise.race([
+                apiClient.post('/auth/user-logout', { reason: 'window_close' }),
+                new Promise((r) => setTimeout(r, 2000)), // never trap the user in the app
+              ]);
+            } catch { /* server-side timeout closer will handle it */ }
+            await getCurrentWindow().destroy();
+          });
+        }
+      } catch (e) {
+        console.warn('Tauri window close listener not attached:', e);
+      }
+    })();
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   // Track every React Router navigation so Alt+Left/Right work correctly
   const location = useLocation();
   useEffect(() => {

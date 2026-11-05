@@ -28,6 +28,7 @@ import {
 } from "../ui/dropdown-menu";
 import { DatePicker } from "../ui/date-picker";
 import { ImageUpload } from "../common/ImageUpload_DK";
+import { AddFinanceDialog } from "./AddFinanceDialog";
 import { useOwnerAuth } from "../../contexts/OwnerAuthContext";
 import { useAuth } from "../../contexts/AuthContext";
 import {
@@ -53,38 +54,6 @@ interface BankAccount {
   isActive: boolean;
 }
 
-interface NewFinanceData {
-  financeName: string;
-  phoneNumbers: string[];
-  emails: string[];
-  houseNo: string;
-  street: string;
-  streetName: string;
-  village: string;
-  landmark: string;
-  address: string;
-  city: string;
-  district: string;
-  state: string;
-  pincode: string;
-  location: string;
-  since: string;
-  // Primary Bank details
-  bankName: string;
-  branch: string;
-  ifscCode: string;
-  accountNumber: string;
-  accountName: string;
-  upiId: string;
-}
-
-const emptyFinance: NewFinanceData = {
-  financeName: "", phoneNumbers: [""], emails: [""],
-  houseNo: "", street: "", streetName: "", village: "", landmark: "",
-  address: "", city: "", district: "", state: "", pincode: "", location: "", since: "",
-  bankName: "", branch: "", ifscCode: "", accountNumber: "", accountName: "", upiId: "",
-};
-
 interface CompanyDataState {
   id: string;
   name: string;
@@ -109,6 +78,9 @@ interface CompanyDataState {
   state: string;
   pincode: string;
   location: string;
+  office_lat: number | null | string;
+  office_lng: number | null | string;
+  office_geofence_m: number | string;
 }
 
 interface KPIsState {
@@ -201,11 +173,8 @@ export default function CompanyProfile() {
 
   // Forms state
   const [newBank, setNewBank] = useState<Partial<BankAccount>>({});
-  const [newFinance, setNewFinance] = useState<NewFinanceData>({ ...emptyFinance });
-  const [newFinanceLogoFile, setNewFinanceLogoFile] = useState<File | null>(null);
   const [tempWebLogoFile, setTempWebLogoFile] = useState<File | null>(null);
   const [tempPrintLogoFile, setTempPrintLogoFile] = useState<File | null>(null);
-  const [isSubmittingFinance, setIsSubmittingFinance] = useState(false);
 
   // Dynamic Data
   const [companyData, setCompanyData] = useState<CompanyDataState>({
@@ -231,6 +200,9 @@ export default function CompanyProfile() {
     state: "",
     pincode: "",
     location: "",
+    office_lat: null,
+    office_lng: null,
+    office_geofence_m: 200,
   });
 
   const [banks, setBanks] = useState<BankAccount[]>([]);
@@ -291,6 +263,9 @@ export default function CompanyProfile() {
           state: f.state || "",
           pincode: f.pincode || "",
           location: f.location || "",
+          office_lat: f.office_lat !== undefined && f.office_lat !== null ? f.office_lat : "",
+          office_lng: f.office_lng !== undefined && f.office_lng !== null ? f.office_lng : "",
+          office_geofence_m: f.office_geofence_m !== undefined && f.office_geofence_m !== null ? f.office_geofence_m : 200,
         });
 
         if (Array.isArray(f.banks)) {
@@ -451,6 +426,9 @@ export default function CompanyProfile() {
         state: companyData.state,
         pincode: companyData.pincode,
         location: companyData.location,
+        office_lat: companyData.office_lat !== "" && companyData.office_lat !== null ? Number(companyData.office_lat) : null,
+        office_lng: companyData.office_lng !== "" && companyData.office_lng !== null ? Number(companyData.office_lng) : null,
+        office_geofence_m: companyData.office_geofence_m ? parseInt(String(companyData.office_geofence_m), 10) : 200,
       };
 
       const res = await apiClient.put('/finance/profile', payload);
@@ -635,75 +613,6 @@ export default function CompanyProfile() {
       }
     } catch (err: any) {
       toast.error(err?.response?.data?.error || "Failed to delete bank account");
-    }
-  };
-
-  // ─── CREATE NEW FINANCE COMPANY ───
-  const handleCreateFinance = async () => {
-    if (!newFinance.financeName.trim()) {
-      toast.error("Please enter a finance company name");
-      return;
-    }
-    const validPhones = newFinance.phoneNumbers.filter(p => p.trim());
-    if (validPhones.length === 0) {
-      toast.error("Please enter at least one phone number");
-      return;
-    }
-
-    setIsSubmittingFinance(true);
-    try {
-      const formData = new FormData();
-      formData.append("finance_name", newFinance.financeName.trim());
-      formData.append("phone_numbers", JSON.stringify(validPhones));
-      formData.append("emails", JSON.stringify(newFinance.emails.filter(e => e.trim())));
-      if (newFinance.since) formData.append("since", newFinance.since);
-
-      if (newFinance.houseNo) formData.append("house_no", newFinance.houseNo);
-      if (newFinance.street) formData.append("street", newFinance.street);
-      if (newFinance.streetName) formData.append("street_name", newFinance.streetName);
-      if (newFinance.village) formData.append("village", newFinance.village);
-      if (newFinance.landmark) formData.append("landmark", newFinance.landmark);
-      if (newFinance.address) formData.append("address", newFinance.address);
-      if (newFinance.city) formData.append("city", newFinance.city);
-      if (newFinance.district) formData.append("district", newFinance.district);
-      if (newFinance.state) formData.append("state", newFinance.state);
-      if (newFinance.pincode) formData.append("pincode", newFinance.pincode);
-      if (newFinance.location) formData.append("location", newFinance.location);
-
-      if (newFinance.bankName) formData.append("bank_name", newFinance.bankName.trim());
-      if (newFinance.branch) formData.append("branch", newFinance.branch.trim());
-      if (newFinance.ifscCode) formData.append("ifsc_code", newFinance.ifscCode.trim().toUpperCase());
-      if (newFinance.accountNumber) formData.append("account_number", newFinance.accountNumber.trim());
-      if (newFinance.accountName) formData.append("account_name", newFinance.accountName.trim());
-      if (newFinance.upiId) formData.append("upi_id", newFinance.upiId.trim());
-
-      if (authenticatedOwnerId) {
-        formData.append("owner_id", String(authenticatedOwnerId));
-      }
-
-      if (newFinanceLogoFile) {
-        formData.append("company_logo", newFinanceLogoFile);
-      }
-
-      const response = await apiClient.post('/finance/create', formData);
-
-      if (response.data?.success) {
-        toast.success("New finance company created successfully!");
-        setShowAddFinance(false);
-        setNewFinance({ ...emptyFinance });
-        setNewFinanceLogoFile(null);
-
-        // Refresh global finance lists
-        await refreshFinanceList();
-        await fetchProfileData();
-      } else {
-        toast.error(response.data?.error || "Failed to create finance company");
-      }
-    } catch (err: any) {
-      console.error("Error creating finance:", err);
-      toast.error(err?.response?.data?.error || err.message || "Failed to create finance company");
-    } finally {
-      setIsSubmittingFinance(false);
     }
   };
 
@@ -1217,12 +1126,52 @@ export default function CompanyProfile() {
                       />
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-dashed border-border/60">
+                    <div>
+                      <Label className="text-[11px]">Office Latitude</Label>
+                      <Input
+                        value={companyData.office_lat ?? ""}
+                        onChange={e => setCompanyData({ ...companyData, office_lat: e.target.value })}
+                        placeholder="e.g. 11.0168445"
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Office Longitude</Label>
+                      <Input
+                        value={companyData.office_lng ?? ""}
+                        onChange={e => setCompanyData({ ...companyData, office_lng: e.target.value })}
+                        placeholder="e.g. 76.9558321"
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Geofence (Meters)</Label>
+                      <Input
+                        type="number"
+                        value={companyData.office_geofence_m ?? 200}
+                        onChange={e => setCompanyData({ ...companyData, office_geofence_m: e.target.value })}
+                        placeholder="200"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  </div>
                 </div>
               ) : (
-                <p className="text-sm text-foreground flex items-start gap-1.5 pt-0.5">
-                  <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                  {formattedFullAddress}
-                </p>
+                <div>
+                  <p className="text-sm text-foreground flex items-start gap-1.5 pt-0.5">
+                    <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                    {formattedFullAddress}
+                  </p>
+                  {companyData.office_lat && companyData.office_lng && (
+                    <div className="text-xs text-muted-foreground flex items-center gap-2 mt-1 ml-5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                        Office GPS: {Number(companyData.office_lat).toFixed(6)}, {Number(companyData.office_lng).toFixed(6)} (Geofence: {companyData.office_geofence_m || 200}m)
+                      </span>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -1816,352 +1765,16 @@ export default function CompanyProfile() {
       </Dialog>
 
       {/* ─── Add New Finance Dialog ─── */}
-      <Dialog
+      <AddFinanceDialog
         open={showAddFinance}
-        onOpenChange={open => {
-          if (!open) {
-            setShowAddFinance(false);
-            setNewFinance({ ...emptyFinance });
-            setNewFinanceLogoFile(null);
-          } else {
-            setShowAddFinance(true);
-          }
+        onOpenChange={setShowAddFinance}
+        authenticatedOwnerId={authenticatedOwnerId}
+        authenticatedOwnerName={authenticatedOwnerName}
+        onCreated={async () => {
+          await refreshFinanceList();
+          await fetchProfileData();
         }}
-      >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-primary" /> Create New Finance Company
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-5 pt-2">
-            {/* Authenticated Owner Context Badge */}
-            {authenticatedOwnerName && (
-              <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20 text-xs">
-                <div className="flex items-center gap-2 text-primary font-medium">
-                  <Shield className="h-4 w-4 shrink-0" />
-                  <span>Account Owner: <strong className="text-foreground">{authenticatedOwnerName}</strong></span>
-                </div>
-                <Badge variant="outline" className="text-[10px] bg-background/50 border-primary/30 text-primary">
-                  Owner Authenticated
-                </Badge>
-              </div>
-            )}
-
-            {/* Basic Info */}
-            <div className="space-y-3">
-              <h4 className="text-sm font-semibold text-foreground">Basic Information</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Finance Name *</Label>
-                  <Input
-                    value={newFinance.financeName}
-                    onChange={e => setNewFinance({ ...newFinance, financeName: e.target.value })}
-                    placeholder="e.g., ABC Finance Ltd."
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Established Since (Date)</Label>
-                  <DatePicker
-                    value={newFinance.since}
-                    onValueChange={val => setNewFinance({ ...newFinance, since: val })}
-                    placeholder="Pick established date"
-                    className="w-full"
-                    max={new Date()}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Company Logo Upload */}
-            <div className="space-y-1">
-              <ImageUpload
-                label="Company Logo (1:1 Ratio)"
-                value={newFinanceLogoFile}
-                onChange={f => setNewFinanceLogoFile(f instanceof File ? f : null)}
-                enableCrop={true}
-                aspectRatio={1}
-                className="w-full"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Uploaded securely to AWS S3 storage under folder <code className="text-[10px] bg-muted px-1 py-0.5 rounded">finance/</code>
-              </p>
-            </div>
-
-            <Separator />
-
-            {/* Primary Bank Account Details */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-primary" />
-                <h4 className="text-sm font-semibold text-foreground">Primary Bank Account Details</h4>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Bank Name</Label>
-                  <Input
-                    value={newFinance.bankName}
-                    onChange={e => setNewFinance({ ...newFinance, bankName: e.target.value })}
-                    placeholder="e.g., State Bank of India"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Account Number</Label>
-                  <Input
-                    value={newFinance.accountNumber}
-                    onChange={e => setNewFinance({ ...newFinance, accountNumber: e.target.value })}
-                    placeholder="e.g., 50100234567890"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">IFSC Code</Label>
-                  <Input
-                    value={newFinance.ifscCode}
-                    onChange={e => setNewFinance({ ...newFinance, ifscCode: e.target.value.toUpperCase() })}
-                    placeholder="e.g., SBIN0001234"
-                    maxLength={11}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Branch</Label>
-                  <Input
-                    value={newFinance.branch}
-                    onChange={e => setNewFinance({ ...newFinance, branch: e.target.value })}
-                    placeholder="e.g., Main Branch"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Account Holder Name</Label>
-                  <Input
-                    value={newFinance.accountName}
-                    onChange={e => setNewFinance({ ...newFinance, accountName: e.target.value })}
-                    placeholder="Defaults to Finance Name"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">UPI ID (Optional)</Label>
-                  <Input
-                    value={newFinance.upiId}
-                    onChange={e => setNewFinance({ ...newFinance, upiId: e.target.value })}
-                    placeholder="e.g., abcdfinance@okhdfcbank"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Phone Numbers */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold">Phone Numbers *</Label>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs text-primary"
-                  onClick={() => setNewFinance({ ...newFinance, phoneNumbers: [...newFinance.phoneNumbers, ""] })}
-                >
-                  <Plus className="h-3 w-3 mr-1" /> Add
-                </Button>
-              </div>
-              {newFinance.phoneNumbers.map((ph, i) => (
-                <div key={i} className="flex gap-2">
-                  <Input
-                    value={ph}
-                    onChange={e => {
-                      const p = [...newFinance.phoneNumbers];
-                      p[i] = e.target.value;
-                      setNewFinance({ ...newFinance, phoneNumbers: p });
-                    }}
-                    placeholder="+91 9876543210"
-                  />
-                  {newFinance.phoneNumbers.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-9 w-9 p-0 text-destructive"
-                      onClick={() => {
-                        const p = [...newFinance.phoneNumbers];
-                        p.splice(i, 1);
-                        setNewFinance({ ...newFinance, phoneNumbers: p });
-                      }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Emails */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold">Email Addresses</Label>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs text-primary"
-                  onClick={() => setNewFinance({ ...newFinance, emails: [...newFinance.emails, ""] })}
-                >
-                  <Plus className="h-3 w-3 mr-1" /> Add
-                </Button>
-              </div>
-              {newFinance.emails.map((em, i) => (
-                <div key={i} className="flex gap-2">
-                  <Input
-                    value={em}
-                    onChange={e => {
-                      const emails = [...newFinance.emails];
-                      emails[i] = e.target.value;
-                      setNewFinance({ ...newFinance, emails });
-                    }}
-                    placeholder="contact@finance.com"
-                  />
-                  {newFinance.emails.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-9 w-9 p-0 text-destructive"
-                      onClick={() => {
-                        const emails = [...newFinance.emails];
-                        emails.splice(i, 1);
-                        setNewFinance({ ...newFinance, emails });
-                      }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <Separator />
-
-            {/* Address */}
-            <div className="space-y-3">
-              <h4 className="text-sm font-semibold text-foreground">Address Details</h4>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Building No</Label>
-                  <Input
-                    value={newFinance.houseNo}
-                    onChange={e => setNewFinance({ ...newFinance, houseNo: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Street</Label>
-                  <Input
-                    value={newFinance.street}
-                    onChange={e => setNewFinance({ ...newFinance, street: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Street Name</Label>
-                  <Input
-                    value={newFinance.streetName}
-                    onChange={e => setNewFinance({ ...newFinance, streetName: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Village / Area</Label>
-                  <Input
-                    value={newFinance.village}
-                    onChange={e => setNewFinance({ ...newFinance, village: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Landmark</Label>
-                  <Input
-                    value={newFinance.landmark}
-                    onChange={e => setNewFinance({ ...newFinance, landmark: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Additional Info</Label>
-                <Textarea
-                  value={newFinance.address}
-                  onChange={e => setNewFinance({ ...newFinance, address: e.target.value })}
-                  placeholder="Road, building, floor details"
-                  rows={2}
-                />
-              </div>
-              <div className="grid grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">City *</Label>
-                  <Input
-                    value={newFinance.city}
-                    onChange={e => setNewFinance({ ...newFinance, city: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">District *</Label>
-                  <Input
-                    value={newFinance.district}
-                    onChange={e => setNewFinance({ ...newFinance, district: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">State *</Label>
-                  <Input
-                    value={newFinance.state}
-                    onChange={e => setNewFinance({ ...newFinance, state: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Pincode *</Label>
-                  <Input
-                    value={newFinance.pincode}
-                    onChange={e => setNewFinance({ ...newFinance, pincode: e.target.value })}
-                    maxLength={6}
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Location (GPS / Maps Link)</Label>
-                <Input
-                  value={newFinance.location}
-                  onChange={e => setNewFinance({ ...newFinance, location: e.target.value })}
-                  placeholder="Google Maps link or coordinates"
-                />
-              </div>
-            </div>
-
-            {/* Submit */}
-            <div className="flex justify-end gap-3 pt-2">
-              <Button
-                variant="outline"
-                disabled={isSubmittingFinance}
-                onClick={() => {
-                  setShowAddFinance(false);
-                  setNewFinance({ ...emptyFinance });
-                  setNewFinanceLogoFile(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleCreateFinance}
-                disabled={isSubmittingFinance || !newFinance.financeName.trim() || newFinance.phoneNumbers.filter(p => p.trim()).length === 0}
-              >
-                {isSubmittingFinance ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Creating Finance...
-                  </>
-                ) : (
-                  "Create Finance"
-                )}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      />
     </div>
   );
 }

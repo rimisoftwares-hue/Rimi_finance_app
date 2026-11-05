@@ -225,6 +225,17 @@ const handleCreateFinance = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Finance name is required' });
     }
 
+    const parseCoord = (v, limit) => {
+      if (v === undefined || v === null || String(v).trim() === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) && Math.abs(n) <= limit ? Number(n.toFixed(7)) : NaN;
+    };
+    const latitude = parseCoord(req.body.latitude, 90);
+    const longitude = parseCoord(req.body.longitude, 180);
+    if (Number.isNaN(latitude) || Number.isNaN(longitude) || ((latitude === null) !== (longitude === null))) {
+      return res.status(400).json({ success: false, error: 'Latitude and longitude must both be valid numbers' });
+    }
+
     const phoneNumbersArray = parseArrayField(phone_numbers);
     if (phoneNumbersArray.length === 0) {
       return res.status(400).json({ success: false, error: 'At least one phone number is required' });
@@ -288,11 +299,11 @@ const handleCreateFinance = async (req, res) => {
       let addressId = null;
 
       if (house_no || street || street_name || village || effectiveLandmark ||
-          address || city || district || state || pincode || location) {
+          address || city || district || state || pincode || location || latitude !== null || longitude !== null) {
         const addressResult = await client.query(
           `INSERT INTO addresses (
-             house_no, street, street_name, village, land_mark, address, city, district, state, pincode, location
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             house_no, street, street_name, village, land_mark, address, city, district, state, pincode, location, latitude, longitude
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id`,
           [
             house_no || '',
@@ -306,6 +317,8 @@ const handleCreateFinance = async (req, res) => {
             state || '',
             pincode || '',
             location || '',
+            latitude,
+            longitude,
           ]
         );
         addressId = addressResult.rows[0].id;
@@ -315,9 +328,9 @@ const handleCreateFinance = async (req, res) => {
       const financePhotoUrl = uploadedLogo ? uploadedLogo.fileUrl : null;
       const financeResult = await client.query(
         `INSERT INTO finance_detail (
-           owner_id, finance_name, phone_numbers, emails, is_active, since, address_id, finance_photo
-         ) VALUES ($1, $2, $3::jsonb, $4::jsonb, 1, $5, $6, $7)
-         RETURNING id, finance_name, owner_id, phone_numbers, emails, since, address_id, finance_photo, created_at`,
+           owner_id, finance_name, phone_numbers, emails, is_active, since, address_id, finance_photo, office_lat, office_lng
+         ) VALUES ($1, $2, $3::jsonb, $4::jsonb, 1, $5, $6, $7, $8, $9)
+         RETURNING id, finance_name, owner_id, phone_numbers, emails, since, address_id, finance_photo, office_lat, office_lng, office_geofence_m, created_at`,
         [
           authenticatedOwner.id,
           finance_name.trim(),
@@ -326,6 +339,8 @@ const handleCreateFinance = async (req, res) => {
           formattedSinceDate,
           addressId,
           financePhotoUrl,
+          latitude,
+          longitude,
         ]
       );
       const createdFinance = financeResult.rows[0];
@@ -599,6 +614,9 @@ router.get('/allowed-finances', async (req, res) => {
           fd.emails,
           fd.since,
           fd.finance_photo,
+          fd.office_lat,
+          fd.office_lng,
+          fd.office_geofence_m,
           fd.is_active,
           'owner' AS user_role,
           NULL AS login_time_from,
@@ -631,6 +649,9 @@ router.get('/allowed-finances', async (req, res) => {
           fd.emails,
           fd.since,
           fd.finance_photo,
+          fd.office_lat,
+          fd.office_lng,
+          fd.office_geofence_m,
           fd.is_active,
           uac.role AS user_role,
           uac.login_time_from,
@@ -675,6 +696,9 @@ router.get('/allowed-finances', async (req, res) => {
           city: f.city || '',
           district: f.district || '',
           state: f.state || '',
+          office_lat: f.office_lat !== null && f.office_lat !== undefined ? Number(f.office_lat) : null,
+          office_lng: f.office_lng !== null && f.office_lng !== undefined ? Number(f.office_lng) : null,
+          office_geofence_m: f.office_geofence_m !== null && f.office_geofence_m !== undefined ? Number(f.office_geofence_m) : 200,
           is_active: f.is_active === 1 || f.is_active === true,
         };
       })
@@ -996,9 +1020,11 @@ router.get('/profile', ownerCheckFinance, async (req, res) => {
       SELECT 
         fd.id, fd.finance_name, fd.owner_id, fd.phone_numbers, fd.emails,
         fd.since, fd.established_date, fd.finance_photo, fd.is_active,
+        fd.office_lat, fd.office_lng, fd.office_geofence_m,
         o.username AS owner_name,
         a.house_no, a.street, a.street_name, a.village, a.land_mark,
         a.address, a.city, a.district, a.state, a.pincode, a.location,
+        a.latitude, a.longitude,
         fd.created_at, fd.updated_at
       FROM finance_detail fd
       LEFT JOIN owner o ON fd.owner_id = o.id
@@ -1212,6 +1238,21 @@ router.put('/profile', ownerCheckFinance, async (req, res) => {
       values.push(is_active ? 1 : 0);
     }
 
+    if (req.body.office_lat !== undefined) {
+      updates.push(`office_lat = $${pIdx++}`);
+      values.push(req.body.office_lat === null || req.body.office_lat === '' ? null : Number(req.body.office_lat));
+    }
+
+    if (req.body.office_lng !== undefined) {
+      updates.push(`office_lng = $${pIdx++}`);
+      values.push(req.body.office_lng === null || req.body.office_lng === '' ? null : Number(req.body.office_lng));
+    }
+
+    if (req.body.office_geofence_m !== undefined) {
+      updates.push(`office_geofence_m = $${pIdx++}`);
+      values.push(req.body.office_geofence_m === null || req.body.office_geofence_m === '' ? 200 : parseInt(req.body.office_geofence_m, 10));
+    }
+
     if (updates.length > 0) {
       updates.push(`updated_at = CURRENT_TIMESTAMP`);
       values.push(financeId);
@@ -1226,7 +1267,8 @@ router.put('/profile', ownerCheckFinance, async (req, res) => {
     const hasAddressField = house_no !== undefined || street !== undefined || street_name !== undefined ||
       village !== undefined || effectiveLandmark !== null || address !== undefined ||
       city !== undefined || district !== undefined || state !== undefined ||
-      pincode !== undefined || location !== undefined;
+      pincode !== undefined || location !== undefined ||
+      req.body.latitude !== undefined || req.body.longitude !== undefined;
 
     if (hasAddressField) {
       const { rows: existingAddr } = await db.query(`
@@ -1254,16 +1296,25 @@ router.put('/profile', ownerCheckFinance, async (req, res) => {
         if (state !== undefined) { addrUpdates.push(`state = $${aIdx++}`); addrVals.push(state); }
         if (pincode !== undefined) { addrUpdates.push(`pincode = $${aIdx++}`); addrVals.push(pincode); }
         if (location !== undefined) { addrUpdates.push(`location = $${aIdx++}`); addrVals.push(location); }
+        if (req.body.latitude !== undefined) {
+          addrUpdates.push(`latitude = $${aIdx++}`);
+          addrVals.push(req.body.latitude === null || req.body.latitude === '' ? null : Number(req.body.latitude));
+        }
+        if (req.body.longitude !== undefined) {
+          addrUpdates.push(`longitude = $${aIdx++}`);
+          addrVals.push(req.body.longitude === null || req.body.longitude === '' ? null : Number(req.body.longitude));
+        }
 
         if (addrUpdates.length > 0) {
           addrVals.push(addrId);
           await db.query(`UPDATE addresses SET ${addrUpdates.join(', ')} WHERE id = $${aIdx}`, addrVals);
         }
       } else {
+        const parseCoordOrNull = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
         const { rows: newAddr } = await db.query(
           `INSERT INTO addresses (
-             house_no, street, street_name, village, land_mark, address, city, district, state, pincode, location
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             house_no, street, street_name, village, land_mark, address, city, district, state, pincode, location, latitude, longitude
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id`,
           [
             house_no || '',
@@ -1277,6 +1328,8 @@ router.put('/profile', ownerCheckFinance, async (req, res) => {
             state || '',
             pincode || '',
             location || '',
+            parseCoordOrNull(req.body.latitude),
+            parseCoordOrNull(req.body.longitude),
           ]
         );
         await db.query(

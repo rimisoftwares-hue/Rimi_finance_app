@@ -4,6 +4,8 @@ import { Eye, EyeOff, Lock, User, Building, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useOwnerAuth } from '../contexts/OwnerAuthContext';
 import apiClient from '../api/apiClient';
+import { useLoginLocation } from '../hooks/useLoginLocation';
+import { PermissionModal } from '../components/common/PermissionModal';
 
 
 interface Finance {
@@ -16,11 +18,27 @@ const UserLogin = () => {
   const [selectedFinance, setSelectedFinance] = useState<string>('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
+  const [policy, setPolicy] = useState<'strict' | 'prefer' | 'off'>('prefer');
   const [isLoading, setIsLoading] = useState(false);
   const [financeList, setFinanceList] = useState<Finance[]>([]);
   const { userLogin } = useAuth();
   const { owner, isLoading: ownerLoading, ownerLogout } = useOwnerAuth();
   const navigate = useNavigate();
+  const loginLoc = useLoginLocation();
+
+  // Load login policy on mount
+  useEffect(() => {
+    apiClient.get('/auth/login-policy')
+      .then((r) => {
+        if (r.data?.policy) {
+          setPolicy(r.data.policy);
+        }
+      })
+      .catch(() => {
+        setPolicy('prefer');
+      });
+  }, []);
 
   // Redirect to owner login if no owner session
   useEffect(() => {
@@ -71,7 +89,9 @@ const UserLogin = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setNotice(null);
     setIsLoading(true);
+
     try {
       if (!selectedFinance) {
         throw new Error('Please select a finance company');
@@ -81,12 +101,48 @@ const UserLogin = () => {
         throw new Error('Username/phone number and password are required');
       }
 
-      const res = await userLogin(identifier, password, selectedFinance);
+      // Location capture gate
+      let locationPayload: {
+        latitude?: number;
+        longitude?: number;
+        accuracyM?: number;
+        locationPermission?: 'granted' | 'declined' | 'blocked' | 'unavailable' | 'not_asked';
+      } | undefined = undefined;
+
+      if (policy !== 'off') {
+        const locResult = await loginLoc.captureForLogin();
+        const hasCoords = locResult.latitude != null && locResult.longitude != null;
+
+        if (policy === 'strict' && !hasCoords) {
+          setError('Location is required to log in');
+          setIsLoading(false);
+          return;
+        }
+
+        if (policy === 'prefer' && !hasCoords) {
+          setNotice('Location is off; approximate location was recorded');
+        }
+
+        locationPayload = {
+          latitude: locResult.latitude,
+          longitude: locResult.longitude,
+          accuracyM: locResult.accuracyM,
+          locationPermission: locResult.locationPermission,
+        };
+      }
+
+      const res = await userLogin(identifier, password, selectedFinance, locationPayload);
 
       if (res && res.success) {
         navigate('/');
       } else {
-        setError(res?.message || 'Invalid credentials or finance access denied');
+        if (res?.error_code === 'LOCATION_REQUIRED') {
+          setError(res?.message || 'Location is required by policy.');
+          // Re-open permission flow
+          loginLoc.captureForLogin();
+        } else {
+          setError(res?.message || 'Invalid credentials or finance access denied');
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred during login');
@@ -229,6 +285,41 @@ const UserLogin = () => {
               )}
             </div>
 
+            {/* Location Status Row (Hidden if policy is off) */}
+            {policy !== 'off' && (
+              <div className="flex items-center justify-between text-xs px-1 text-gray-600">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      loginLoc.status === 'granted' ? 'bg-emerald-500' : 'bg-amber-500'
+                    }`}
+                  />
+                  <span>
+                    Location:{' '}
+                    <strong className="font-semibold text-gray-700">
+                      {loginLoc.status === 'granted' ? 'Enabled' : 'Off'}
+                    </strong>
+                  </span>
+                </div>
+                {loginLoc.status !== 'granted' && (
+                  <button
+                    type="button"
+                    onClick={() => loginLoc.captureForLogin()}
+                    className="text-blue-600 hover:text-blue-700 font-medium underline"
+                  >
+                    Enable
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Non-blocking Notice */}
+            {notice && (
+              <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded-md text-xs text-amber-800">
+                {notice}
+              </div>
+            )}
+
             <div>
               <button
                 type="submit"
@@ -252,6 +343,16 @@ const UserLogin = () => {
           </form>
         </div>
       </div>
+
+      <PermissionModal
+        open={loginLoc.flow.phase === 'soft' || loginLoc.flow.phase === 'blocked'}
+        type="location"
+        mode={loginLoc.flow.phase === 'blocked' ? 'blocked' : 'soft'}
+        busy={loginLoc.flow.phase === 'requesting'}
+        onAllow={loginLoc.flow.onAllow}
+        onCancel={loginLoc.flow.onCancel}
+        onRetry={loginLoc.flow.retryAfterSettings}
+      />
     </div>
   );
 };

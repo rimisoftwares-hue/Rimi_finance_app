@@ -81,6 +81,14 @@ export const OwnerAuthProvider: React.FC<{ children: ReactNode }> = ({ children 
     localStorage.removeItem('ownerFinances');
     localStorage.removeItem('authToken');
     localStorage.removeItem('currentFinance');
+    sessionStorage.removeItem('authToken');
+    sessionStorage.removeItem('userData');
+    sessionStorage.removeItem('financeData');
+    sessionStorage.removeItem('currentFinance');
+    sessionStorage.removeItem('statistics');
+    sessionStorage.removeItem('currentFinanceId');
+    sessionStorage.removeItem('lastLogin');
+    sessionStorage.removeItem('lastKnownLocation');
     setOwner(null);
     setOwnerFinanceList([]);
   };

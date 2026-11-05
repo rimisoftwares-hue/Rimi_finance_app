@@ -50,9 +50,22 @@ router.use('/godowns', enhancedCheckFinance, godownRoutes);
 const voucherRoutes = require('../modules/accounting/vouchers/voucher.routes');
 router.use('/vouchers', enhancedCheckFinance, voucherRoutes);
 
+// ─── Accounting: Day Book ─────────────────────────────────────────────────────
+const daybookRoutes = require('../modules/accounting/daybook/daybook.routes');
+router.use('/accounting/daybook', enhancedCheckFinance, daybookRoutes);
+router.use('/daybook', enhancedCheckFinance, daybookRoutes);
+
 // ─── Accounting: Reports ──────────────────────────────────────────────────────
 const reportsRoutes = require('../modules/accounting/reports/reports.routes');
 router.use('/reports', enhancedCheckFinance, reportsRoutes);
+
+// ─── Agent Assignments ────────────────────────────────────────────────────────
+const agentAssignmentRoutes = require('../modules/agents/agentAssignment.routes');
+router.use('/agent-assignments', enhancedCheckFinance, agentAssignmentRoutes);
+
+// ─── Agent Area Allocations ───────────────────────────────────────────────────
+const areaAllocationRoutes = require('../modules/agents/areaAllocation.routes');
+router.use('/agents/area-allocations', enhancedCheckFinance, areaAllocationRoutes);
 
 module.exports = router;
 

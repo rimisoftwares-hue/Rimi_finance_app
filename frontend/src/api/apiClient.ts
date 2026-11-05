@@ -26,14 +26,18 @@ apiClient.interceptors.request.use(
       delete config.headers['Content-Type'];
     }
 
-    // Auth token (stored as 'authToken' by AuthContext)
-    const token = localStorage.getItem('authToken');
+    // Auth token (session-ephemeral for users, persistent for owner)
+    const token = sessionStorage.getItem('authToken') || localStorage.getItem('authToken');
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
 
     // Finance ID — AuthContext stores it inside the 'financeData' JSON object
-    const financeRaw = localStorage.getItem('financeData') || localStorage.getItem('currentFinance');
+    const financeRaw =
+      sessionStorage.getItem('financeData') ||
+      sessionStorage.getItem('currentFinance') ||
+      localStorage.getItem('financeData') ||
+      localStorage.getItem('currentFinance');
     if (financeRaw) {
       try {
         const financeData = JSON.parse(financeRaw);
@@ -94,11 +98,22 @@ apiClient.interceptors.response.use(
 
       // Session expired during regular app usage:
       // Clear user session keys (preserve ownerToken if owner is still active)
+      sessionStorage.removeItem('authToken');
+      sessionStorage.removeItem('financeData');
+      sessionStorage.removeItem('currentFinance');
+      sessionStorage.removeItem('userData');
+      sessionStorage.removeItem('statistics');
+      sessionStorage.removeItem('lastLogin');
+      sessionStorage.removeItem('currentFinanceId');
+      sessionStorage.removeItem('lastKnownLocation');
+
       localStorage.removeItem('authToken');
       localStorage.removeItem('financeData');
+      localStorage.removeItem('currentFinance');
       localStorage.removeItem('userData');
       localStorage.removeItem('statistics');
       localStorage.removeItem('lastLogin');
+      localStorage.removeItem('currentFinanceId');
 
       const hasOwner = !!localStorage.getItem('ownerToken');
       if (hasOwner) {

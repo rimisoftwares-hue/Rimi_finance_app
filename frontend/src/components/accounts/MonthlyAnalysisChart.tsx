@@ -63,7 +63,7 @@ export function MonthlyAnalysisChart({
                     tickFormatter={(v: number) => v >= 100000 ? `${(v/100000).toFixed(1)}L` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : `${v}`} />
                   <Tooltip
                     contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                    formatter={(v: any) => `₹${Number(v).toLocaleString()}`}
+                    formatter={(v: any) => `₹${Number(v).toLocaleString("en-IN")}`}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   {bars.map(b => (

@@ -1,11 +1,15 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Building2, ChevronDown, Check, Loader2 } from "lucide-react";
+import { Building2, ChevronDown, Check, Loader2, Bell, X } from "lucide-react";
 import { DashboardToggle } from "../components/dashboard/DashboardToggle";
 import { MainDashboard } from "../components/dashboard/MainDashboard";
 import { StaffDashboard } from "../components/dashboard/StaffDashboard";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
+import { Button } from "../components/ui/button";
+import { usePermissionFlow } from "../hooks/usePermissionFlow";
+import { DevicePermissionService } from "../services/devicePermissionService";
+import { PermissionModal } from "../components/common/PermissionModal";
 
 /* ── Shimmer block ── */
 function Shimmer({ className = "" }: { className?: string }) {
@@ -42,6 +46,31 @@ export default function Dashboard() {
   const { currentFinance, financeList, switchFinance, refreshFinanceList } = useAuth();
   const [showFinanceMenu, setShowFinanceMenu] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const notificationFlow = usePermissionFlow("notification");
+  const [showNotificationBanner, setShowNotificationBanner] = useState(false);
+
+  useEffect(() => {
+    const isDismissed = sessionStorage.getItem("dismissed_notification_banner") === "true";
+    if (isDismissed) return;
+
+    DevicePermissionService.queryStatus("notification").then((status) => {
+      if (status === "prompt") {
+        setShowNotificationBanner(true);
+      }
+    });
+  }, []);
+
+  const handleEnableNotifications = async () => {
+    const res = await notificationFlow.ensure();
+    if (res.granted) {
+      setShowNotificationBanner(false);
+    }
+  };
+
+  const handleDismissBanner = () => {
+    sessionStorage.setItem("dismissed_notification_banner", "true");
+    setShowNotificationBanner(false);
+  };
 
   useEffect(() => {
     localStorage.setItem("dashboardMode", mode);
@@ -185,6 +214,38 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Dismissible Desktop Reminders Banner */}
+      {showNotificationBanner && (
+        <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl border border-primary/20 bg-primary/5 text-foreground text-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-lg bg-primary/10 text-primary">
+              <Bell className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="font-medium text-xs sm:text-sm">Enable desktop reminders</p>
+              <p className="text-[11px] sm:text-xs text-muted-foreground">Receive reminders for upcoming collections and assignment updates.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              onClick={handleEnableNotifications}
+              className="h-8 text-xs font-medium"
+            >
+              Enable
+            </Button>
+            <button
+              type="button"
+              onClick={handleDismissBanner}
+              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Dashboard Content with smooth finance-switch transition */}
       <div className="relative">
         <AnimatePresence mode="wait">
@@ -211,6 +272,16 @@ export default function Dashboard() {
           )}
         </AnimatePresence>
       </div>
+
+      <PermissionModal
+        open={notificationFlow.phase === 'soft' || notificationFlow.phase === 'blocked'}
+        type="notification"
+        mode={notificationFlow.phase === 'blocked' ? 'blocked' : 'soft'}
+        busy={notificationFlow.phase === 'requesting'}
+        onAllow={notificationFlow.onAllow}
+        onCancel={notificationFlow.onCancel}
+        onRetry={notificationFlow.retryAfterSettings}
+      />
     </div>
   );
 }

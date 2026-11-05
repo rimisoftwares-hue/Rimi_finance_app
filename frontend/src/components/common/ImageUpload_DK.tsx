@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { cn } from '../lib/utils';
+import { usePermissionFlow } from '../../hooks/usePermissionFlow';
+import { PermissionModal } from './PermissionModal';
 import ReactCrop, { Crop, PixelCrop, centerCrop, makeAspectCrop, convertToPixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
@@ -95,6 +97,9 @@ export function ImageUpload({
   const [originalFileName, setOriginalFileName] = useState<string>('image.jpg');
   const [originalMimeType, setOriginalMimeType] = useState<string>('image/jpeg');
 
+  // Permission flow
+  const cameraFlow = usePermissionFlow('camera');
+
   // Camera state
   const [cameraOpen, setCameraOpen] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -171,10 +176,17 @@ export function ImageUpload({
     }
   }, [stopStream]);
 
-  const openCamera = useCallback(() => {
+  const openCameraUI = useCallback(() => {
     setCameraOpen(true);
     setTimeout(() => startCamera(facingMode), 100);
   }, [facingMode, startCamera]);
+
+  const handleCameraClick = useCallback(async () => {
+    const r = await cameraFlow.ensure();
+    if (r.granted) {
+      openCameraUI();
+    }
+  }, [cameraFlow, openCameraUI]);
 
   const closeCamera = useCallback(() => {
     stopStream();
@@ -439,7 +451,7 @@ export function ImageUpload({
               {enableCamera && (
                 <button
                   type="button"
-                  onClick={openCamera}
+                  onClick={handleCameraClick}
                   className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-medium shadow-sm transition-all active:scale-95"
                 >
                   <Camera className="w-3.5 h-3.5" />
@@ -488,7 +500,7 @@ export function ImageUpload({
                   {enableCamera && (
                     <button
                       type="button"
-                      onClick={openCamera}
+                      onClick={handleCameraClick}
                       className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-xs"
                       title="Take Photo"
                     >
@@ -522,7 +534,7 @@ export function ImageUpload({
                   {enableCamera && (
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); openCamera(); }}
+                      onClick={(e) => { e.stopPropagation(); handleCameraClick(); }}
                       className="p-1.5 bg-primary text-primary-foreground rounded-full shadow hover:bg-primary/90 transition-colors"
                       title="Retake with camera"
                     >
@@ -828,6 +840,20 @@ export function ImageUpload({
         </div>,
         document.body
       )}
+
+      <PermissionModal
+        open={cameraFlow.phase === 'soft' || cameraFlow.phase === 'blocked'}
+        type="camera"
+        mode={cameraFlow.phase === 'blocked' ? 'blocked' : 'soft'}
+        busy={cameraFlow.phase === 'requesting'}
+        onAllow={cameraFlow.onAllow}
+        onCancel={cameraFlow.onCancel}
+        onRetry={cameraFlow.retryAfterSettings}
+        fallback={{
+          label: "Upload from file",
+          onClick: () => inputRef.current?.click(),
+        }}
+      />
     </div>
   );
 }

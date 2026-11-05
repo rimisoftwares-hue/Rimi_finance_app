@@ -897,6 +897,9 @@ CREATE TABLE finance_detail (
     updated_at                TIMESTAMP           DEFAULT CURRENT_TIMESTAMP,
     since                     DATE         DEFAULT NULL,
     address_id                UUID                DEFAULT NULL,
+    office_lat                DECIMAL(10,7)       DEFAULT NULL,
+    office_lng                DECIMAL(10,7)       DEFAULT NULL,
+    office_geofence_m         INT                 DEFAULT 200,
 
     PRIMARY KEY (id),
     CONSTRAINT fk_finance_address FOREIGN KEY (address_id) REFERENCES addresses(id) ON DELETE SET NULL,
@@ -2188,9 +2191,21 @@ CREATE TABLE IF NOT EXISTS agent_login_sessions (
     login_lng             DECIMAL(10,7)       DEFAULT NULL,
     distance_from_office  DECIMAL(8,2)        DEFAULT NULL,
     location_label        VARCHAR(200)        DEFAULT NULL,
+    location_source       VARCHAR(10)         NOT NULL DEFAULT 'none',
+    location_accuracy_m   INT                 DEFAULT NULL,
+    location_permission   VARCHAR(15)         DEFAULT NULL,
+    ip_city               VARCHAR(100)        DEFAULT NULL,
+    ip_region             VARCHAR(100)        DEFAULT NULL,
+    ip_country            VARCHAR(10)         DEFAULT NULL,
+    flagged               BOOLEAN             NOT NULL DEFAULT false,
+    flag_reason           VARCHAR(100)        DEFAULT NULL,
+    last_seen_at          TIMESTAMP           DEFAULT CURRENT_TIMESTAMP,
+    logout_reason         VARCHAR(20)         DEFAULT NULL,
     PRIMARY KEY (id),
     CONSTRAINT fk_als_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_als_open ON agent_login_sessions (last_seen_at) WHERE logout_time IS NULL;
 
 -- ------------------------------------------------------------
 -- Method 4.5: Live Customer Location Tracking Method
