@@ -57,6 +57,14 @@ export const submitFormData = async (params: SubmitFormDataParams): Promise<Subm
       formData.append('vehiclePhoto', vehicle.vehiclePhoto);
       delete (vehicleData as any).vehiclePhoto;
     }
+    if (vehicle.frontImage instanceof File) {
+      formData.append('frontImage', vehicle.frontImage);
+      delete (vehicleData as any).frontImage;
+    }
+    if (vehicle.sideImage instanceof File) {
+      formData.append('sideImage', vehicle.sideImage);
+      delete (vehicleData as any).sideImage;
+    }
 
     formData.append('customer', JSON.stringify(customerData));
     formData.append('guardian', JSON.stringify(guardianData));

@@ -10,6 +10,7 @@ const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = re
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const Jimp = require('jimp');
 const { mapPendingCollectionRow } = require('./pendingCollectionsHelper');
+const { isDeferredVehicle, resolveDeferredVehicle, mapVehicleUniqueViolation } = require('./deferredVehicle');
 const {
   evaluateCustomerKyc,
   evaluateStaffKyc,
@@ -132,6 +133,12 @@ const cleanContactNumber = (num) => {
   return digits.length === 10 ? digits : null;
 };
 
+const parseCoordinate = (val) => {
+  if (val === undefined || val === null || val === '') return null;
+  const n = Number(val);
+  return isNaN(n) ? null : n;
+};
+
 const resolveVehicleInfoId = async (conn, vehicle) => {
   if (!vehicle) return null;
 
@@ -227,6 +234,24 @@ const validateCustomerPayload = (customer, address, contacts) => {
   if ((!streetName || !String(streetName).trim()) && (!village || !String(village).trim())) {
     return { isValid: false, valid: false, error: 'Either Street Name or Village is required' };
   }
+  // Coordinates validation
+  const latRaw = address?.latitude ?? customer?.latitude ?? customer?.caddress?.latitude;
+  const lngRaw = address?.longitude ?? customer?.longitude ?? customer?.caddress?.longitude;
+  const hasLat = latRaw !== undefined && latRaw !== null && String(latRaw).trim() !== '';
+  const hasLng = lngRaw !== undefined && lngRaw !== null && String(lngRaw).trim() !== '';
+  if (hasLat !== hasLng) {
+    return { isValid: false, valid: false, error: 'Both latitude and longitude must be provided, or leave both empty' };
+  }
+  if (hasLat && hasLng) {
+    const latN = Number(latRaw);
+    const lngN = Number(lngRaw);
+    if (isNaN(latN) || latN < -90 || latN > 90) {
+      return { isValid: false, valid: false, error: 'Latitude must be between -90 and 90' };
+    }
+    if (isNaN(lngN) || lngN < -180 || lngN > 180) {
+      return { isValid: false, valid: false, error: 'Longitude must be between -180 and 180' };
+    }
+  }
   // Contacts: at least one valid 10-digit contact
   const contactList = Array.isArray(contacts)
     ? contacts
@@ -268,6 +293,24 @@ const validateGuardianPayload = (guardian, gaddress, gcontacts) => {
   const streetName = gaddress?.street_name || guardian?.street_name || guardian?.gaddress?.street_name || guardian?.address?.street_name;
   if (!streetName || !String(streetName).trim()) {
     return { isValid: false, valid: false, error: 'Guardian street name is required' };
+  }
+  // Coordinates validation
+  const latRaw = gaddress?.latitude ?? guardian?.latitude ?? guardian?.gaddress?.latitude;
+  const lngRaw = gaddress?.longitude ?? guardian?.longitude ?? guardian?.gaddress?.longitude;
+  const hasLat = latRaw !== undefined && latRaw !== null && String(latRaw).trim() !== '';
+  const hasLng = lngRaw !== undefined && lngRaw !== null && String(lngRaw).trim() !== '';
+  if (hasLat !== hasLng) {
+    return { isValid: false, valid: false, error: 'Both latitude and longitude must be provided, or leave both empty' };
+  }
+  if (hasLat && hasLng) {
+    const latN = Number(latRaw);
+    const lngN = Number(lngRaw);
+    if (isNaN(latN) || latN < -90 || latN > 90) {
+      return { isValid: false, valid: false, error: 'Latitude must be between -90 and 90' };
+    }
+    if (isNaN(lngN) || lngN < -180 || lngN > 180) {
+      return { isValid: false, valid: false, error: 'Longitude must be between -180 and 180' };
+    }
   }
   // At least one valid guardian contact number
   const contactList = Array.isArray(gcontacts)
@@ -458,7 +501,7 @@ const handleFileUploads = async (files, hplno) => {
     if (fileArray && fileArray.length > 0) {
       const file = fileArray[0];
       const fileName = generateFileName(file.originalname);
-      const folder = (fieldName === 'vehiclePhoto' || fieldName === 'customerVehiclePhoto') ? 'vehicles' : 'customers';
+      const folder = (fieldName === 'vehiclePhoto' || fieldName === 'customerVehiclePhoto' || fieldName === 'frontImage' || fieldName === 'sideImage') ? 'vehicles' : 'customers';
 
       try {
         const s3Url = await uploadToS3(file.buffer, fileName, file.mimetype, folder);
@@ -595,7 +638,9 @@ router.post('/', enhancedCheckFinance, upload.fields([
   { name: 'vehiclePhoto', maxCount: 1 },
   { name: 'customerPropertyPhoto', maxCount: 1 },
   { name: 'guardianPhoto', maxCount: 1 },
-  { name: 'guardianPropertyPhoto', maxCount: 1 }
+  { name: 'guardianPropertyPhoto', maxCount: 1 },
+  { name: 'frontImage', maxCount: 1 },
+  { name: 'sideImage', maxCount: 1 }
 ]), async (req, res) => {
   const conn = await db.connect();
 
@@ -639,27 +684,52 @@ router.post('/', enhancedCheckFinance, upload.fields([
 
       console.log('vehicle id:', vehicle.id);
 
-      // 3. Update vehicle status to 'sales' if vehicle ID exists
-      if (vehicle.id) {
-        // First check if vehicle exists and is available
+      let targetVehicleId = vehicle.id;
+
+      // 3. Handle Vehicle: deferred (consulting) vehicles are resolved/inserted inside this
+      //    transaction (see deferredVehicle.js). Real UUIDs keep the existing behaviour below.
+      if (isDeferredVehicle(vehicle)) {
+        const deferred = await resolveDeferredVehicle(conn, {
+          vehicle,
+          financeId: finance_id,
+          resolveVehicleInfoId,
+          insertClause: pgInsertClause,
+        });
+        targetVehicleId = deferred.vehicleId;
+
+        const __insVehAct = pgInsertClause({
+          finance_id: finance_id,
+          type: 'vehicle',
+          reference_id: targetVehicleId,
+          description: deferred.created
+            ? `Vehicle ${deferred.vehicleNumber} created with sales status for consulting customer ${customer.hplno}`
+            : `Vehicle ${deferred.vehicleNumber} status changed to sales for customer ${customer.hplno}`,
+          created_by: req.user?.user_name || 'System'
+        });
+        await conn.query(
+          `INSERT INTO recent_activity (${__insVehAct.columns}) VALUES (${__insVehAct.placeholders})`,
+          __insVehAct.values
+        );
+      } else if (targetVehicleId) {
+        // Existing vehicle: update status to 'sales' if available
         const { rows: vehicleCheck } = await conn.query(
           'SELECT id, status FROM vehicle_detail WHERE id = $1 AND finance_id = $2',
-          [vehicle.id, finance_id]
+          [targetVehicleId, finance_id]
         );
 
         if (vehicleCheck.length > 0 && vehicleCheck[0].status === 'available') {
           // Update vehicle status to 'sales'
           await conn.query(
             'UPDATE vehicle_detail SET status = $1 WHERE id = $2',
-            ['sales', vehicle.id]
+            ['sales', targetVehicleId]
           );
 
           // Log the vehicle status change
           const __ins1 = pgInsertClause({
             finance_id: finance_id,
             type: 'vehicle',
-            reference_id: vehicle.id,
-            description: `Vehicle ${vehicle.vehicleNumber} status changed to sales for customer ${customer.hplno}`,
+            reference_id: targetVehicleId,
+            description: `Vehicle ${vehicle.vehicleNumber || ''} status changed to sales for customer ${customer.hplno}`,
             created_by: req.user?.user_name || 'System'
           });
           await conn.query(
@@ -678,7 +748,7 @@ router.post('/', enhancedCheckFinance, upload.fields([
         cname: customer.cname,
         cfname_value: customer.cfname?.value || null,
         cfname_unit: customer.cfname?.unit || null,
-        vehicle_id: vehicle.id || null,
+        vehicle_id: targetVehicleId || null,
         aadhar_id: customer.aadhar_id || null,
         other_govt_id_type: customer.other_govt_id_type || null,
         other_govt_id_number: customer.other_govt_id_number || null,
@@ -733,20 +803,48 @@ router.post('/', enhancedCheckFinance, upload.fields([
         });
       }
       // Store vehicle photo directly in vehicle_media
-      const vehPhotoUrl = getFileUrl(uploadedFiles.vehiclePhoto) || getFileUrl(uploadedFiles.customerVehiclePhoto);
-      if (vehPhotoUrl && vehicle.id) {
-        await saveVehicleMedia(conn, {
-          financeId: finance_id,
-          vehicleId: vehicle.id,
-          mediaUrl: vehPhotoUrl,
-          mediaType: 'front',
-          isPrimary: 1
-        });
+      if (targetVehicleId) {
+        if (uploadedFiles.frontImage) {
+          const frontUrl = getFileUrl(uploadedFiles.frontImage);
+          if (frontUrl) {
+            await saveVehicleMedia(conn, {
+              financeId: finance_id,
+              vehicleId: targetVehicleId,
+              mediaUrl: frontUrl,
+              mediaType: 'front',
+              isPrimary: 1
+            });
+          }
+        }
+        if (uploadedFiles.sideImage) {
+          const sideUrl = getFileUrl(uploadedFiles.sideImage);
+          if (sideUrl) {
+            await saveVehicleMedia(conn, {
+              financeId: finance_id,
+              vehicleId: targetVehicleId,
+              mediaUrl: sideUrl,
+              mediaType: 'side',
+              isPrimary: 0
+            });
+          }
+        }
+        const vehPhotoUrl = getFileUrl(uploadedFiles.vehiclePhoto) || getFileUrl(uploadedFiles.customerVehiclePhoto);
+        if (vehPhotoUrl && !uploadedFiles.frontImage) {
+          await saveVehicleMedia(conn, {
+            financeId: finance_id,
+            vehicleId: targetVehicleId,
+            mediaUrl: vehPhotoUrl,
+            mediaType: 'front',
+            isPrimary: 1
+          });
+        }
       }
 
       // 1. Insert customer address if provided
       let customerAddressId = null;
       if (customer.caddress) {
+        const cLat = parseCoordinate(customer.caddress.latitude);
+        const cLng = parseCoordinate(customer.caddress.longitude);
         const addressResultIns = pgInsertClause({
           house_no: customer.caddress.house_no || null,
           street: customer.caddress.street || null,
@@ -758,13 +856,22 @@ router.post('/', enhancedCheckFinance, upload.fields([
           district: customer.caddress.district || null,
           state: customer.caddress.state || null,
           pincode: customer.caddress.pincode || null,
-          location: customer.caddress.location || null
+          location: customer.caddress.location || null,
+          latitude: cLat,
+          longitude: cLng
         });
         const { rows: addressResult } = await conn.query(
           `INSERT INTO addresses (${addressResultIns.columns}) VALUES (${addressResultIns.placeholders}) RETURNING id`,
           addressResultIns.values
         );
         customerAddressId = addressResult[0].id;
+
+        if (cLat !== null || cLng !== null) {
+          await conn.query(
+            `UPDATE customers SET home_latitude = $1, home_longitude = $2 WHERE id = $3`,
+            [cLat, cLng, customerId]
+          );
+        }
 
         // Insert into address_history
         const __ins2 = pgInsertClause({
@@ -869,6 +976,8 @@ router.post('/', enhancedCheckFinance, upload.fields([
       // 2. Insert guardian address if provided
       let guardianAddressId = null;
       if (guardian.gaddress) {
+        const gLat = parseCoordinate(guardian.gaddress.latitude);
+        const gLng = parseCoordinate(guardian.gaddress.longitude);
         const addressResultIns = pgInsertClause({
           house_no: guardian.gaddress.house_no || null,
           street: guardian.gaddress.street || null,
@@ -880,7 +989,9 @@ router.post('/', enhancedCheckFinance, upload.fields([
           district: guardian.gaddress.district || null,
           state: guardian.gaddress.state || null,
           pincode: guardian.gaddress.pincode || null,
-          location: guardian.gaddress.location || null
+          location: guardian.gaddress.location || null,
+          latitude: gLat,
+          longitude: gLng
         });
         const { rows: addressResult } = await conn.query(
           `INSERT INTO addresses (${addressResultIns.columns}) VALUES (${addressResultIns.placeholders}) RETURNING id`,
@@ -904,7 +1015,7 @@ router.post('/', enhancedCheckFinance, upload.fields([
       const __ins6 = pgInsertClause({
         finance_id: finance_id,
         customer_id: customerId,
-        vehicle_id: vehicle.id || null,
+        vehicle_id: targetVehicleId || null,
         loan_type: loan.loan_type || null,
         hpAmount: loan.hpAmount || 0,
         hpDate: loan.hpDate || null,
@@ -960,11 +1071,15 @@ router.post('/', enhancedCheckFinance, upload.fields([
       throw err;
     }
   } catch (parseErr) {
-    console.error('Parse error:', parseErr);
-    res.status(400).json({
+    console.error('Customer creation error:', parseErr && parseErr.code ? parseErr.code : '', parseErr && parseErr.message);
+    // Backstop: unique violations on vehicle_detail become clear 409s instead of 400/500
+    const mapped = mapVehicleUniqueViolation(parseErr) || parseErr;
+    res.status(mapped.status || 400).json({
       success: false,
-      error: 'Invalid JSON data',
-      details: parseErr.message
+      code: mapped.code && /^[A-Z_]+$/.test(String(mapped.code)) ? mapped.code : undefined,
+      field: mapped.field,
+      error: mapped.message || 'Invalid request data',
+      details: mapped.message
     });
   } finally {
     conn.release();
@@ -1143,6 +1258,8 @@ router.post(['/vehicleLoan', '/vehicle-loan', '/customer/vehicleLoan'], enhanced
       // 3. Insert customer address if provided
       let customerAddressId = null;
       if (customer.caddress) {
+        const cLat = parseCoordinate(customer.caddress.latitude);
+        const cLng = parseCoordinate(customer.caddress.longitude);
         const addressResultIns = pgInsertClause({
           house_no: customer.caddress.house_no || null,
           street: customer.caddress.street || null,
@@ -1154,13 +1271,22 @@ router.post(['/vehicleLoan', '/vehicle-loan', '/customer/vehicleLoan'], enhanced
           district: customer.caddress.district || null,
           state: customer.caddress.state || null,
           pincode: customer.caddress.pincode || null,
-          location: customer.caddress.location || null
+          location: customer.caddress.location || null,
+          latitude: cLat,
+          longitude: cLng
         });
         const { rows: addressResult } = await conn.query(
           `INSERT INTO addresses (${addressResultIns.columns}) VALUES (${addressResultIns.placeholders}) RETURNING id`,
           addressResultIns.values
         );
         customerAddressId = addressResult[0].id;
+
+        if (cLat !== null || cLng !== null) {
+          await conn.query(
+            `UPDATE customers SET home_latitude = $1, home_longitude = $2 WHERE id = $3`,
+            [cLat, cLng, customerId]
+          );
+        }
 
         // Insert into address_history
         const __ins9 = pgInsertClause({
@@ -1265,6 +1391,8 @@ router.post(['/vehicleLoan', '/vehicle-loan', '/customer/vehicleLoan'], enhanced
       // 7. Insert guardian address if provided
       let guardianAddressId = null;
       if (guardian.gaddress) {
+        const gLat = parseCoordinate(guardian.gaddress.latitude);
+        const gLng = parseCoordinate(guardian.gaddress.longitude);
         const addressResultIns = pgInsertClause({
           house_no: guardian.gaddress.house_no || null,
           street: guardian.gaddress.street || null,
@@ -1276,7 +1404,9 @@ router.post(['/vehicleLoan', '/vehicle-loan', '/customer/vehicleLoan'], enhanced
           district: guardian.gaddress.district || null,
           state: guardian.gaddress.state || null,
           pincode: guardian.gaddress.pincode || null,
-          location: guardian.gaddress.location || null
+          location: guardian.gaddress.location || null,
+          latitude: gLat,
+          longitude: gLng
         });
         const { rows: addressResult } = await conn.query(
           `INSERT INTO addresses (${addressResultIns.columns}) VALUES (${addressResultIns.placeholders}) RETURNING id`,
@@ -1358,10 +1488,10 @@ router.post(['/vehicleLoan', '/vehicle-loan', '/customer/vehicleLoan'], enhanced
       throw err;
     }
   } catch (parseErr) {
-    console.error('Parse error:', parseErr);
-    res.status(400).json({
+    console.error('Customer creation error:', parseErr);
+    res.status(parseErr.status || 400).json({
       success: false,
-      error: 'Invalid JSON data',
+      error: parseErr.message || 'Invalid request data',
       details: parseErr.message
     });
   } finally {
@@ -1563,6 +1693,8 @@ router.put('/consulting/:customerId', enhancedCheckFinance, upload.fields([
         );
 
         // Insert new address
+        const cLat = parseCoordinate(customer.caddress.latitude);
+        const cLng = parseCoordinate(customer.caddress.longitude);
         const addressResultIns = pgInsertClause({
           house_no: customer.caddress.house_no || null,
           street: customer.caddress.street || null,
@@ -1574,12 +1706,21 @@ router.put('/consulting/:customerId', enhancedCheckFinance, upload.fields([
           district: customer.caddress.district || null,
           state: customer.caddress.state || null,
           pincode: customer.caddress.pincode || null,
-          location: customer.caddress.location || null
+          location: customer.caddress.location || null,
+          latitude: cLat,
+          longitude: cLng
         });
         const { rows: addressResult } = await conn.query(
           `INSERT INTO addresses (${addressResultIns.columns}) VALUES (${addressResultIns.placeholders}) RETURNING id`,
           addressResultIns.values
         );
+
+        if (cLat !== null || cLng !== null) {
+          await conn.query(
+            `UPDATE customers SET home_latitude = $1, home_longitude = $2 WHERE id = $3`,
+            [cLat, cLng, actualCustomerId]
+          );
+        }
 
         // Insert new address history record
         const __ins15 = pgInsertClause({
@@ -1724,6 +1865,8 @@ router.put('/consulting/:customerId', enhancedCheckFinance, upload.fields([
           );
 
           // Insert new address
+          const gLat = parseCoordinate(guardian.gaddress.latitude);
+          const gLng = parseCoordinate(guardian.gaddress.longitude);
           const addressResultIns = pgInsertClause({
             house_no: guardian.gaddress.house_no || null,
             street: guardian.gaddress.street || null,
@@ -1735,7 +1878,9 @@ router.put('/consulting/:customerId', enhancedCheckFinance, upload.fields([
             district: guardian.gaddress.district || null,
             state: guardian.gaddress.state || null,
             pincode: guardian.gaddress.pincode || null,
-            location: guardian.gaddress.location || null
+            location: guardian.gaddress.location || null,
+            latitude: gLat,
+            longitude: gLng
           });
           const { rows: addressResult } = await conn.query(
             `INSERT INTO addresses (${addressResultIns.columns}) VALUES (${addressResultIns.placeholders}) RETURNING id`,
@@ -2065,6 +2210,8 @@ const updateFinanceCustomerHandler = async (req, res) => {
         );
 
         // Insert new address
+        const cLat = parseCoordinate(customer.caddress.latitude);
+        const cLng = parseCoordinate(customer.caddress.longitude);
         const addressResultIns = pgInsertClause({
           house_no: customer.caddress.house_no || null,
           street: customer.caddress.street || null,
@@ -2076,12 +2223,21 @@ const updateFinanceCustomerHandler = async (req, res) => {
           district: customer.caddress.district || null,
           state: customer.caddress.state || null,
           pincode: customer.caddress.pincode || null,
-          location: customer.caddress.location || null
+          location: customer.caddress.location || null,
+          latitude: cLat,
+          longitude: cLng
         });
         const { rows: addressResult } = await conn.query(
           `INSERT INTO addresses (${addressResultIns.columns}) VALUES (${addressResultIns.placeholders}) RETURNING id`,
           addressResultIns.values
         );
+
+        if (cLat !== null || cLng !== null) {
+          await conn.query(
+            `UPDATE customers SET home_latitude = $1, home_longitude = $2 WHERE id = $3`,
+            [cLat, cLng, actualCustomerId]
+          );
+        }
 
         // Insert new address history record
         const __ins22 = pgInsertClause({
@@ -2227,6 +2383,8 @@ const updateFinanceCustomerHandler = async (req, res) => {
           );
 
           // Insert new address
+          const gLat = parseCoordinate(guardian.gaddress.latitude);
+          const gLng = parseCoordinate(guardian.gaddress.longitude);
           const addressResultIns = pgInsertClause({
             house_no: guardian.gaddress.house_no || null,
             street: guardian.gaddress.street || null,
@@ -2238,7 +2396,9 @@ const updateFinanceCustomerHandler = async (req, res) => {
             district: guardian.gaddress.district || null,
             state: guardian.gaddress.state || null,
             pincode: guardian.gaddress.pincode || null,
-            location: guardian.gaddress.location || null
+            location: guardian.gaddress.location || null,
+            latitude: gLat,
+            longitude: gLng
           });
           const { rows: addressResult } = await conn.query(
             `INSERT INTO addresses (${addressResultIns.columns}) VALUES (${addressResultIns.placeholders}) RETURNING id`,
@@ -3767,6 +3927,525 @@ router.get('/next-hplno', enhancedCheckFinance, async (req, res) => {
   }
 });
 
+// -----------------------------------------------------------------------
+// POST /api/customers/print-batch
+// Batched customer + guardian + loan + vehicle + active payments + finance
+// lookup for unified print templates and Notices bulk generation.
+// -----------------------------------------------------------------------
+router.post('/print-batch', enhancedCheckFinance, async (req, res) => {
+  try {
+    const rawIds = req.body?.customerIds;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'customerIds must be a non-empty array'
+      });
+    }
+
+    // De-duplicate while preserving request order
+    const uniqueIds = Array.from(
+      new Set(
+        rawIds
+          .map(id => (id !== null && id !== undefined ? String(id).trim() : ''))
+          .filter(Boolean)
+      )
+    );
+
+    if (uniqueIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'customerIds must contain at least one valid identifier'
+      });
+    }
+
+    if (uniqueIds.length > 200) {
+      return res.status(400).json({
+        success: false,
+        error: 'Maximum 200 customerIds allowed per batch request'
+      });
+    }
+
+    const financeId = req.financeId;
+
+    // 1. Batched query for finance details + branding assets and customers in parallel
+    const [financeRes, brandingRes, customersRes] = await Promise.all([
+      db.query(
+        `SELECT 
+           fd.id,
+           fd.finance_name,
+           fd.phone_numbers,
+           fd.emails,
+           fd.finance_photo,
+           a.house_no,
+           a.street,
+           a.street_name,
+           a.village,
+           a.land_mark,
+           a.address,
+           a.city,
+           a.district,
+           a.state,
+           a.pincode,
+           a.location,
+           CONCAT_WS(', ',
+             NULLIF(CONCAT_WS(' ', a.house_no, a.street), ''),
+             NULLIF(a.street_name, ''),
+             NULLIF(a.village, ''),
+             NULLIF(a.land_mark, ''),
+             NULLIF(a.address, ''),
+             NULLIF(a.city, ''),
+             NULLIF(a.district, ''),
+             NULLIF(a.state, ''),
+             NULLIF(a.pincode, '')
+           ) AS full_address
+         FROM finance_detail fd
+         LEFT JOIN LATERAL (
+           SELECT ah.address_id
+           FROM address_history ah
+           WHERE ah.entity_type = 'finance'
+             AND ah.entity_id = fd.id::text
+             AND ah.is_current = 1
+           ORDER BY ah.changed_at DESC NULLS LAST
+           LIMIT 1
+         ) ah_fin ON true
+         LEFT JOIN addresses a ON ah_fin.address_id = a.id
+         WHERE fd.id = $1
+         LIMIT 1`,
+        [financeId]
+      ),
+      db.query(
+        `SELECT asset_type, file_path
+         FROM finance_branding_assets
+         WHERE finance_id = $1
+           AND asset_type IN ('print_logo', 'web_logo')
+           AND is_active = true
+         ORDER BY created_at DESC`,
+        [financeId]
+      ),
+      db.query(
+        `SELECT 
+           c.*,
+           a.house_no,
+           a.street,
+           a.street_name,
+           a.village,
+           a.land_mark,
+           a.address,
+           a.city,
+           a.district,
+           a.state,
+           a.pincode,
+           a.location,
+           CONCAT_WS(', ',
+             NULLIF(CONCAT_WS(' ', a.house_no, a.street), ''),
+             NULLIF(a.street_name, ''),
+             NULLIF(a.village, ''),
+             NULLIF(a.land_mark, ''),
+             NULLIF(a.address, ''),
+             NULLIF(a.city, ''),
+             NULLIF(a.district, ''),
+             NULLIF(a.state, ''),
+             NULLIF(a.pincode, '')
+           ) AS full_address
+         FROM customers c
+         LEFT JOIN LATERAL (
+           SELECT ah.address_id
+           FROM address_history ah
+           WHERE ah.entity_type = 'customer'
+             AND ah.entity_id = c.id::text
+             AND ah.is_current = 1
+           ORDER BY ah.changed_at DESC NULLS LAST
+           LIMIT 1
+         ) ah_cur ON true
+         LEFT JOIN addresses a ON ah_cur.address_id = a.id
+         WHERE c.finance_id = $1
+           AND (c.id::text = ANY($2::text[]) OR c.hplno::text = ANY($2::text[]))`,
+        [financeId, uniqueIds]
+      )
+    ]);
+
+    // Assemble top-level finance object
+    const finRow = financeRes.rows[0] || {};
+    const parseJsonArray = (val) => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val.map(String).filter(Boolean);
+      if (typeof val === 'string') {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+        } catch {
+          return val.split(',').map(s => s.trim()).filter(Boolean);
+        }
+      }
+      return [];
+    };
+
+    const printLogoAsset = brandingRes.rows.find(r => r.asset_type === 'print_logo')?.file_path;
+    const webLogoAsset = brandingRes.rows.find(r => r.asset_type === 'web_logo')?.file_path;
+    const rawWebLogo = webLogoAsset || finRow.finance_photo || null;
+    const rawPrintLogo = printLogoAsset || webLogoAsset || finRow.finance_photo || null;
+
+    const safeSignUrl = async (url) => {
+      if (!url || typeof url !== 'string') return null;
+      if (url.startsWith('http') && url.includes('amazonaws.com')) {
+        try {
+          return await getSignedImageUrl(url, 86400);
+        } catch {
+          return url;
+        }
+      }
+      return url;
+    };
+
+    const [signedWebLogo, signedPrintLogo] = await Promise.all([
+      safeSignUrl(rawWebLogo),
+      rawPrintLogo === rawWebLogo ? safeSignUrl(rawWebLogo) : safeSignUrl(rawPrintLogo)
+    ]);
+
+    const financePayload = {
+      id: finRow.id ? String(finRow.id) : String(financeId),
+      name: finRow.finance_name || '',
+      address: finRow.full_address || '',
+      phone_numbers: parseJsonArray(finRow.phone_numbers),
+      emails: parseJsonArray(finRow.emails),
+      print_logo_url: signedPrintLogo,
+      logo_url: signedWebLogo
+    };
+
+    const customerRows = customersRes.rows;
+    const matchedCustomerUuids = customerRows.map(c => c.id);
+    const matchedCustomerUuidTexts = matchedCustomerUuids.map(id => String(id));
+
+    // Determine missingIds (preserve input order)
+    const byUuidLower = new Map();
+    const byHplno = new Map();
+    for (const c of customerRows) {
+      byUuidLower.set(String(c.id).toLowerCase(), c);
+      if (c.hplno !== null && c.hplno !== undefined) {
+        byHplno.set(String(c.hplno).trim(), c);
+      }
+    }
+
+    const missingIds = [];
+    const orderedCustomers = [];
+    const seenCustomerUuids = new Set();
+
+    for (const reqId of uniqueIds) {
+      const matched = byUuidLower.get(reqId.toLowerCase()) || byHplno.get(reqId);
+      if (!matched) {
+        missingIds.push(reqId);
+      } else {
+        const cidStr = String(matched.id);
+        if (!seenCustomerUuids.has(cidStr)) {
+          seenCustomerUuids.add(cidStr);
+          orderedCustomers.push(matched);
+        }
+      }
+    }
+
+    if (orderedCustomers.length === 0) {
+      return res.json({
+        success: true,
+        finance: financePayload,
+        items: [],
+        missingIds
+      });
+    }
+
+    // 2. Run ONE batched query per related entity (contacts, guardians, loans, vehicles, payments, kyc photos)
+    const [contactsRes, guardiansRes, loansRes, vehiclesRes, paymentsRes, kycPhotosRes] = await Promise.all([
+      db.query(
+        `SELECT id, customer_id, contact_type, type, number
+         FROM contacts
+         WHERE customer_id = ANY($1::uuid[])
+           AND finance_id = $2
+         ORDER BY id ASC`,
+        [matchedCustomerUuids, financeId]
+      ),
+      db.query(
+        `SELECT 
+           g.*,
+           ag.house_no AS g_house_no,
+           ag.street AS g_street,
+           ag.street_name AS g_street_name,
+           ag.village AS g_village,
+           ag.land_mark AS g_land_mark,
+           ag.address AS g_address,
+           ag.city AS g_city,
+           ag.district AS g_district,
+           ag.state AS g_state,
+           ag.pincode AS g_pincode,
+           ag.location AS g_location,
+           CONCAT_WS(', ',
+             NULLIF(CONCAT_WS(' ', ag.house_no, ag.street), ''),
+             NULLIF(ag.street_name, ''),
+             NULLIF(ag.village, ''),
+             NULLIF(ag.land_mark, ''),
+             NULLIF(ag.address, ''),
+             NULLIF(ag.city, ''),
+             NULLIF(ag.district, ''),
+             NULLIF(ag.state, ''),
+             NULLIF(ag.pincode, '')
+           ) AS full_address
+         FROM guardians g
+         LEFT JOIN LATERAL (
+           SELECT ahg.address_id
+           FROM address_history ahg
+           WHERE ahg.entity_type = 'guardian'
+             AND (ahg.entity_id = g.id::text OR ahg.entity_id = g.customer_id::text)
+             AND ahg.is_current = 1
+           ORDER BY ahg.changed_at DESC NULLS LAST
+           LIMIT 1
+         ) ahg_cur ON true
+         LEFT JOIN addresses ag ON ahg_cur.address_id = ag.id
+         WHERE g.customer_id = ANY($1::uuid[])
+           AND g.finance_id = $2`,
+        [matchedCustomerUuids, financeId]
+      ),
+      db.query(
+        `SELECT 
+           l.*,
+           TO_CHAR(l.hp_date, 'YYYY-MM-DD') AS "hpDateStr",
+           TO_CHAR(l.due_date, 'YYYY-MM-DD') AS "dueDateStr"
+         FROM loans l
+         WHERE l.customer_id = ANY($1::uuid[])
+           AND l.finance_id = $2
+         ORDER BY l.hp_date DESC NULLS LAST, l.id DESC`,
+        [matchedCustomerUuids, financeId]
+      ),
+      db.query(
+        `SELECT 
+           vd.*,
+           vi.brand,
+           vi.model_name,
+           vi.make_year,
+           vi.fuel_type,
+           vi.engine_capacity,
+           vi.body_type
+         FROM vehicle_detail vd
+         LEFT JOIN vehicle_info vi ON vd.vehicle_info_id = vi.id
+         WHERE vd.finance_id = $2
+           AND vd.id IN (
+             SELECT c_v.vehicle_id FROM customers c_v WHERE c_v.id = ANY($1::uuid[]) AND c_v.vehicle_id IS NOT NULL
+             UNION
+             SELECT l_v.vehicle_id FROM loans l_v WHERE l_v.customer_id = ANY($1::uuid[]) AND l_v.vehicle_id IS NOT NULL
+           )`,
+        [matchedCustomerUuids, financeId]
+      ),
+      db.query(
+        `SELECT 
+           p.id,
+           p.customer_id,
+           TO_CHAR(p.due_date, 'YYYY-MM-DD') AS "dueDate",
+           TO_CHAR(p.payment_date, 'YYYY-MM-DD') AS "paymentDate",
+           p.bill_number AS "billNumber",
+           p.amount,
+           p.penalty,
+           p.status,
+           p.payment_mode,
+           p.collected_by,
+           p.remarks
+         FROM payments p
+         WHERE p.customer_id = ANY($1::uuid[])
+           AND p.finance_id = $2
+           AND COALESCE(p.payment_status, 'active') = 'active'
+         ORDER BY COALESCE(p.payment_date, p.due_date) ASC NULLS LAST, p.created_at ASC`,
+        [matchedCustomerUuids, financeId]
+      ),
+      db.query(
+        `SELECT entity_type, entity_id, document_type, file_path
+         FROM kyc_documents
+         WHERE document_type IN ('customer_photo', 'guardian_photo')
+           AND is_current = true
+           AND (
+             (entity_type = 'customer' AND entity_id = ANY($1::text[]))
+             OR (entity_type = 'guardian' AND (
+               entity_id = ANY($1::text[])
+               OR entity_id IN (SELECT id::text FROM guardians WHERE customer_id = ANY($2::uuid[]) AND finance_id = $3)
+             ))
+           )
+         ORDER BY uploaded_at DESC`,
+        [matchedCustomerUuidTexts, matchedCustomerUuids, financeId]
+      )
+    ]);
+
+    // Group contacts by customer_id
+    const customerContactsMap = new Map();
+    const guardianContactsMap = new Map();
+    for (const ct of contactsRes.rows) {
+      const cid = String(ct.customer_id);
+      const entry = {
+        id: ct.id,
+        contact_type: ct.contact_type,
+        type: ct.type,
+        number: ct.number
+      };
+      if (ct.contact_type === 'guardian') {
+        if (!guardianContactsMap.has(cid)) guardianContactsMap.set(cid, []);
+        guardianContactsMap.get(cid).push(entry);
+      } else {
+        if (!customerContactsMap.has(cid)) customerContactsMap.set(cid, []);
+        customerContactsMap.get(cid).push(entry);
+      }
+    }
+
+    // Group guardians by customer_id and guardian_id -> customer_id
+    const guardianByCustomerMap = new Map();
+    const guardianIdToCustomerIdMap = new Map();
+    for (const g of guardiansRes.rows) {
+      const cid = String(g.customer_id);
+      if (g.id) guardianIdToCustomerIdMap.set(String(g.id), cid);
+      if (!guardianByCustomerMap.has(cid)) {
+        guardianByCustomerMap.set(cid, g);
+      }
+    }
+
+    // Group latest loan by customer_id
+    const loanByCustomerMap = new Map();
+    for (const l of loansRes.rows) {
+      const cid = String(l.customer_id);
+      if (!loanByCustomerMap.has(cid)) {
+        loanByCustomerMap.set(cid, l);
+      }
+    }
+
+    // Index vehicles by id
+    const vehicleByIdMap = new Map();
+    for (const v of vehiclesRes.rows) {
+      vehicleByIdMap.set(String(v.id), v);
+    }
+
+    // Group active payments by customer_id
+    const paymentsByCustomerMap = new Map();
+    for (const p of paymentsRes.rows) {
+      const cid = String(p.customer_id);
+      if (!paymentsByCustomerMap.has(cid)) paymentsByCustomerMap.set(cid, []);
+      paymentsByCustomerMap.get(cid).push({
+        id: p.id,
+        dueDate: p.dueDate || '',
+        paymentDate: p.paymentDate || '',
+        billNumber: p.billNumber || '',
+        amount: Number(p.amount || 0),
+        penalty: Number(p.penalty || 0),
+        status: p.status || 'paid',
+        payment_mode: p.payment_mode || 'cash',
+        collected_by: p.collected_by || '',
+        remarks: p.remarks || ''
+      });
+    }
+
+    // Sign KYC photos in parallel
+    const cphotoMap = new Map();
+    const gphotoMap = new Map();
+    await Promise.all(
+      kycPhotosRes.rows.map(async (doc) => {
+        const signed = await safeSignUrl(doc.file_path);
+        const entityIdStr = String(doc.entity_id);
+        if (doc.entity_type === 'customer' && doc.document_type === 'customer_photo') {
+          if (!cphotoMap.has(entityIdStr)) cphotoMap.set(entityIdStr, signed);
+        } else if (doc.entity_type === 'guardian' && doc.document_type === 'guardian_photo') {
+          const cid = guardianIdToCustomerIdMap.get(entityIdStr) || entityIdStr;
+          if (!gphotoMap.has(cid)) gphotoMap.set(cid, signed);
+        }
+      })
+    );
+
+    // Assemble per-customer items
+    const items = orderedCustomers.map((c) => {
+      const cid = String(c.id);
+      const ccontacts = customerContactsMap.get(cid) || [];
+      const gcontacts = guardianContactsMap.get(cid) || [];
+      const workContact = ccontacts.find(ct => ct.type === 'work');
+      const gWorkContact = gcontacts.find(ct => ct.type === 'work');
+
+      const gRow = guardianByCustomerMap.get(cid) || null;
+      const lRow = loanByCustomerMap.get(cid) || null;
+      const vehicleId = c.vehicle_id || lRow?.vehicle_id || null;
+      const vRow = vehicleId ? (vehicleByIdMap.get(String(vehicleId)) || null) : null;
+
+      return {
+        customer: {
+          id: c.id,
+          hplno: c.hplno,
+          cname: c.cname || '',
+          loanStatus: c.loan_status || 'active',
+          brokerName: c.broker_name || '',
+          cfname: {
+            value: c.cfname_value || '',
+            unit: c.cfname_unit || ''
+          },
+          full_address: c.full_address || '',
+          work_office_address: c.work_office_address || '',
+          work_office_phone: workContact?.number || '',
+          ccontacts,
+          cphoto: cphotoMap.get(cid) || null
+        },
+        guardian: gRow
+          ? {
+              id: gRow.id,
+              gname: gRow.gname || '',
+              gfname: {
+                value: gRow.gfname_value || '',
+                unit: gRow.gfname_unit || ''
+              },
+              full_address: gRow.full_address || '',
+              work_office_address: gRow.work_office_address || '',
+              work_office_phone: gWorkContact?.number || '',
+              gcontacts,
+              gphoto: gphotoMap.get(cid) || null
+            }
+          : null,
+        loan: lRow
+          ? {
+              id: lRow.id,
+              loan_type: lRow.loan_type || '',
+              hpAmount: Number(lRow.hp_amount || 0),
+              hpDate: lRow.hpDateStr || '',
+              dueDate: lRow.dueDateStr || '',
+              due_date: lRow.dueDateStr || '',
+              dueMonth: Number(lRow.due_month || 0),
+              interestRate: Number(lRow.interest_rate || 0),
+              penaltyAmount: Number(lRow.penalty_amount || 0),
+              dueAmount: Number(lRow.due_amount || 0),
+              down_payment: Number(lRow.down_payment || 0),
+              net_payable: Number(lRow.net_payable || 0),
+              documentation_charge: Number(lRow.documentation_charge || 0)
+            }
+          : null,
+        vehicle: vRow
+          ? {
+              id: vRow.id,
+              vehicle_number: vRow.vehicle_number || '',
+              model_name: vRow.model_name || '',
+              vehicle_modal: vRow.vehicle_modal || vRow.model_name || '',
+              brand: vRow.brand || '',
+              chassis_number: vRow.chassis_number || '',
+              engine_number: vRow.engine_number || '',
+              body_type: vRow.body_type || '',
+              type: vRow.type || '',
+              color: vRow.color || ''
+            }
+          : null,
+        payments: paymentsByCustomerMap.get(cid) || []
+      };
+    });
+
+    return res.json({
+      success: true,
+      finance: financePayload,
+      items,
+      missingIds
+    });
+  } catch (err) {
+    console.error('Error in POST /customers/print-batch:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch batch print data',
+      details: err.message
+    });
+  }
+});
+
 router.get('/:customerId', enhancedCheckFinance, async (req, res) => {
   const conn = await db.connect();
   try {
@@ -3794,6 +4473,8 @@ router.get('/:customerId', enhancedCheckFinance, async (req, res) => {
         a.state,
         a.pincode,
         a.location,
+        a.latitude,
+        a.longitude,
         CONCAT_WS(', ',
           NULLIF(CONCAT_WS(' ', a.house_no, a.street), ''),
           NULLIF(a.street_name, ''),
@@ -3849,6 +4530,8 @@ router.get('/:customerId', enhancedCheckFinance, async (req, res) => {
         ag.state as g_state,
         ag.pincode as g_pincode,
         ag.location as g_location,
+        ag.latitude as g_latitude,
+        ag.longitude as g_longitude,
         CONCAT_WS(', ',
           NULLIF(CONCAT_WS(' ', ag.house_no, ag.street), ''),
           NULLIF(ag.street_name, ''),
@@ -4012,7 +4695,9 @@ router.get('/:customerId', enhancedCheckFinance, async (req, res) => {
       district: customer[0].district,
       state: customer[0].state,
       pincode: customer[0].pincode,
-      location: customer[0].location
+      location: customer[0].location,
+      latitude: customer[0].latitude != null ? customer[0].latitude.toString() : '',
+      longitude: customer[0].longitude != null ? customer[0].longitude.toString() : ''
     };
 
     // Construct full address JSON object for guardian
@@ -4027,7 +4712,9 @@ router.get('/:customerId', enhancedCheckFinance, async (req, res) => {
       district: guardian[0].g_district,
       state: guardian[0].g_state,
       pincode: guardian[0].g_pincode,
-      location: guardian[0].g_location
+      location: guardian[0].g_location,
+      latitude: guardian[0].g_latitude != null ? guardian[0].g_latitude.toString() : '',
+      longitude: guardian[0].g_longitude != null ? guardian[0].g_longitude.toString() : ''
     } : null;
 
     // Remove address-related fields from main customer object

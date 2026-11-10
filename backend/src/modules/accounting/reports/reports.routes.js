@@ -11,5 +11,7 @@ router.get('/cash-flow',      ctrl.getCashFlow);
 router.get('/balances',       ctrl.getBalances);
 router.get('/charges',        ctrl.getCharges);
 router.get('/compliance',     ctrl.getCompliance);
+router.get('/demand',         ctrl.getDemand);
+router.get('/business',       ctrl.getBusinessReport);
 
 module.exports = router;

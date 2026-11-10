@@ -7,8 +7,7 @@ import {
   Building2, Phone, Mail, MapPin, Upload, Plus, Trash2, Star, Edit, Check, X,
   Users, CreditCard, TrendingUp, IndianRupee, Warehouse, Car, UserCheck,
   Shield, Calendar, Clock, Download, Printer, CheckCircle, XCircle,
-  Loader2, AlertCircle, RefreshCw, Lock, ShieldAlert, ExternalLink,
-  ChevronDown
+  Loader2, AlertCircle, RefreshCw, Lock, ShieldAlert, ExternalLink
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
@@ -18,14 +17,6 @@ import { Switch } from "../ui/switch";
 import { Label } from "../ui/label";
 import { Separator } from "../ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "../ui/dropdown-menu";
 import { DatePicker } from "../ui/date-picker";
 import { ImageUpload } from "../common/ImageUpload_DK";
 import { AddFinanceDialog } from "./AddFinanceDialog";
@@ -148,8 +139,7 @@ const colorMap: Record<string, string> = {
 export default function CompanyProfile() {
   const navigate = useNavigate();
   const { owner, ownerLogout } = useOwnerAuth();
-  const { user, currentFinance, financeList, switchFinance, refreshFinanceDetails, refreshFinanceList } = useAuth();
-  const [isSwitchingFinance, setIsSwitchingFinance] = useState(false);
+  const { user, currentFinance, refreshFinanceDetails, refreshFinanceList } = useAuth();
 
   // Strict Owner Access Verification
   const isOwner = Boolean(owner && (!user || user.role === 'owner'));
@@ -331,31 +321,6 @@ export default function CompanyProfile() {
   useEffect(() => {
     fetchProfileData();
   }, [fetchProfileData, currentFinance?.id]);
-
-  const handleSwitchFinance = async (targetId: string | number) => {
-    if (isSwitchingFinance) return;
-    const targetIdStr = String(targetId);
-    if (targetIdStr === String(companyData.id || currentFinance?.id)) {
-      toast.info("This finance company is already active.");
-      return;
-    }
-
-    setIsSwitchingFinance(true);
-    try {
-      const success = await switchFinance(targetIdStr);
-      if (success) {
-        toast.success("Finance company switched successfully");
-        await fetchProfileData();
-      } else {
-        toast.error("Failed to switch finance company");
-      }
-    } catch (err: any) {
-      console.error("Error switching finance:", err);
-      toast.error(err?.response?.data?.error || err?.response?.data?.message || err?.message || "Failed to switch finance company");
-    } finally {
-      setIsSwitchingFinance(false);
-    }
-  };
 
   // Profile completion calculation
   const profileCompletion = useMemo(() => computeCompletion(companyData, banks), [companyData, banks]);
@@ -853,92 +818,18 @@ export default function CompanyProfile() {
             >
               <Printer className="h-4 w-4 mr-1.5" /> Print
             </Button>
-            {/* Finance Switch & Refresh Dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={isSwitchingFinance}
-                  className="bg-white/20 text-primary-foreground border-white/30 hover:bg-white/30 backdrop-blur-sm shadow-sm flex items-center gap-1.5"
-                  title="Switch Finance Company"
-                >
-                  {isSwitchingFinance ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-white" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  <span className="hidden md:inline font-medium text-xs">Switch Finance</span>
-                  <ChevronDown className="h-3 w-3 opacity-80" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-72 bg-popover/95 backdrop-blur-md border border-border/80 shadow-xl z-50">
-                <DropdownMenuLabel className="flex items-center justify-between text-xs text-muted-foreground uppercase tracking-wider py-1.5">
-                  <span>Authorized Finances</span>
-                  <Badge variant="outline" className="text-[10px] font-semibold py-0 px-1.5">
-                    {financeList.length} Available
-                  </Badge>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-
-                <div className="max-h-64 overflow-y-auto space-y-1 p-1">
-                  {financeList.length === 0 ? (
-                    <div className="py-3 px-2 text-center text-xs text-muted-foreground">
-                      No other finance companies found
-                    </div>
-                  ) : (
-                    financeList.map((f: any) => {
-                      const isActive = String(f.id) === String(companyData.id || currentFinance?.id);
-                      return (
-                        <DropdownMenuItem
-                          key={f.id}
-                          disabled={isSwitchingFinance}
-                          onClick={() => handleSwitchFinance(f.id)}
-                          className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors ${
-                            isActive
-                              ? "bg-primary/10 text-primary font-semibold"
-                              : "hover:bg-accent text-foreground"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                            {f.logo_url || f.finance_photo ? (
-                              <img
-                                src={f.logo_url || f.finance_photo}
-                                alt={f.name || f.finance_name}
-                                className="h-6 w-6 rounded-md object-cover border border-border/40 shrink-0"
-                              />
-                            ) : (
-                              <div className={`p-1.5 rounded-md shrink-0 ${isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                                <Building2 className="h-3.5 w-3.5" />
-                              </div>
-                            )}
-                            <div className="truncate">
-                              <p className="text-xs font-medium truncate">{f.name || f.finance_name}</p>
-                              {f.city && (
-                                <p className="text-[10px] text-muted-foreground truncate">{f.city}</p>
-                              )}
-                            </div>
-                          </div>
-                          {isActive && (
-                            <Check className="h-4 w-4 text-primary shrink-0 ml-1" />
-                          )}
-                        </DropdownMenuItem>
-                      );
-                    })
-                  )}
-                </div>
-
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={fetchProfileData}
-                  disabled={isLoading || isSwitchingFinance}
-                  className="flex items-center gap-2 text-xs py-2 cursor-pointer text-muted-foreground hover:text-foreground"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
-                  <span>Refresh Current Profile</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Refresh Button */}
+            <Button
+              size="sm"
+              variant="secondary"
+              className="bg-white/20 text-primary-foreground border-white/30 hover:bg-white/30 backdrop-blur-sm shadow-sm flex items-center gap-1.5"
+              onClick={fetchProfileData}
+              disabled={isLoading}
+              title="Refresh Current Profile"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+              <span className="hidden md:inline font-medium text-xs">Refresh</span>
+            </Button>
           </div>
         </div>
 
@@ -1751,7 +1642,7 @@ export default function CompanyProfile() {
               value={tempPrintLogoFile}
               onChange={f => setTempPrintLogoFile(f instanceof File ? f : null)}
               enableCrop={true}
-              aspectRatio={16 / 9}
+              aspectRatio={1}
               existingUrl={companyData.printLogoUrl || undefined}
             />
             <div className="flex justify-end gap-2 pt-2">

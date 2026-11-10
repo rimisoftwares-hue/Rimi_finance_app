@@ -89,7 +89,9 @@ apiClient.interceptors.response.use(
         url.includes('/auth/user-login') ||
         url.includes('/auth/owner-login') ||
         url.includes('/auth/login') ||
-        url.includes('/auth/owner-finances');
+        url.includes('/auth/owner-finances') ||
+        (url.includes('/auth/change-password') &&
+          error.response?.data?.error_code === 'INVALID_CURRENT_PASSWORD');
 
       // Do NOT clear tokens or redirect if this 401 is from a login attempt
       if (isAuthEndpoint) {

@@ -4,6 +4,7 @@ import { CapitalizedInput } from '../common/CapitalizedInput';
 import { SelectInput } from './SelectInput';
 import { AutocompleteInput } from './AutocompleteInput'; // Add this import
 import { DatePickerInput } from './DatePickerInput';
+import { AddConsultingVehicleDialog } from './AddConsultingVehicleDialog';
 import { useFormStore } from '../../types/formStore';
 import { Car, CreditCard, Wallet, FileText, Users, MessageSquare, Check } from 'lucide-react';
 import { Textarea } from '../ui/textarea';
@@ -11,6 +12,7 @@ import { useVehicleSearch } from '../../hooks/useVehicleSearch'; // Add this imp
 import { calculateLoanDetails } from '../../utils/calculations'
 interface Step2Props {
   errors: Record<string, string>;
+  allowAddNewVehicle?: boolean;
 }
 
 const loan_type = [
@@ -38,15 +40,19 @@ const paymode_type = [
   { value: 'other', label: 'Other' },
 ];
 
-// export const Step2ConsuldingLoan: React.FC<Step2Props> = ({ errors }) => {
-//   const { vehicle, loan, updateVehicle, updateLoan } = useFormStore();
-export const Step2ConsuldingLoan: React.FC<Step2Props> = ({ errors }) => {
+export const Step2ConsuldingLoan: React.FC<Step2Props> = ({ errors, allowAddNewVehicle = false }) => {
   const { vehicle, loan, updateVehicle, updateLoan } = useFormStore();
-  const { suggestions, loading, error, searchVehicles, getVehicleById } = useVehicleSearch();
-  const [isVehicleSelected, setIsVehicleSelected] = useState(false);
+  const { suggestions, loading, error, searchVehicles, getVehicleById, clearSuggestions } = useVehicleSearch();
+  const [isVehicleSelected, setIsVehicleSelected] = useState(!!vehicle.isNewVehicle || !!vehicle.id);
   const [yearlyInterestRate, setYearlyInterestRate] = useState<string>('');
   const [isDueDateModified, setIsDueDateModified] = useState<boolean>(false);
+  const [isAddVehicleOpen, setIsAddVehicleOpen] = useState(false);
+  const [pendingVehicleQuery, setPendingVehicleQuery] = useState('');
   const formRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIsVehicleSelected(!!vehicle.isNewVehicle || !!vehicle.id);
+  }, [vehicle.id, vehicle.isNewVehicle]);
 
   // Set default values on component mount
   useEffect(() => {
@@ -188,7 +194,10 @@ export const Step2ConsuldingLoan: React.FC<Step2Props> = ({ errors }) => {
 
   // Handle vehicle number input with search suggestions
   const handleVehicleNumberChange = async (value: string) => {
-    updateVehicle({ vehicleNumber: value.toUpperCase() });
+    updateVehicle({
+      vehicleNumber: value.toUpperCase(),
+      isNewVehicle: false,
+    });
 
     // Only search if length is at least 2 characters
     if (value.trim().length >= 2) {
@@ -218,26 +227,45 @@ export const Step2ConsuldingLoan: React.FC<Step2Props> = ({ errors }) => {
     }
   };
 
-  // When a vehicle is selected from suggestions
+  // When a vehicle is selected from suggestions or created from dialog
   const handleVehicleSelect = async (selectedVehicle: any) => {
     if (selectedVehicle) {
-      // Update all vehicle fields from the selected vehicle  {`${selectedVehicle.brand} ${selectedVehicle.model_name}`}
+      // Update all vehicle fields from the selected vehicle
       updateVehicle({
-        vehicleNumber: selectedVehicle.vehicle_number,
-        vehicleName: selectedVehicle.brand + ` ${selectedVehicle.model_name}` || '',
-        modelName: selectedVehicle.vehicle_modal || '',
+        vehicleNumber: selectedVehicle.vehicle_number || '',
+        vehicleName: selectedVehicle.brand ? `${selectedVehicle.brand} ${selectedVehicle.model_name || ''}`.trim() : (selectedVehicle.vehicleName || ''),
+        modelName: selectedVehicle.model_name || selectedVehicle.vehicle_modal || selectedVehicle.modelName || '',
+        vehicle_modal: selectedVehicle.vehicle_modal || '',
         type: selectedVehicle.type || '',
         color: selectedVehicle.color || '',
-        id: selectedVehicle.id
+        id: selectedVehicle.id,
+        isNewVehicle: !!selectedVehicle.isNewVehicle,
+        deal_type: 'consulting',
+        chassis_number: selectedVehicle.chassis_number || '',
+        engine_number: selectedVehicle.engine_number || '',
+        insurance_expiry_date: selectedVehicle.insurance_expiry_date || '',
+        base_price: selectedVehicle.base_price !== undefined ? selectedVehicle.base_price : 0,
+        selling_price: selectedVehicle.selling_price !== undefined ? selectedVehicle.selling_price : 0,
+        rc_status: selectedVehicle.rc_status || 'original',
+        rc_holder: selectedVehicle.rc_holder || 'Company',
+        vehicle_info_id: selectedVehicle.vehicle_info_id || '',
+        brand: selectedVehicle.brand || '',
+        model_name: selectedVehicle.model_name || '',
+        frontImage: selectedVehicle.frontImage,
+        sideImage: selectedVehicle.sideImage,
       });
       setIsVehicleSelected(true);
     }
   };
 
-  // If user manually changes a field, mark as not auto-selected
+  // If user manually changes a field, mark as not auto-selected (unless it is a new deferred vehicle)
   const handleManualFieldChange = (field: keyof typeof vehicle, value: string) => {
-    updateVehicle({ [field]: value });
-    if (isVehicleSelected) {
+    if (field === 'modelName') {
+      updateVehicle({ modelName: value, model_name: value });
+    } else {
+      updateVehicle({ [field]: value });
+    }
+    if (isVehicleSelected && !vehicle.isNewVehicle) {
       setIsVehicleSelected(false);
     }
   };
@@ -246,7 +274,7 @@ export const Step2ConsuldingLoan: React.FC<Step2Props> = ({ errors }) => {
   useEffect(() => {
     const cleanNumber = String(vehicle.vehicleNumber || '').trim();
     // Valid vehicle registration number has at least 6 alphanumeric characters
-    if (!cleanNumber || cleanNumber.length < 6) {
+    if (!cleanNumber || cleanNumber.length < 6 || vehicle.isNewVehicle || vehicle.id?.startsWith('temp_')) {
       return;
     }
 
@@ -315,14 +343,24 @@ export const Step2ConsuldingLoan: React.FC<Step2Props> = ({ errors }) => {
             placeholder="MH12AB1234"
             required
             containerClassName="col-span-2"
+            onAddNew={allowAddNewVehicle ? (query) => {
+              setPendingVehicleQuery(query);
+              setIsAddVehicleOpen(true);
+            } : undefined}
+            addNewText="+ Add Vehicle"
           />
 
           {isVehicleSelected && (
-            <div className="col-span-2 mb-2 p-2 bg-green-50 border border-green-200 rounded text-sm">
-              <div className="flex items-center text-green-700">
+            <div className="col-span-2 mb-2 p-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded text-sm flex items-center justify-between">
+              <div className="flex items-center text-green-700 dark:text-green-300">
                 <Check className="w-4 h-4 mr-2" />
-                Vehicle details auto-filled from database
+                {vehicle.isNewVehicle ? 'New vehicle details added (will be saved with loan)' : 'Vehicle details auto-filled from database'}
               </div>
+              {vehicle.isNewVehicle && (
+                <span className="px-2 py-0.5 text-xs font-semibold rounded bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                  New
+                </span>
+              )}
             </div>
           )}
 
@@ -675,6 +713,18 @@ export const Step2ConsuldingLoan: React.FC<Step2Props> = ({ errors }) => {
           />
         </div>
       </section>
+
+      {allowAddNewVehicle && (
+        <AddConsultingVehicleDialog
+          open={isAddVehicleOpen}
+          onOpenChange={setIsAddVehicleOpen}
+          initialVehicleNumber={pendingVehicleQuery || vehicle.vehicleNumber || ''}
+          onVehicleCreated={(newVehicle) => {
+            handleVehicleSelect(newVehicle);
+            clearSuggestions();
+          }}
+        />
+      )}
     </div>
   );
 };

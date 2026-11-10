@@ -530,38 +530,38 @@ export const FileInput: React.FC<FileInputProps> = ({
             </div>
           </div>
         ) : (
-          /* ─── Empty State: Camera + Browse Buttons ─── */
-          <div className="flex flex-col items-center justify-center p-3 text-center space-y-2 w-full h-full">
-            <div className="flex items-center gap-2 w-full max-w-xs">
-              {/* Camera Option Button */}
+          /* ─── Empty State: Icon-Only Camera + Browse Buttons ─── */
+          <div className="flex flex-col items-center justify-center p-3 text-center space-y-2 w-full h-full min-h-[120px]">
+            <div className="flex items-center justify-center gap-3">
+              {/* Camera Option Button (Icon Only) */}
               {enableCamera && (
                 <button
                   type="button"
                   onClick={handleCameraClick}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-medium shadow-sm transition-all active:scale-95"
+                  className="w-10 h-10 flex items-center justify-center rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm transition-all duration-150 hover:scale-105 active:scale-95"
+                  title="Take photo from camera"
+                  aria-label="Camera"
                 >
-                  <Camera className="w-3.5 h-3.5" />
-                  Camera
+                  <Camera className="w-5 h-5" />
                 </button>
               )}
 
-              {/* Browse File Button */}
+              {/* Browse File Button (Icon Only) */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className={cn(
-                  'flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg text-xs font-medium border border-border shadow-sm transition-all active:scale-95',
-                  enableCamera
-                    ? 'flex-1 bg-background hover:bg-muted/60 text-foreground'
-                    : 'w-full bg-primary text-primary-foreground hover:bg-primary/90'
+                  'w-10 h-10 flex items-center justify-center rounded-xl border border-border bg-background hover:bg-muted/80 text-foreground shadow-sm transition-all duration-150 hover:scale-105 active:scale-95',
+                  !enableCamera && 'bg-primary text-primary-foreground hover:bg-primary/90'
                 )}
+                title="Browse file from device"
+                aria-label="Browse File"
               >
-                <FolderOpen className="w-3.5 h-3.5" />
-                Browse File
+                <FolderOpen className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-[10px] text-muted-foreground">
-              Click buttons or drag & drop (JPG, PNG, WEBP — Max 5MB)
+            <p className="text-[10px] text-muted-foreground tracking-tight">
+              Click icon or drag & drop (JPG, PNG — Max 5MB)
             </p>
           </div>
         )}

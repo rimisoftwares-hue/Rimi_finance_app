@@ -101,6 +101,45 @@ export const validateStreetOrVillage = (
 };
 
 /**
+ * Validates latitude and longitude coordinates.
+ * Both must be present or both empty.
+ * If present, latitude must be between -90 and 90, longitude between -180 and 180.
+ */
+export const validateCoordinates = (
+  latitude?: string | null,
+  longitude?: string | null
+): { isValid: boolean; latError?: string; lngError?: string } => {
+  const hasLat = latitude !== undefined && latitude !== null && latitude.trim() !== '';
+  const hasLng = longitude !== undefined && longitude !== null && longitude.trim() !== '';
+
+  if (!hasLat && !hasLng) {
+    return { isValid: true };
+  }
+
+  if (hasLat !== hasLng) {
+    const msg = 'Enter both latitude and longitude, or leave both empty';
+    return {
+      isValid: false,
+      latError: !hasLat ? msg : undefined,
+      lngError: !hasLng ? msg : undefined,
+    };
+  }
+
+  const latNum = Number(latitude);
+  const lngNum = Number(longitude);
+
+  if (isNaN(latNum) || latNum < -90 || latNum > 90) {
+    return { isValid: false, latError: 'Latitude must be between -90 and 90' };
+  }
+
+  if (isNaN(lngNum) || lngNum < -180 || lngNum > 180) {
+    return { isValid: false, lngError: 'Longitude must be between -180 and 180' };
+  }
+
+  return { isValid: true };
+};
+
+/**
  * Cleans a UUID value. Returns trimmed string if valid UUID, or null otherwise.
  */
 export const cleanUuid = (val: any): string | null => {
@@ -186,6 +225,19 @@ export const validateCustomerStep = (customer: CustomerDetails): Record<string, 
     errors.village = addrRes.villageError!;
   }
 
+  // Coordinate validation
+  const coordRes = validateCoordinates(customer.caddress?.latitude, customer.caddress?.longitude);
+  if (!coordRes.isValid) {
+    if (coordRes.latError) {
+      errors['caddress.latitude'] = coordRes.latError;
+      errors.latitude = coordRes.latError;
+    }
+    if (coordRes.lngError) {
+      errors['caddress.longitude'] = coordRes.lngError;
+      errors.longitude = coordRes.lngError;
+    }
+  }
+
   // Contact validation: At least one valid 10-digit number is required
   const contacts = customer.ccontacts || [];
   let validContactCount = 0;
@@ -245,6 +297,19 @@ export const validateGuardianStep = (guardian: GuardianDetails): Record<string, 
     errors['gaddress.street_name'] = 'Guardian street name is required';
     errors['guardian.street_name'] = 'Guardian street name is required';
     errors.street_name = 'Guardian street name is required';
+  }
+
+  // Coordinate validation
+  const coordRes = validateCoordinates(guardian.gaddress?.latitude, guardian.gaddress?.longitude);
+  if (!coordRes.isValid) {
+    if (coordRes.latError) {
+      errors['gaddress.latitude'] = coordRes.latError;
+      errors['guardian.gaddress.latitude'] = coordRes.latError;
+    }
+    if (coordRes.lngError) {
+      errors['gaddress.longitude'] = coordRes.lngError;
+      errors['guardian.gaddress.longitude'] = coordRes.lngError;
+    }
   }
 
   // Contact validation: At least one valid guardian contact number is mandatory

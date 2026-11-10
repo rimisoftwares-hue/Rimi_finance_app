@@ -7,6 +7,7 @@ import {
   Users,
   UserX,
   UserCheck,
+  UserPlus,
   Car,
   User,
   ChevronRight,
@@ -22,7 +23,6 @@ import {
   FileX,
   BarChart3,
   Activity,
-  TrendingUp,
   Search,
   ShieldCheck,
   Wallet,
@@ -79,8 +79,8 @@ const navigation: NavigationItem[] = [
     name: "Entry",
     icon: FilePlus,
     submenu: [
-      { name: "Consulting Form", href: "/ConsultingForm", icon: FileText },
-      { name: "Vehicle Loan Form", href: "/VehicleLoanForm", icon: Car }
+      { name: "Loan Form", href: "/loanForm", icon: FileText },
+      { name: "Loan Requests", href: "/loanRequests", icon: BellDot },
     ]
   },
   {
@@ -97,10 +97,9 @@ const navigation: NavigationItem[] = [
     name: "Reports",
     icon: BarChart3,
     submenu: [
-      { name: "Collection Report", href: "/reports/collection", icon: FileText },
+      // { name: "Collection Report", href: "/reports/collection", icon: FileText },
       { name: "Payments", href: "/paymentReport", icon: CreditCard },
-      { name: "Activity Log", href: "/reports/activity", icon: Activity },
-      { name: "Revenue", href: "/reports/revenue", icon: TrendingUp },
+      // { name: "Activity Log", href: "/reports/activity", icon: Activity },
       { name: "Due Analysis", href: "/reports/due-analysis", icon: Search },
       { name: "Compliance", href: "/reports/compliance", icon: ShieldCheck },
       { name: "Charges", href: "/reports/charges", icon: CreditCard },
@@ -147,11 +146,14 @@ const navigation: NavigationItem[] = [
       { name: "Live Map", href: "/locator/live", icon: Map },
     ],
   },
+  { name: "Notices", href: "/notices", icon: BellDot },
+  { name: "Vehicles", href: "/vehicle", icon: Car },
   {
     name: "Agent Mgmt",
     icon: MapPin,
     submenu: [
       { name: "Agent Management", href: "/AgentManagement", icon: UserCheck },
+      { name: "Invite Studio", href: "/invite", icon: UserPlus },
       { name: "Assign Customers", href: "/agents/assign", icon: Users },
       { name: "Area Allocation", href: "/agents/areas", icon: MapPin },
       { name: "Assignment History", href: "/agents/history", icon: Clock },
@@ -170,11 +172,8 @@ const navigation: NavigationItem[] = [
       { name: "Bad Debts", href: "/master/bad-debts", icon: Skull },
     ],
   },
-  { name: "Notices", href: "/notices", icon: BellDot },
-  { name: "Loan Requests", href: "/loanRequests", icon: BellDot },
-  { name: "Loans", href: "/loans", icon: HandCoins },
-  { name: "Vehicles", href: "/vehicle", icon: Car },
-  { name: "user Profile", href: "/UserProfile", icon: UserCircle }
+  { name: "user Profile", href: "/UserProfile", icon: UserCircle },
+
 ];
 
 export function Sidebar() {

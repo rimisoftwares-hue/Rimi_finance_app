@@ -1,5 +1,21 @@
 // routes/reports/reports.service.js
 const { db } = require('../../../config/database.config');
+const {
+  isClosedLoanStatus,
+  buildSchedule,
+  allocatePayments,
+  splitReceived,
+  aggregateByMonth,
+  summarize,
+} = require('./demand.calculator');
+const {
+  getCurrentDateIST,
+  getMonthStartEnd,
+  pickSanityBoundedEarliestMonth,
+  computeLoanRatio,
+  buildMonthSpine,
+  computeBusinessReport,
+} = require('./business.calculator');
 
 // â”€â”€â”€ Trial Balance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 exports.getTrialBalance = async (financeId, options = {}) => {
@@ -1023,4 +1039,363 @@ exports.getCompliance = async (financeId, { mode = 'All', search, fromDate, toDa
 
   return filtered;
 };
+
+// ─── Demand Statement ─────────────────────────────────────────────────────────
+
+/**
+ * Load all loans and valid payments for a finance, allocate payments across the FULL
+ * schedule of each loan (Decision A & Decision B), and split received amounts into
+ * Principal and Interest (Decision C for closed loans).
+ *
+ * @param {string} financeId
+ * @returns {Promise<Array<object>>}
+ */
+async function buildAllocatedInstallments(financeId) {
+  const loansSql = `
+    SELECT
+      l.id AS loan_id,
+      l.customer_id,
+      l.hp_amount,
+      TO_CHAR(l.hp_date, 'YYYY-MM-DD') AS hp_date,
+      TO_CHAR(l.due_date, 'YYYY-MM-DD') AS due_date,
+      l.due_month,
+      l.interest_rate,
+      l.principle_part,
+      l.interest_part,
+      l.due_amount,
+      c.hplno,
+      c.cname AS customer_name,
+      c.loan_status,
+      COALESCE(
+        (
+          SELECT NULLIF(TRIM(fs.loan_prefix), '')
+          FROM finance_settings fs
+          WHERE fs.finance_id = $1::uuid
+          LIMIT 1
+        ),
+        'HPL'
+      ) AS loan_prefix
+    FROM loans l
+    INNER JOIN customers c
+      ON c.id = l.customer_id
+     AND c.finance_id = l.finance_id
+    WHERE l.finance_id = $1::uuid
+    ORDER BY COALESCE(l.due_date, l.hp_date) ASC, c.hplno ASC NULLS LAST, l.id ASC
+  `;
+
+  const paymentsSql = `
+    SELECT
+      p.id,
+      p.customer_id,
+      TO_CHAR(p.due_date, 'YYYY-MM-DD') AS due_date,
+      TO_CHAR(p.payment_date, 'YYYY-MM-DD') AS payment_date,
+      p.amount,
+      p.penalty,
+      p.payment_status
+    FROM payments p
+    WHERE p.finance_id = $1::uuid
+      AND p.payment_status IS DISTINCT FROM 'cancelled'
+      AND COALESCE(p.amount, 0) > 0
+      AND EXISTS (
+        SELECT 1
+        FROM loans l
+        WHERE l.customer_id = p.customer_id
+          AND l.finance_id = p.finance_id
+      )
+    ORDER BY COALESCE(p.due_date, p.payment_date) ASC, p.payment_date ASC, p.created_at ASC, p.id ASC
+  `;
+
+  const [loansRes, paymentsRes] = await Promise.all([
+    db.query(loansSql, [financeId]),
+    db.query(paymentsSql, [financeId]),
+  ]);
+
+  const paymentsByCustomer = new Map();
+  for (const p of paymentsRes.rows) {
+    const custKey = String(p.customer_id);
+    if (!paymentsByCustomer.has(custKey)) {
+      paymentsByCustomer.set(custKey, []);
+    }
+    paymentsByCustomer.get(custKey).push(p);
+  }
+
+  const loansByCustomer = new Map();
+  for (const row of loansRes.rows) {
+    const custKey = String(row.customer_id);
+    if (!loansByCustomer.has(custKey)) {
+      loansByCustomer.set(custKey, []);
+    }
+    const prefix = row.loan_prefix || 'HPL';
+    const loanNo = row.hplno != null ? `${prefix} ${row.hplno}` : '-';
+    loansByCustomer.get(custKey).push({
+      id: row.loan_id,
+      customer_id: row.customer_id,
+      loan_no: loanNo,
+      cname: row.customer_name || '',
+      loan_status: row.loan_status || 'active',
+      hp_amount: row.hp_amount,
+      hp_date: row.hp_date,
+      due_date: row.due_date,
+      due_month: row.due_month,
+      interest_rate: row.interest_rate,
+      principle_part: row.principle_part,
+      interest_part: row.interest_part,
+      due_amount: row.due_amount,
+    });
+  }
+
+  const allSplitRows = [];
+
+  for (const [custKey, customerLoans] of loansByCustomer.entries()) {
+    const combinedSchedule = [];
+    for (const loan of customerLoans) {
+      const sched = buildSchedule(loan);
+      for (const inst of sched) {
+        combinedSchedule.push(inst);
+      }
+    }
+
+    if (combinedSchedule.length === 0) continue;
+
+    const custPayments = paymentsByCustomer.get(custKey) || [];
+    const { installments } = allocatePayments(combinedSchedule, custPayments);
+
+    for (const inst of installments) {
+      const split = splitReceived(inst);
+      if (isClosedLoanStatus(split.loanStatus) && split.demandTotal === 0 && split.receivedTotal === 0) {
+        continue;
+      }
+      allSplitRows.push(split);
+    }
+  }
+
+  return allSplitRows;
+}
+
+/**
+ * Get the Demand Statement monthly aggregation and grand summary.
+ *
+ * @param {string} financeId
+ * @param {string|null} [from] Optional YYYY-MM-DD start date
+ * @param {string|null} [to] Optional YYYY-MM-DD end date
+ */
+exports.getDemandStatement = async (financeId, from = null, to = null) => {
+  const allRows = await buildAllocatedInstallments(financeId);
+
+  const inRangeRows = allRows.filter((row) => {
+    if (from && row.dueDate < from) return false;
+    if (to && row.dueDate > to) return false;
+    return true;
+  });
+
+  const months = aggregateByMonth(inRangeRows);
+  const summary = summarize(months, inRangeRows.length);
+
+  return {
+    period: { from: from || null, to: to || null },
+    summary,
+    months,
+  };
+};
+
+/**
+ * Get the Business & Revenue Report (Accounts -> Business).
+ *
+ * Basis (Decision A):
+ * - Collections (`principal`, `interest`, `defaultAmt`, `handLoan`, `totalCollection`)
+ *   are aggregated by `payments.payment_date` calendar month in `Asia/Kolkata` (cash basis).
+ * - Disbursements (`hpCount`, `loanAmount`) and `docCharge` are aggregated by
+ *   `loans.hp_date` calendar month in `Asia/Kolkata` (loan origination date basis).
+ * - `netIncome = interest + defaultAmt + docCharge` therefore mixes cash-basis
+ *   collections (interest, default penalty) with loan-date documentation charges.
+ *
+ * @param {string} financeId Authenticated finance UUID
+ * @param {string|null} [from] Optional YYYY-MM-DD start date (snapped to month start)
+ * @param {string|null} [to] Optional YYYY-MM-DD end date (snapped to month end)
+ * @param {object} [options] Optional overrides (e.g. `todayDateIST` for deterministic tests)
+ */
+exports.getBusinessReport = async (financeId, from = null, to = null, options = {}) => {
+  const todayDateIST = options.todayDateIST || getCurrentDateIST();
+  const currentMonthKey = todayDateIST.slice(0, 7);
+
+  // 1. Sanity-bounded earliest month across loans and active payments for this finance
+  const earliestSql = `
+    SELECT
+      (
+        SELECT TO_CHAR(MIN(l.hp_date), 'YYYY-MM-DD')
+        FROM loans l
+        WHERE l.finance_id = $1::uuid
+          AND l.hp_date IS NOT NULL
+          AND l.hp_date >= DATE '2000-01-01'
+          AND l.hp_date <= $2::date
+      ) AS min_loan_date,
+      (
+        SELECT TO_CHAR(MIN(p.payment_date), 'YYYY-MM-DD')
+        FROM payments p
+        WHERE p.finance_id = $1::uuid
+          AND p.payment_status IS DISTINCT FROM 'cancelled'
+          AND p.payment_date IS NOT NULL
+          AND p.payment_date >= DATE '2000-01-01'
+          AND p.payment_date <= $2::date
+      ) AS min_payment_date
+  `;
+  const { rows: earliestRows } = await db.query(earliestSql, [financeId, todayDateIST]);
+  const minLoanDate = earliestRows[0]?.min_loan_date || null;
+  const minPaymentDate = earliestRows[0]?.min_payment_date || null;
+
+  const earliestMonthKey = pickSanityBoundedEarliestMonth(
+    [minLoanDate, minPaymentDate],
+    todayDateIST
+  );
+
+  // 2. Build the month spine (effective, default12, default6)
+  const spine = buildMonthSpine({
+    from,
+    to,
+    earliestMonthKey,
+    currentMonthKey,
+  });
+
+  // Union of all month keys across effective, default12, and default6 windows
+  const allSpineKeys = Array.from(
+    new Set([...spine.effective, ...spine.default12, ...spine.default6])
+  ).sort();
+
+  const queryStartDate =
+    allSpineKeys.length > 0
+      ? getMonthStartEnd(allSpineKeys[0]).startDate
+      : `${currentMonthKey}-01`;
+  const queryEndDate =
+    allSpineKeys.length > 0
+      ? getMonthStartEnd(allSpineKeys[allSpineKeys.length - 1]).endDate
+      : getMonthStartEnd(currentMonthKey).endDate;
+
+  // 3. SQL aggregation for loans and payments within the required month window
+  const loansAggSql = `
+    SELECT
+      TO_CHAR(l.hp_date, 'YYYY-MM') AS month_key,
+      COUNT(*)::int AS hp_count,
+      COALESCE(ROUND(SUM(COALESCE(l.hp_amount, 0)) * 100), 0)::bigint AS loan_amount_paise,
+      COALESCE(ROUND(SUM(COALESCE(l.documentation_charge, 0)) * 100), 0)::bigint AS doc_charge_paise
+    FROM loans l
+    WHERE l.finance_id = $1::uuid
+      AND l.hp_date IS NOT NULL
+      AND l.hp_date >= $2::date
+      AND l.hp_date <= $3::date
+    GROUP BY TO_CHAR(l.hp_date, 'YYYY-MM')
+    ORDER BY month_key ASC
+  `;
+
+  const paymentsAggSql = `
+    SELECT
+      matched_loan.loan_id,
+      p.customer_id,
+      TO_CHAR(p.payment_date, 'YYYY-MM') AS month_key,
+      COALESCE(ROUND(SUM(COALESCE(p.amount, 0)) * 100), 0)::bigint AS amount_paise,
+      COALESCE(ROUND(SUM(COALESCE(p.penalty, 0)) * 100), 0)::bigint AS penalty_paise,
+      COALESCE(ROUND(SUM(COALESCE(p.hand_loan, 0)) * 100), 0)::bigint AS hand_loan_paise
+    FROM payments p
+    LEFT JOIN LATERAL (
+      SELECT l.id AS loan_id
+      FROM loans l
+      WHERE l.finance_id = $1::uuid
+        AND l.customer_id = p.customer_id
+      ORDER BY
+        CASE
+          WHEN p.due_date IS NOT NULL
+           AND COALESCE(l.due_date, l.hp_date) IS NOT NULL
+           AND date_trunc('month', p.due_date)::date >= date_trunc('month', COALESCE(l.due_date, l.hp_date))::date
+           AND date_trunc('month', p.due_date)::date <= (
+             date_trunc('month', COALESCE(l.due_date, l.hp_date))
+             + ((GREATEST(COALESCE(l.due_month, 1), 1) - 1) || ' months')::interval
+           )::date
+          THEN 0
+          ELSE 1
+        END ASC,
+        CASE
+          WHEN p.due_date IS NOT NULL AND l.due_date IS NOT NULL
+           AND EXTRACT(DAY FROM p.due_date) = EXTRACT(DAY FROM l.due_date)
+          THEN 0
+          ELSE 1
+        END ASC,
+        CASE
+          WHEN COALESCE(l.hp_date, l.due_date) <= COALESCE(p.due_date, p.payment_date)
+          THEN 0
+          ELSE 1
+        END ASC,
+        ABS(COALESCE(p.due_date, p.payment_date) - COALESCE(l.due_date, l.hp_date, COALESCE(p.due_date, p.payment_date))) ASC,
+        l.hp_date ASC NULLS LAST,
+        l.id ASC
+      LIMIT 1
+    ) matched_loan ON TRUE
+    WHERE p.finance_id = $1::uuid
+      AND p.payment_status IS DISTINCT FROM 'cancelled'
+      AND p.payment_date IS NOT NULL
+      AND p.payment_date >= $2::date
+      AND p.payment_date <= $3::date
+    GROUP BY matched_loan.loan_id, p.customer_id, TO_CHAR(p.payment_date, 'YYYY-MM')
+    ORDER BY month_key ASC
+  `;
+
+  const [loansAggRes, paymentsAggRes] = await Promise.all([
+    db.query(loansAggSql, [financeId, queryStartDate, queryEndDate]),
+    db.query(paymentsAggSql, [financeId, queryStartDate, queryEndDate]),
+  ]);
+
+  // 4. Batched loan ratios query (`= ANY($2::uuid[])`) for all loans referenced in payment groups
+  const referencedLoanIds = Array.from(
+    new Set(paymentsAggRes.rows.map((r) => r.loan_id).filter(Boolean))
+  );
+
+  const loansRatioById = new Map();
+  if (referencedLoanIds.length > 0) {
+    const loanRatiosSql = `
+      SELECT
+        l.id,
+        l.hp_amount,
+        l.due_month,
+        l.interest_rate,
+        l.principle_part,
+        l.interest_part,
+        l.due_amount
+      FROM loans l
+      WHERE l.finance_id = $1::uuid
+        AND l.id = ANY($2::uuid[])
+    `;
+    const { rows: ratioRows } = await db.query(loanRatiosSql, [financeId, referencedLoanIds]);
+    for (const loanRow of ratioRows) {
+      loansRatioById.set(String(loanRow.id), computeLoanRatio(loanRow));
+    }
+  }
+
+  const loanMonthRows = loansAggRes.rows.map((r) => ({
+    monthKey: r.month_key,
+    hpCount: Number(r.hp_count) || 0,
+    loanAmountPaise: Number(r.loan_amount_paise) || 0,
+    docChargePaise: Number(r.doc_charge_paise) || 0,
+  }));
+
+  const paymentGroups = paymentsAggRes.rows.map((r) => ({
+    monthKey: r.month_key,
+    loanId: r.loan_id ? String(r.loan_id) : null,
+    customerId: r.customer_id ? String(r.customer_id) : null,
+    amountPaise: Number(r.amount_paise) || 0,
+    penaltyPaise: Number(r.penalty_paise) || 0,
+    handLoanPaise: Number(r.hand_loan_paise) || 0,
+    payment_status: 'active',
+  }));
+
+  return computeBusinessReport({
+    loanMonthRows,
+    paymentGroups,
+    loansRatioById,
+    spine,
+    from,
+    to,
+    earliestMonthKey,
+    currentMonthKey,
+  });
+};
+
+
 

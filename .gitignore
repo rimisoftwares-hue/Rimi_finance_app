@@ -9,3 +9,6 @@ test_assets/
 .cargo/
 e2e/
 test_scripts/
+.env
+backend/.env
+

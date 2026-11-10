@@ -12,6 +12,8 @@ export interface Addresses {
   state: string;
   pincode: string;
   location: string;
+  latitude?: string;
+  longitude?: string;
 }
 
 export interface CustomerContact {
@@ -92,6 +94,12 @@ export interface VehicleDetails {
   remarks: string;
   variant: string;
   vehiclePhoto?: PhotoField;
+  isNewVehicle?: boolean;
+  /** Year of manufacture (vehicle_detail.vehicle_modal). */
+  vehicle_modal?: string;
+  insurance_expiry_date?: string;
+  frontImage?: File;
+  sideImage?: File;
 }
 
 export interface LoanDetails {
@@ -168,7 +176,7 @@ const initialCustomer: CustomerDetails = {
   cphoto: null,
   cvehiclePhoto: null,
   cpropertyPhoto: null,
-  ccontacts: [],
+  ccontacts: [{ contact_type: 'customer', type: 'mobile', number: '' }],
   cfname: { value: '', unit: 'S/O' },
   aadhar_id: '',
   other_govt_id_type: 'other',
@@ -188,7 +196,9 @@ const initialCustomer: CustomerDetails = {
     district: '',
     state: '',
     pincode: '',
-    location: ''
+    location: '',
+    latitude: '',
+    longitude: ''
   }
 };
 
@@ -213,7 +223,10 @@ const initialVehicle: VehicleDetails = {
   deal_type:'consulting',
   remarks:'',
   variant:'',
-  vehiclePhoto: null
+  vehiclePhoto: null,
+  isNewVehicle: false,
+  vehicle_modal: '',
+  insurance_expiry_date: ''
 };
 
 const initialLoan: LoanDetails = {
@@ -248,7 +261,7 @@ const initialGuardian: GuardianDetails = {
   gname: '',
   gphoto: null,
   gpropertyPhoto: null,
-  gcontacts: [],
+  gcontacts: [{ contact_type: 'guardian', type: 'mobile', number: '' }],
   gfname: { value: '', unit: 'S/O' },
   aadhar_id: '',
   other_govt_id_type: 'pan_card',
@@ -269,8 +282,18 @@ const initialGuardian: GuardianDetails = {
     district: '',
     state: '',
     pincode: '',
-    location: ''
+    location: '',
+    latitude: '',
+    longitude: ''
   }
+};
+
+/** Initial (empty) form values, used e.g. by the OCR apply policy to detect untouched fields. */
+export const initialFormValues = {
+  customer: initialCustomer,
+  vehicle: initialVehicle,
+  loan: initialLoan,
+  guardian: initialGuardian,
 };
 
 export const useFormStore = create<FormState>((set) => ({

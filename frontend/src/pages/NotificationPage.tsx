@@ -1,17 +1,19 @@
 // src/pages/NotificationPage.tsx
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   CheckCheck, 
   RotateCw, 
   Archive,
   CheckCircle2,
-  CalendarDays
+  CalendarDays,
+  KeyRound
 } from 'lucide-react';
 import { useNotifications } from '../hooks/useNotifications';
 import { NotificationCategory, NotificationItemData } from '../types/notification';
 import { NotificationFilters } from '../components/notifications/NotificationFilters';
 import { NotificationItem } from '../components/notifications/NotificationItem';
 import { NotificationEmptyState } from '../components/notifications/NotificationEmptyState';
+import { JoinWithCodeDialog } from '../components/invitations/JoinWithCodeDialog';
 import { Button } from '../components/ui/button';
 
 export default function NotificationPage() {
@@ -26,12 +28,14 @@ export default function NotificationPage() {
     markAllAsRead,
     archive,
     unarchive,
+    respondToInvite,
   } = useNotifications();
 
   const [activeCategory, setActiveCategory] = useState<NotificationCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [joinCodeOpen, setJoinCodeOpen] = useState(false);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -164,8 +168,18 @@ export default function NotificationPage() {
           </p>
         </div>
 
-        {/* Global Header Actions: Refresh & Mark All as Read */}
+        {/* Global Header Actions: Join with Code, Refresh & Mark All as Read */}
         <div className="flex items-center gap-2.5 self-stretch sm:self-auto flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setJoinCodeOpen(true)}
+            className="h-9 px-3.5 rounded-xl border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary text-xs font-semibold transition-all shadow-2xs"
+          >
+            <KeyRound className="h-3.5 w-3.5 mr-2 text-primary" />
+            <span>Join with Code</span>
+          </Button>
+
           <Button
             variant="outline"
             size="sm"
@@ -289,6 +303,7 @@ export default function NotificationPage() {
                     onMarkAsUnread={markAsUnread}
                     onArchive={archive}
                     onUnarchive={unarchive}
+                    onRespondToInvite={respondToInvite}
                     isSelected={selectedIds.has(item.id)}
                     onToggleSelect={handleToggleSelect}
                   />
@@ -298,6 +313,14 @@ export default function NotificationPage() {
           ))}
         </div>
       )}
+
+      <JoinWithCodeDialog
+        open={joinCodeOpen}
+        onOpenChange={setJoinCodeOpen}
+        onSuccess={() => {
+          refresh();
+        }}
+      />
     </div>
   );
 }

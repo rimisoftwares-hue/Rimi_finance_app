@@ -3,6 +3,13 @@
 // Starts the Express app and sets up WebSocket.
 // Moved from backend/index.js — no logic changes.
 
+const dns = require('dns');
+const net = require('net');
+dns.setDefaultResultOrder('ipv4first');
+if (typeof net.setDefaultAutoSelectFamily === 'function') {
+  net.setDefaultAutoSelectFamily(false);
+}
+
 const path = require('path');
 require('dotenv').config({
   path: path.resolve(__dirname, '../.env')
@@ -88,6 +95,16 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('='.repeat(60) + '\n');
   // Uncomment to enable WebSocket:
   // setupWebSocket(server);
+
+  // OCR worker (AI Scan) runs in-process only when both flags are on.
+  // It never runs DDL; the OCR tables come from sql/migrations/006_create_ocr_tables.sql.
+  const { getOcrConfig } = require('./modules/ocr/ocr.config');
+  const ocrCfg = getOcrConfig();
+  if (ocrCfg.enabled && ocrCfg.workerEnabled) {
+    require('./modules/ocr/ocr.worker').startOcrWorker().catch((err) => {
+      console.error('[OCR] Worker failed to start:', err && err.code ? err.code : 'ERROR');
+    });
+  }
 });
 
 // ─── Error handlers ───────────────────────────────────────────────────────────

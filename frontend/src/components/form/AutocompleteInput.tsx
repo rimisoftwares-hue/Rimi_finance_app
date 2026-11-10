@@ -1,6 +1,6 @@
 // components/AutocompleteInput.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Check, X } from 'lucide-react';
+import { Search, Check, X, Plus } from 'lucide-react';
 
 interface AutocompleteInputProps {
   label: string;
@@ -15,6 +15,8 @@ interface AutocompleteInputProps {
   className?: string;
   containerClassName?: string;
   disabled?: boolean;
+  onAddNew?: (query: string) => void;
+  addNewText?: string;
 }
 
 export const AutocompleteInput: React.FC<AutocompleteInputProps> = ({
@@ -29,7 +31,9 @@ export const AutocompleteInput: React.FC<AutocompleteInputProps> = ({
   required = false,
   className = '',
   containerClassName = '',
-  disabled = false
+  disabled = false,
+  onAddNew,
+  addNewText = 'Add Vehicle'
 }) => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
@@ -150,10 +154,26 @@ export const AutocompleteInput: React.FC<AutocompleteInputProps> = ({
       )}
 
       {showSuggestions && suggestions.length === 0 && !loading && value && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg">
-          <div className="px-3 py-3 text-gray-500 text-center">
-            No vehicles found
-          </div>
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+          {onAddNew ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onAddNew(value);
+                setShowSuggestions(false);
+              }}
+              className="w-full px-3 py-3 text-blue-600 font-normal flex items-center justify-center gap-1.5 hover:bg-blue-50 transition-colors text-sm cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{addNewText}</span>
+            </button>
+          ) : (
+            <div className="px-3 py-3 text-gray-500 text-center">
+              No vehicles found
+            </div>
+          )}
         </div>
       )}
 

@@ -6,6 +6,7 @@ const { db } = require('../../config/database.config');
 const crypto = require('crypto');
 const { authMiddleware, ownerOnly, checkFinance, enhancedCheckFinance } = require('../../middleware/auth.middleware');
 const { haversineKm, validCoords, getClientIp, lookupIp } = require('./loginLocation');
+const { changePasswordForPrincipal } = require('./changePassword.service');
 
 const logoutAuth = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -224,6 +225,29 @@ const formatFinanceData = (financeRaw) => {
     office_lng: financeRaw.office_lng != null ? parseFloat(financeRaw.office_lng) : null,
     office_geofence_m: financeRaw.office_geofence_m ? parseInt(financeRaw.office_geofence_m, 10) : 200
   };
+};
+
+// Resolve signed print_logo_url with fallback: print_logo -> web_logo -> finance_detail.finance_photo
+const resolveFinancePrintLogoUrl = async (financeId, fallbackFinancePhoto = null) => {
+  try {
+    if (!financeId) return fallbackFinancePhoto ? await getSignedImageUrl(fallbackFinancePhoto) : null;
+    const { rows } = await db.query(
+      `SELECT asset_type, file_path
+       FROM finance_branding_assets
+       WHERE finance_id = $1
+         AND asset_type IN ('print_logo', 'web_logo')
+         AND is_active = true
+       ORDER BY created_at DESC`,
+      [financeId]
+    );
+    const printLogo = rows.find(r => r.asset_type === 'print_logo')?.file_path;
+    const webLogo = rows.find(r => r.asset_type === 'web_logo')?.file_path;
+    const rawUrl = printLogo || webLogo || fallbackFinancePhoto || null;
+    return rawUrl ? await getSignedImageUrl(rawUrl) : null;
+  } catch (err) {
+    console.error('Error resolving finance print_logo_url:', err);
+    return fallbackFinancePhoto ? await getSignedImageUrl(fallbackFinancePhoto) : null;
+  }
 };
 
 function parseAllowedCompanies(value) {
@@ -620,6 +644,7 @@ router.post('/user-login', async (req, res) => {
     }
 
     const financeData = formatFinanceData(financeRaw);
+    financeData.print_logo_url = await resolveFinancePrintLogoUrl(financeRaw.id, financeRaw.finance_photo);
 
     // 2. Evaluate location according to LOGIN_LOCATION_POLICY
     const policy = process.env.LOGIN_LOCATION_POLICY || 'prefer';
@@ -952,6 +977,7 @@ router.get('/finance-details/:financeId', async (req, res) => {
     }
 
     const financeData = formatFinanceData(result.rows[0]);
+    financeData.print_logo_url = await resolveFinancePrintLogoUrl(result.rows[0].id, result.rows[0].finance_photo);
 
     res.json({
       success: true,
@@ -1930,7 +1956,7 @@ router.post('/reset-password', async (req, res) => {
 
     // PostgreSQL UPDATE
     await db.query(
-      'UPDATE users SET password = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2',
+      'UPDATE users SET password = $1, reset_token = NULL, reset_token_expiry = NULL, password_changed_at = CURRENT_TIMESTAMP WHERE id = $2',
       [hashedPassword, user.id]
     );
 
@@ -1942,45 +1968,24 @@ router.post('/reset-password', async (req, res) => {
 });
 
 // ========== CHANGE PASSWORD ==========
-router.post('/change-password', async (req, res) => {
+router.post('/change-password', async (req, res, next) => {
   try {
-    const { currentPassword, newPassword } = req.body;
-    const userId = req.user.id;
-
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ success: false, message: 'Current and new passwords are required' });
-    }
-
-    // PostgreSQL query
-    const result = await db.query(
-      'SELECT * FROM users WHERE id = $1',
-      [userId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    const user = result.rows[0];
-    const isMatch = await bcrypt.compare(currentPassword, user.password);
-
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Current password is incorrect' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-    // PostgreSQL UPDATE
-    await db.query(
-      'UPDATE users SET password = $1 WHERE id = $2',
-      [hashedPassword, userId]
-    );
-
-    res.json({ success: true, message: 'Password changed successfully' });
+    const result = await changePasswordForPrincipal(req);
+    return res.json(result);
   } catch (error) {
-    console.error('Change password error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    if (error && error.statusCode) {
+      if (error.statusCode === 429 && error.retryAfterSeconds) {
+        res.set('Retry-After', String(error.retryAfterSeconds));
+      }
+      return res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        error_code: error.errorCode || 'CHANGE_PASSWORD_ERROR',
+        retryAfterSeconds: error.retryAfterSeconds || undefined,
+      });
+    }
+    console.error('Change password error:', error.message);
+    return res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 

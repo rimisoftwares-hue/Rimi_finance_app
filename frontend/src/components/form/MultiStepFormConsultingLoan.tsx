@@ -235,7 +235,7 @@ const handleSubmit = async () => {
 
       <div className="flex-1 overflow-auto min-h-0">
         {currentStep === 1 && <Step1CustomerDetails errors={errors} />}
-        {currentStep === 2 && <Step2ConsuldingLoan errors={errors} />}
+        {currentStep === 2 && <Step2ConsuldingLoan errors={errors} allowAddNewVehicle={true} />}
         {currentStep === 3 && <Step3GuardianDetails errors={errors} />}
       </div>
 

@@ -18,11 +18,13 @@ const steps: Step[] = [
 interface StepperNavigationProps {
   onStepClick: (step: number) => void;
   canNavigateToStep: (step: number) => boolean;
+  align?: 'left' | 'center';
 }
 
 export const StepperNavigation: React.FC<StepperNavigationProps> = ({
   onStepClick,
   canNavigateToStep,
+  align = 'center',
 }) => {
   const { currentStep, completedSteps } = useFormStore();
 
@@ -101,8 +103,11 @@ export const StepperNavigation: React.FC<StepperNavigationProps> = ({
   //   </nav>
   // );
   return (
-  <nav className="w-full mb-8">
-    <ol className="flex items-center justify-center gap-2 sm:gap-4">
+  <nav className="w-full">
+    <ol className={cn(
+      "flex items-center gap-2 sm:gap-4 w-full overflow-x-auto py-1",
+      align === 'left' ? "justify-start" : "justify-center"
+    )}>
       {steps.map((step, index) => {
         const isCompleted = completedSteps.includes(step.id);
         const isActive = currentStep === step.id;

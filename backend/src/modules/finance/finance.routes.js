@@ -299,7 +299,7 @@ const handleCreateFinance = async (req, res) => {
       let addressId = null;
 
       if (house_no || street || street_name || village || effectiveLandmark ||
-          address || city || district || state || pincode || location || latitude !== null || longitude !== null) {
+        address || city || district || state || pincode || location || latitude !== null || longitude !== null) {
         const addressResult = await client.query(
           `INSERT INTO addresses (
              house_no, street, street_name, village, land_mark, address, city, district, state, pincode, location, latitude, longitude
@@ -676,10 +676,38 @@ router.get('/allowed-finances', async (req, res) => {
       rows = result.rows;
     }
 
+    // Batch lookup of active print_logo and web_logo branding assets across all returned finances
+    const financeIds = rows.map(r => r.id).filter(Boolean);
+    const brandingMap = new Map();
+    if (financeIds.length > 0) {
+      const { rows: assetRows } = await db.query(
+        `SELECT finance_id, asset_type, file_path
+         FROM finance_branding_assets
+         WHERE finance_id = ANY($1::uuid[])
+           AND asset_type IN ('print_logo', 'web_logo')
+           AND is_active = true
+         ORDER BY created_at DESC`,
+        [financeIds]
+      );
+      for (const a of assetRows) {
+        const fid = String(a.finance_id);
+        if (!brandingMap.has(fid)) brandingMap.set(fid, {});
+        const bucket = brandingMap.get(fid);
+        if (!bucket[a.asset_type]) {
+          bucket[a.asset_type] = a.file_path;
+        }
+      }
+    }
+
     const processedFinances = await Promise.all(
       rows.map(async (f) => {
-        const logoUrl = f.logo_url || f.finance_photo || null;
+        const assets = brandingMap.get(String(f.id)) || {};
+        const logoUrl = f.logo_url || assets.web_logo || f.finance_photo || null;
         const signedLogo = logoUrl ? await getSignedImageUrl(logoUrl) : null;
+        const rawPrintLogo = assets.print_logo || assets.web_logo || f.logo_url || f.finance_photo || null;
+        const signedPrintLogo = rawPrintLogo
+          ? (rawPrintLogo === logoUrl ? signedLogo : await getSignedImageUrl(rawPrintLogo))
+          : null;
         return {
           id: String(f.id),
           name: f.name,
@@ -689,6 +717,7 @@ router.get('/allowed-finances', async (req, res) => {
           since: f.since,
           finance_photo: signedLogo || f.finance_photo,
           logo_url: signedLogo || f.logo_url,
+          print_logo_url: signedPrintLogo,
           user_role: f.user_role || 'agent',
           login_time_from: f.login_time_from || null,
           login_time_to: f.login_time_to || null,
@@ -831,15 +860,21 @@ router.post('/switch', async (req, res) => {
       );
     }
 
-    // 5. Fetch branding logo
+    // 5. Fetch branding logos (print_logo and web_logo)
     const { rows: brandingRows } = await db.query(`
-      SELECT file_path FROM finance_branding_assets 
-      WHERE finance_id = $1 AND asset_type = 'web_logo' AND is_active = true 
-      ORDER BY created_at DESC LIMIT 1
+      SELECT asset_type, file_path FROM finance_branding_assets 
+      WHERE finance_id = $1 AND asset_type IN ('print_logo', 'web_logo') AND is_active = true 
+      ORDER BY created_at DESC
     `, [targetFinanceId]);
 
-    const rawLogo = brandingRows.length > 0 ? brandingRows[0].file_path : targetFinance.finance_photo;
+    const webLogoRow = brandingRows.find(r => r.asset_type === 'web_logo');
+    const printLogoRow = brandingRows.find(r => r.asset_type === 'print_logo');
+    const rawLogo = webLogoRow ? webLogoRow.file_path : targetFinance.finance_photo;
     const signedLogo = rawLogo ? await getSignedImageUrl(rawLogo) : null;
+    const rawPrintLogo = printLogoRow?.file_path || webLogoRow?.file_path || targetFinance.finance_photo || null;
+    const signedPrintLogo = rawPrintLogo
+      ? (rawPrintLogo === rawLogo ? signedLogo : await getSignedImageUrl(rawPrintLogo))
+      : null;
 
     // 6. Gather all allowed companies for JWT payload
     let allowedCompanies = [targetFinanceId];
@@ -910,6 +945,7 @@ router.post('/switch', async (req, res) => {
         since: targetFinance.since,
         finance_photo: signedLogo || targetFinance.finance_photo,
         logo_url: signedLogo || rawLogo,
+        print_logo_url: signedPrintLogo,
         address: fullAddress,
         house_no: targetFinance.house_no,
         street: targetFinance.street,

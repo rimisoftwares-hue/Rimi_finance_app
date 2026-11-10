@@ -31,6 +31,8 @@ export type NotificationStatus =
   | 'rejected'
   | 'overdue';
 
+export type InviteNotificationStatus = 'pending' | 'accepted' | 'declined' | 'cancelled';
+
 export interface NotificationItemData {
   id: string;
   type: NotificationType;
@@ -49,6 +51,13 @@ export interface NotificationItemData {
   actionLabel: string;
   actionLink: string;
   metadata?: Record<string, unknown>;
+  // Direct invite notification fields
+  invitationId?: string;
+  financeId?: string;
+  financeName?: string;
+  role?: 'admin' | 'agent' | 'staff';
+  invitedByName?: string;
+  inviteStatus?: InviteNotificationStatus;
 }
 
 export interface NotificationFilterCounts {

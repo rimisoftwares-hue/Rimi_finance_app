@@ -558,7 +558,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-    CREATE TYPE invitation_status_enum AS ENUM ('pending', 'accepted', 'expired', 'cancelled');
+    CREATE TYPE invitation_status_enum AS ENUM ('pending', 'accepted', 'expired', 'cancelled', 'declined', 'exhausted');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -865,6 +865,7 @@ CREATE TABLE owner (
     max_customers_override    INT                 DEFAULT NULL,
     max_finances_override     INT                 DEFAULT NULL,
     max_users_override        INT                 DEFAULT NULL,
+    password_changed_at       TIMESTAMPTZ         DEFAULT NULL,
     created_at                TIMESTAMP           NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                TIMESTAMP           NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -1063,6 +1064,7 @@ CREATE TABLE users (
     is_active                 SMALLINT            DEFAULT 1,
     reset_token               VARCHAR(255)        DEFAULT NULL,
     reset_token_expiry        TIMESTAMP,
+    password_changed_at       TIMESTAMPTZ         DEFAULT NULL,
     created_at                TIMESTAMP           DEFAULT CURRENT_TIMESTAMP,
     updated_at                TIMESTAMP           DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -2413,7 +2415,9 @@ CREATE TABLE IF NOT EXISTS agent_area_allocations (
 CREATE TABLE IF NOT EXISTS agent_invitations (
     id                    UUID                NOT NULL DEFAULT uuidv7(),
     finance_id            UUID                NOT NULL,
-    invited_by            UUID                NOT NULL,
+    invited_by            UUID                DEFAULT NULL,
+    invited_by_owner_id   UUID                DEFAULT NULL,
+    invite_type           VARCHAR(20)         NOT NULL DEFAULT 'direct',
     user_id               UUID                DEFAULT NULL,
     invite_token          VARCHAR(255)        NOT NULL UNIQUE,
     invitation_code       VARCHAR(50)         DEFAULT NULL UNIQUE,
@@ -2422,18 +2426,52 @@ CREATE TABLE IF NOT EXISTS agent_invitations (
     status                invitation_status_enum NOT NULL DEFAULT 'pending',
     login_time_from       TIME                DEFAULT NULL,
     login_time_to         TIME                DEFAULT NULL,
+    max_uses              INT                 DEFAULT NULL,
+    used_count            INT                 NOT NULL DEFAULT 0,
     expires_at            TIMESTAMP           NOT NULL,
     accepted_at           TIMESTAMP           DEFAULT NULL,
+    revoked_at            TIMESTAMPTZ         DEFAULT NULL,
+    deleted_at            TIMESTAMPTZ         DEFAULT NULL,
     created_at            TIMESTAMP           NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            TIMESTAMP           NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
+    CONSTRAINT chk_ai_invite_type CHECK (invite_type IN ('direct', 'code')),
+    CONSTRAINT chk_ai_assigned_role_not_owner CHECK (assigned_role <> 'owner'),
+    CONSTRAINT chk_ai_max_uses CHECK (max_uses IS NULL OR max_uses >= 1),
+    CONSTRAINT chk_ai_used_count CHECK (used_count >= 0),
+    CONSTRAINT chk_ai_code_has_code CHECK (invite_type <> 'code' OR invitation_code IS NOT NULL),
     CONSTRAINT fk_ai_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
-    CONSTRAINT fk_ai_invited_by FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ai_invited_by FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_ai_invited_by_owner FOREIGN KEY (invited_by_owner_id) REFERENCES owner(id) ON DELETE SET NULL,
     CONSTRAINT fk_ai_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_finance_status ON agent_invitations (finance_id, status);
+CREATE INDEX IF NOT EXISTS idx_ai_finance_type_created ON agent_invitations (finance_id, invite_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_user_status ON agent_invitations (user_id, status);
+-- At most one pending direct invitation per (finance, user)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ai_pending_direct ON agent_invitations (finance_id, user_id) WHERE invite_type = 'direct' AND status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email));
+
+-- Table 5.4b: Invitation redemption history (direct accepts + code redemptions)
+CREATE TABLE IF NOT EXISTS agent_invitation_redemptions (
+    id                    UUID                NOT NULL DEFAULT uuidv7(),
+    invitation_id         UUID                NOT NULL,
+    finance_id            UUID                NOT NULL,
+    user_id               UUID                NOT NULL,
+    invited_by_user_id    UUID                DEFAULT NULL,
+    invited_by_owner_id   UUID                DEFAULT NULL,
+    redeemed_at           TIMESTAMPTZ         NOT NULL DEFAULT now(),
+    PRIMARY KEY (id),
+    CONSTRAINT uq_air_invitation_user UNIQUE (invitation_id, user_id),
+    CONSTRAINT fk_air_invitation FOREIGN KEY (invitation_id) REFERENCES agent_invitations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_air_finance FOREIGN KEY (finance_id) REFERENCES finance_detail(id) ON DELETE CASCADE,
+    CONSTRAINT fk_air_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_air_invited_by_user FOREIGN KEY (invited_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_air_invited_by_owner FOREIGN KEY (invited_by_owner_id) REFERENCES owner(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_air_finance_redeemed ON agent_invitation_redemptions (finance_id, redeemed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_air_user ON agent_invitation_redemptions (user_id);
 
 -- ------------------------------------------------------------
 -- Method 5.5: Single Customer Agent Assignment
@@ -4797,7 +4835,7 @@ CROSS JOIN (
     SELECT 'advanced_reports' UNION ALL
     SELECT 'ai_chatbot' UNION ALL
     SELECT 'ai_voice_agent'
-) f
+)
 WHERE 
     (sp.plan_code = 'A1' AND f.code IN ('offline_mode')) OR
     (sp.plan_code = 'A2' AND f.code IN ('offline_mode', 'online_mode', 'whatsapp_alerts', 'customer_app')) OR

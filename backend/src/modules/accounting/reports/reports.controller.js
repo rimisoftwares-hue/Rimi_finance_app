@@ -1,5 +1,30 @@
 // routes/reports/reports.controller.js
 const svc = require('./reports.service');
+const { parseYmdParts } = require('./demand.calculator');
+const { diffMonthsInclusive } = require('./business.calculator');
+
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ValidationError';
+    this.statusCode = 400;
+  }
+}
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_DEMAND_RANGE_DAYS = 1827; // ~5 years (including leap days)
+const MAX_BUSINESS_RANGE_DAYS = 3653; // ~10 years (including leap days)
+const MAX_BUSINESS_RANGE_MONTHS = 120; // 10 years (120 calendar months)
+
+function getFinanceId(req) {
+  return (
+    req.financeId ||
+    req.user?.finance_id ||
+    req.user?.financeId ||
+    req.headers?.['finance-id'] ||
+    req.headers?.['x-finance-id']
+  );
+}
 
 // Helper to keep UUIDs as string, or integer as number
 const toId = (val) => (val && /^\d+$/.test(String(val)) ? Number(val) : val);
@@ -201,3 +226,167 @@ exports.getCompliance = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+exports.getDemand = async (req, res) => {
+  try {
+    const financeId = getFinanceId(req);
+    if (!financeId || !UUID_REGEX.test(String(financeId))) {
+      throw new ValidationError('Valid finance_id is required');
+    }
+
+    const fromRaw = req.query.from ?? req.query.fromDate;
+    const toRaw = req.query.to ?? req.query.toDate;
+
+    let fromParts = null;
+    if (fromRaw !== undefined && String(fromRaw).trim() !== '') {
+      const fromStr = String(fromRaw).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fromStr)) {
+        throw new ValidationError('from must be a valid YYYY-MM-DD date');
+      }
+      fromParts = parseYmdParts(fromStr);
+      if (!fromParts) {
+        throw new ValidationError('from must be a real calendar date in YYYY-MM-DD format');
+      }
+    }
+
+    let toParts = null;
+    if (toRaw !== undefined && String(toRaw).trim() !== '') {
+      const toStr = String(toRaw).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(toStr)) {
+        throw new ValidationError('to must be a valid YYYY-MM-DD date');
+      }
+      toParts = parseYmdParts(toStr);
+      if (!toParts) {
+        throw new ValidationError('to must be a real calendar date in YYYY-MM-DD format');
+      }
+    }
+
+    if (fromParts && toParts) {
+      if (fromParts.ymd > toParts.ymd) {
+        throw new ValidationError('Invalid date range: from must be less than or equal to to');
+      }
+
+      const fromUtcMs = Date.UTC(fromParts.year, fromParts.month - 1, fromParts.day);
+      const toUtcMs = Date.UTC(toParts.year, toParts.month - 1, toParts.day);
+      const diffDays = Math.round((toUtcMs - fromUtcMs) / (1000 * 60 * 60 * 24));
+      if (diffDays > MAX_DEMAND_RANGE_DAYS) {
+        throw new ValidationError('Date range cannot exceed 5 years');
+      }
+    }
+
+    const data = await svc.getDemandStatement(
+      String(financeId),
+      fromParts ? fromParts.ymd : null,
+      toParts ? toParts.ymd : null
+    );
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    if (err instanceof ValidationError || err.statusCode === 400) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    console.error('getDemand error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
+ * GET /api/reports/business
+ *
+ * Returns the database-driven Business & Revenue Report for the caller's finance.
+ * Note on Basis (Decision A):
+ * - Collections (`principal`, `interest`, `defaultAmt`, `handLoan`, `totalCollection`)
+ *   are bucketed by `payment_date` month in `Asia/Kolkata` (cash basis).
+ * - Disbursements (`hpCount`, `loanAmount`) and `docCharge` are bucketed by
+ *   `hp_date` month in `Asia/Kolkata` (loan origination date basis).
+ * - `netIncome` (`interest + defaultAmt + docCharge`) mixes cash-basis collections
+ *   with loan-date documentation charges.
+ * - Any `from`/`to` range is snapped to whole calendar months (Decision C).
+ */
+exports.getBusinessReport = async (req, res) => {
+  try {
+    if (
+      req.query?.financeId !== undefined ||
+      req.query?.finance_id !== undefined ||
+      req.body?.financeId !== undefined ||
+      req.body?.finance_id !== undefined
+    ) {
+      throw new ValidationError(
+        'financeId parameter is not accepted; finance is determined from authenticated context'
+      );
+    }
+
+    const financeId = getFinanceId(req);
+    if (!financeId || !UUID_REGEX.test(String(financeId))) {
+      throw new ValidationError('Valid finance_id is required from authenticated context');
+    }
+
+    const fromRaw = req.query?.from ?? req.query?.fromDate;
+    const toRaw = req.query?.to ?? req.query?.toDate;
+
+    let fromParts = null;
+    if (fromRaw !== undefined && String(fromRaw).trim() !== '') {
+      const fromStr = String(fromRaw).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fromStr)) {
+        throw new ValidationError('from must be a valid YYYY-MM-DD date');
+      }
+      fromParts = parseYmdParts(fromStr);
+      if (!fromParts) {
+        throw new ValidationError('from must be a real calendar date in YYYY-MM-DD format');
+      }
+    }
+
+    let toParts = null;
+    if (toRaw !== undefined && String(toRaw).trim() !== '') {
+      const toStr = String(toRaw).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(toStr)) {
+        throw new ValidationError('to must be a valid YYYY-MM-DD date');
+      }
+      toParts = parseYmdParts(toStr);
+      if (!toParts) {
+        throw new ValidationError('to must be a real calendar date in YYYY-MM-DD format');
+      }
+    }
+
+    if (fromParts && toParts) {
+      if (fromParts.ymd > toParts.ymd) {
+        throw new ValidationError('Invalid date range: from must be less than or equal to to');
+      }
+
+      const fromUtcMs = Date.UTC(fromParts.year, fromParts.month - 1, fromParts.day);
+      const toUtcMs = Date.UTC(toParts.year, toParts.month - 1, toParts.day);
+      const diffDays = Math.round((toUtcMs - fromUtcMs) / (1000 * 60 * 60 * 24));
+      const spanMonths = diffMonthsInclusive(
+        fromParts.ymd.slice(0, 7),
+        toParts.ymd.slice(0, 7)
+      );
+      if (diffDays > MAX_BUSINESS_RANGE_DAYS || spanMonths > MAX_BUSINESS_RANGE_MONTHS) {
+        throw new ValidationError('Date range cannot exceed 10 years (120 months)');
+      }
+    }
+
+    const data = await svc.getBusinessReport(
+      String(financeId),
+      fromParts ? fromParts.ymd : null,
+      toParts ? toParts.ymd : null
+    );
+
+    if (
+      data?.monthKeys?.effective &&
+      data.monthKeys.effective.length > MAX_BUSINESS_RANGE_MONTHS
+    ) {
+      throw new ValidationError('Date range cannot exceed 10 years (120 months)');
+    }
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    if (err instanceof ValidationError || err.statusCode === 400) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    console.error('getBusinessReport error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.ValidationError = ValidationError;
+

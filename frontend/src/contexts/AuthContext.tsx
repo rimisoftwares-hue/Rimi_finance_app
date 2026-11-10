@@ -40,6 +40,7 @@ interface Finance {
   since?: string;
   finance_photo?: string;
   logo_url?: string;
+  print_logo_url?: string | null;
   owner_id?: string | number;
   owner_username?: string;
   user_role?: string;

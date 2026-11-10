@@ -2,15 +2,17 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   User, Settings, LogOut, ChevronDown, 
   Shield, Briefcase, Mail, Phone, Calendar,
-  Building, Users, Clock, Sun, Moon
+  Building, Users, Clock, Sun, Moon, KeyRound
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
+import { JoinWithCodeDialog } from './invitations/JoinWithCodeDialog';
 
 export function UserProfile() {
   const { user, currentFinance, userLogout } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const [joinCodeOpen, setJoinCodeOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -149,12 +151,24 @@ export function UserProfile() {
               </div>
             </button>
 
+            {/* Join with Code */}
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                setJoinCodeOpen(true);
+              }}
+              className="w-full px-4 py-3 flex items-center text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              <KeyRound className="h-4 w-4 mr-3 text-emerald-500" />
+              <span>Join with Code</span>
+            </button>
+
             {/* User Management (for owners/admins) */}
             {(user.role === 'owner' || user.role === 'admin') && (
               <button
                 onClick={() => {
                   setIsOpen(false);
-                  navigate('/user-management');
+                  navigate('/AgentManagement');
                 }}
                 className="w-full px-4 py-3 flex items-center text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
               >
@@ -205,6 +219,11 @@ export function UserProfile() {
           </div>
         </div>
       )}
+
+      <JoinWithCodeDialog
+        open={joinCodeOpen}
+        onOpenChange={setJoinCodeOpen}
+      />
     </div>
   );
 }

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  User, Edit, Trash2, Plus, X, CheckCircle, AlertCircle, Building, 
-  Mail, Phone, Key, Briefcase, Calendar, GraduationCap, Users, 
-  Clock, Eye, Sun, Moon, LogOut, ChevronDown, ChevronUp, 
-  Smartphone, MapPin,  CreditCard, FileText,
-  Shield, Activity, TrendingUp
+import {
+  User, Edit, Trash2, Plus, X, CheckCircle, AlertCircle, Building,
+  Mail, Phone, Key, Briefcase, Calendar, GraduationCap, Users,
+  Clock, Eye, Sun, Moon, LogOut, ChevronDown, ChevronUp,
+  Smartphone, MapPin, CreditCard, FileText,
+  Shield, Activity, TrendingUp, UserPlus
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../api/apiClient';
@@ -53,10 +53,10 @@ interface FinanceCompany {
 }
 
 // Create a UserDetailModal component
-const UserDetailModal = ({ user, onClose, financeCompanies }: { 
-  user: UserData, 
-  onClose: () => void, 
-  financeCompanies: FinanceCompany[] 
+const UserDetailModal = ({ user, onClose, financeCompanies }: {
+  user: UserData,
+  onClose: () => void,
+  financeCompanies: FinanceCompany[]
 }) => {
   const getCompanyNames = (companyIds: number[]) => {
     return companyIds.map(id => {
@@ -79,7 +79,7 @@ const UserDetailModal = ({ user, onClose, financeCompanies }: {
             <h3 className="text-2xl font-bold text-gray-900 dark:text-white">User Details</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{user.username} ({user.user_id})</p>
           </div>
-          <button 
+          <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
           >
@@ -99,12 +99,11 @@ const UserDetailModal = ({ user, onClose, financeCompanies }: {
                   <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{user.username}</h2>
                   <p className="text-gray-600 dark:text-gray-400">{user.email}</p>
                 </div>
-                <span className={`inline-flex px-4 py-2 rounded-full text-sm font-semibold ${
-                  user.role === 'owner' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' :
-                  user.role === 'admin' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
-                  user.role === 'agent' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                  'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                }`}>
+                <span className={`inline-flex px-4 py-2 rounded-full text-sm font-semibold ${user.role === 'owner' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' :
+                    user.role === 'admin' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
+                      user.role === 'agent' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                        'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                  }`}>
                   {user.role.toUpperCase()}
                 </span>
               </div>
@@ -273,9 +272,9 @@ const UserDetailModal = ({ user, onClose, financeCompanies }: {
               <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4">
                 <p className="text-sm text-purple-600 dark:text-purple-400">Role Level</p>
                 <p className="text-xl font-bold text-purple-700 dark:text-purple-300">
-                  {user.role === 'owner' ? 'Full Access' : 
-                   user.role === 'admin' ? 'Administrator' : 
-                   user.role === 'agent' ? 'Field Agent' : 'Staff'}
+                  {user.role === 'owner' ? 'Full Access' :
+                    user.role === 'admin' ? 'Administrator' :
+                      user.role === 'agent' ? 'Field Agent' : 'Staff'}
                 </p>
               </div>
               <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-xl p-4">
@@ -311,7 +310,7 @@ const AgentManagement = () => {
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
   // const [darkMode, setDarkMode] = useState(false);
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
-  
+
   const [newUser, setNewUser] = useState({
     email: '',
     username: '',
@@ -333,14 +332,14 @@ const AgentManagement = () => {
     // Set current finance ID
     finance_id: '' as string | number,
   });
-  
+
   const [selectedAllCompanies, setSelectedAllCompanies] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [ownerToken, setOwnerToken] = useState<string | null>(null);
   const { user: currentUser, financeList } = useAuth();
   const navigate = useNavigate();
-  
+
   // Toggle dark mode
   // useEffect(() => {
   //   const isDarkMode = localStorage.getItem('darkMode') === 'true';
@@ -377,12 +376,12 @@ const AgentManagement = () => {
               return user;
             })
           );
-          
+
           setUsers(usersWithDetails);
         } else {
           setUsers([]);
         }
-        
+
         // Use finance list from AuthContext
         if (financeList && financeList.length > 0) {
           setFinanceCompanies(financeList.map(f => ({
@@ -393,13 +392,13 @@ const AgentManagement = () => {
             phone_numbers: Array.isArray(f.phone_numbers) ? f.phone_numbers : [f.phone_numbers],
             address: f.address
           })));
-          
+
           // Set default finance_id for new user form
           if (financeList.length > 0) {
             setNewUser(prev => ({ ...prev, finance_id: financeList[0].id }));
           }
         }
-        
+
       } catch (err) {
         console.error('Error fetching data:', err);
         setError('Failed to load data. Please try again later.');
@@ -407,10 +406,10 @@ const AgentManagement = () => {
         setIsLoading(false);
       }
     };
-    
+
     fetchData();
   }, [financeList]);
-  
+
   // Add endpoint to get staff details
   // useEffect(() => {
   //   // Add this to your index.js routes
@@ -421,7 +420,7 @@ const AgentManagement = () => {
   //         'SELECT * FROM users_details WHERE id = ?',
   //         [userId]
   //       );
-        
+
   //       res.json({
   //         success: true,
   //         staff_details: details[0] || null
@@ -469,7 +468,7 @@ const AgentManagement = () => {
       </div>
     );
   }
-  
+
   // Handle "Select All" checkbox
   const handleSelectAllCompanies = (checked: boolean) => {
     setSelectedAllCompanies(checked);
@@ -487,7 +486,7 @@ const AgentManagement = () => {
     const newCompanies = newUser.allowed_companies.includes(companyId)
       ? newUser.allowed_companies.filter(id => id !== companyId)
       : [...newUser.allowed_companies, companyId];
-    
+
     setNewUser({ ...newUser, allowed_companies: newCompanies });
   };
 
@@ -510,7 +509,7 @@ const AgentManagement = () => {
   //   // Reset form status
   //   setFormError(null);
   //   setFormSuccess(null);
-    
+
   //   // Validate required fields
   //   if (!newUser.email || !newUser.password || !newUser.username || !newUser.phone_no) {
   //     setFormError('All basic information fields are required');
@@ -565,7 +564,7 @@ const AgentManagement = () => {
   //   try {
   //     // Generate user_id
   //     const user_id = generateUserId(newUser.role);
-      
+
   //     // Prepare user data for users_new table
   //     const userData = {
   //       user_id,
@@ -605,15 +604,15 @@ const AgentManagement = () => {
   //         'owner-authorization': `Bearer ${localStorage.getItem('ownerToken')}`
   //       }
   //     });
-      
+
   //     if (response.data.success) {
   //       // Add new user to list
   //       const createdUser = response.data.user;
   //       setUsers([...users, { ...createdUser, staff_details: staffDetails }]);
-        
+
   //       // Show success message
   //       setFormSuccess(`User created successfully! User ID: ${createdUser.user_id}`);
-        
+
   //       // Clear form
   //       setNewUser({
   //         email: '',
@@ -635,7 +634,7 @@ const AgentManagement = () => {
   //         finance_id: financeCompanies.length > 0 ? financeCompanies[0].id : '',
   //       });
   //       setSelectedAllCompanies(false);
-        
+
   //       // Close form after delay
   //       setTimeout(() => {
   //         setShowAddForm(false);
@@ -649,219 +648,219 @@ const AgentManagement = () => {
   // };
   // In AgentManagement.tsx, update the handleSubmit function:
 
-// Add this near the top of the component after other state declarations
+  // Add this near the top of the component after other state declarations
 
 
-// Add useEffect to get ownerToken
-useEffect(() => {
-  const token = localStorage.getItem('ownerToken');
-  setOwnerToken(token);
-}, []);
+  // Add useEffect to get ownerToken
+  useEffect(() => {
+    const token = localStorage.getItem('ownerToken');
+    setOwnerToken(token);
+  }, []);
 
-// Update the handleSubmit function around line 594:
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
+  // Update the handleSubmit function around line 594:
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-  if (currentUser?.role !== 'owner') {
-    setFormError('Only owners can create users');
-    return;
-  }
-
-  // Get owner token
-  const token = localStorage.getItem('ownerToken');
-  if (!token) {
-    setFormError('Owner session expired. Please login as owner again.');
-    return;
-  }
-
-  // Reset form status
-  setFormError(null);
-  setFormSuccess(null);
-  
-  // Validate required fields
-  if (!newUser.email || !newUser.password || !newUser.username || !newUser.phone_no) {
-    setFormError('All basic information fields are required');
-    return;
-  }
-
-  if (newUser.password.length < 4) {
-    setFormError('Password must be at least 4 characters long');
-    return;
-  }
-
-  // Validate phone number format
-  const phoneRegex = /^[0-9]{10}$/;
-  if (!phoneRegex.test(newUser.phone_no)) {
-    setFormError('Phone number must be 10 digits');
-    return;
-  }
-
-  // Validate email format
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(newUser.email)) {
-    setFormError('Please enter a valid email address');
-    return;
-  }
-
-  // Validate login times
-  if (newUser.login_time_from && newUser.login_time_to) {
-    if (newUser.login_time_from >= newUser.login_time_to) {
-      setFormError('Login end time must be after start time');
+    if (currentUser?.role !== 'owner') {
+      setFormError('Only owners can create users');
       return;
     }
-  }
 
-  // For staff/agent roles, validate required staff details
-  if (newUser.role === 'staff' || newUser.role === 'agent') {
-    if (!newUser.staff_name || !newUser.staff_code) {
-      setFormError('Staff name and staff code are required for staff/agent roles');
+    // Get owner token
+    const token = localStorage.getItem('ownerToken');
+    if (!token) {
+      setFormError('Owner session expired. Please login as owner again.');
       return;
     }
-    if (!newUser.finance_id) {
-      setFormError('Finance ID is required for staff/agent roles');
+
+    // Reset form status
+    setFormError(null);
+    setFormSuccess(null);
+
+    // Validate required fields
+    if (!newUser.email || !newUser.password || !newUser.username || !newUser.phone_no) {
+      setFormError('All basic information fields are required');
       return;
     }
-  }
 
-  // Validate allowed companies
-  if (newUser.role !== 'owner' && newUser.allowed_companies.length === 0) {
-    setFormError('Please select at least one company or select "All Companies"');
-    return;
-  }
+    if (newUser.password.length < 4) {
+      setFormError('Password must be at least 4 characters long');
+      return;
+    }
 
-  try {
-    // Generate user_id
-    const user_id = generateUserId(newUser.role);
-    
-    // Prepare user data for users_new table
-    const userData = {
-      user_id,
-      email: newUser.email,
-      username: newUser.username,
-      phone_no: newUser.phone_no,
-      password: newUser.password,
-      user_role: newUser.role,
-      allowed_companies: newUser.role === 'owner' 
-        ? financeCompanies.map(c => c.id)  // Owner gets all companies
-        : newUser.allowed_companies.length > 0 
-          ? newUser.allowed_companies 
-          : [],  // Empty array instead of null
-      login_time_from: newUser.login_time_from || null,
-      login_time_to: newUser.login_time_to || null,
-      is_active: true
-    };
+    // Validate phone number format
+    const phoneRegex = /^[0-9]{10}$/;
+    if (!phoneRegex.test(newUser.phone_no)) {
+      setFormError('Phone number must be 10 digits');
+      return;
+    }
 
-    // Prepare staff details for users_details table (if applicable)
-    let staffDetails = null;
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newUser.email)) {
+      setFormError('Please enter a valid email address');
+      return;
+    }
+
+    // Validate login times
+    if (newUser.login_time_from && newUser.login_time_to) {
+      if (newUser.login_time_from >= newUser.login_time_to) {
+        setFormError('Login end time must be after start time');
+        return;
+      }
+    }
+
+    // For staff/agent roles, validate required staff details
     if (newUser.role === 'staff' || newUser.role === 'agent') {
-      staffDetails = {
-        user_id,
-        finance_id: newUser.finance_id,
-        staff_name: newUser.staff_name,
-        staff_code: newUser.staff_code,
-        father_spouse_name: newUser.father_spouse_name || null,
-        experience_years: newUser.experience_years || 0,
-        education_qualification: newUser.education_qualification || null,
-        photo: newUser.photo || null,
-        joining_date: newUser.joining_date || new Date().toISOString().split('T')[0]
-      };
+      if (!newUser.staff_name || !newUser.staff_code) {
+        setFormError('Staff name and staff code are required for staff/agent roles');
+        return;
+      }
+      if (!newUser.finance_id) {
+        setFormError('Finance ID is required for staff/agent roles');
+        return;
+      }
     }
 
-    // Make API call with both user data and staff details
-    const response = await apiClient.post('/auth/users/create', {
-      user: userData,
-      staff_details: staffDetails
-    });
-    
-    if (response.data.success) {
-      // Add new user to list
-      const createdUser = response.data.user;
-      
-      // Fetch updated user list
-      const usersResponse = await apiClient.get('/auth/allUsers');
-      if (usersResponse.data.success && usersResponse.data.users) {
-        // Fetch staff details for the new user
-        try {
-          const staffResponse = await apiClient.get(`/users/${user_id}/staff-details`);
-          if (staffResponse.data.success) {
-            setUsers(usersResponse.data.users.map((u: UserData) => 
-              u.user_id === user_id ? { ...u, staff_details: staffResponse.data.staff_details } : u
-            ));
-          } else {
+    // Validate allowed companies
+    if (newUser.role !== 'owner' && newUser.allowed_companies.length === 0) {
+      setFormError('Please select at least one company or select "All Companies"');
+      return;
+    }
+
+    try {
+      // Generate user_id
+      const user_id = generateUserId(newUser.role);
+
+      // Prepare user data for users_new table
+      const userData = {
+        user_id,
+        email: newUser.email,
+        username: newUser.username,
+        phone_no: newUser.phone_no,
+        password: newUser.password,
+        user_role: newUser.role,
+        allowed_companies: newUser.role === 'owner'
+          ? financeCompanies.map(c => c.id)  // Owner gets all companies
+          : newUser.allowed_companies.length > 0
+            ? newUser.allowed_companies
+            : [],  // Empty array instead of null
+        login_time_from: newUser.login_time_from || null,
+        login_time_to: newUser.login_time_to || null,
+        is_active: true
+      };
+
+      // Prepare staff details for users_details table (if applicable)
+      let staffDetails = null;
+      if (newUser.role === 'staff' || newUser.role === 'agent') {
+        staffDetails = {
+          user_id,
+          finance_id: newUser.finance_id,
+          staff_name: newUser.staff_name,
+          staff_code: newUser.staff_code,
+          father_spouse_name: newUser.father_spouse_name || null,
+          experience_years: newUser.experience_years || 0,
+          education_qualification: newUser.education_qualification || null,
+          photo: newUser.photo || null,
+          joining_date: newUser.joining_date || new Date().toISOString().split('T')[0]
+        };
+      }
+
+      // Make API call with both user data and staff details
+      const response = await apiClient.post('/auth/users/create', {
+        user: userData,
+        staff_details: staffDetails
+      });
+
+      if (response.data.success) {
+        // Add new user to list
+        const createdUser = response.data.user;
+
+        // Fetch updated user list
+        const usersResponse = await apiClient.get('/auth/allUsers');
+        if (usersResponse.data.success && usersResponse.data.users) {
+          // Fetch staff details for the new user
+          try {
+            const staffResponse = await apiClient.get(`/users/${user_id}/staff-details`);
+            if (staffResponse.data.success) {
+              setUsers(usersResponse.data.users.map((u: UserData) =>
+                u.user_id === user_id ? { ...u, staff_details: staffResponse.data.staff_details } : u
+              ));
+            } else {
+              setUsers(usersResponse.data.users);
+            }
+          } catch (staffError) {
+            console.error('Error fetching staff details:', staffError);
             setUsers(usersResponse.data.users);
           }
-        } catch (staffError) {
-          console.error('Error fetching staff details:', staffError);
-          setUsers(usersResponse.data.users);
         }
+
+        // Show success message
+        setFormSuccess(`User created successfully! User ID: ${createdUser.user_id}`);
+
+        // Clear form
+        setNewUser({
+          email: '',
+          username: '',
+          phone_no: '',
+          password: '',
+          role: 'agent',
+          allowed_companies: [],
+          user_id: '',
+          login_time_from: '',
+          login_time_to: '',
+          staff_name: '',
+          staff_code: '',
+          father_spouse_name: '',
+          experience_years: 0,
+          education_qualification: '',
+          photo: '',
+          joining_date: '',
+          finance_id: financeCompanies.length > 0 ? financeCompanies[0].id : '',
+        });
+        setSelectedAllCompanies(false);
+        // toast({
+        //   title: 'Success!',
+        //   description:`User created successfully! User ID: ${username}`,
+        // });
+        // Close form after delay
+        setTimeout(() => {
+          setShowAddForm(false);
+          setFormSuccess(null);
+        }, 3000);
       }
-      
-      // Show success message
-      setFormSuccess(`User created successfully! User ID: ${createdUser.user_id}`);
-      
-      // Clear form
-      setNewUser({
-        email: '',
-        username: '',
-        phone_no: '',
-        password: '',
-        role: 'agent',
-        allowed_companies: [],
-        user_id: '',
-        login_time_from: '',
-        login_time_to: '',
-        staff_name: '',
-        staff_code: '',
-        father_spouse_name: '',
-        experience_years: 0,
-        education_qualification: '',
-        photo: '',
-        joining_date: '',
-        finance_id: financeCompanies.length > 0 ? financeCompanies[0].id : '',
-      });
-      setSelectedAllCompanies(false);
+    } catch (err: any) {
+      console.error('Error creating user:', err);
       // toast({
-      //   title: 'Success!',
-      //   description:`User created successfully! User ID: ${username}`,
+      //   variant: 'destructive',
+      //   title: 'Submission Failed',
+      //   description: result.message || 'Failed to submit form. Please try again.',
       // });
-      // Close form after delay
-      setTimeout(() => {
-        setShowAddForm(false);
-        setFormSuccess(null);
-      }, 3000);
+      // Better error handling
+      if (err.response?.data) {
+        const errorData = err.response.data;
+        setFormError(errorData.message || errorData.error || 'Failed to create user');
+
+        // Log detailed error for debugging
+        console.log('Detailed error response:', errorData);
+      } else {
+        setFormError('Failed to create user. Please try again.');
+      }
     }
-  } catch (err: any) {
-    console.error('Error creating user:', err);
-    // toast({
-    //   variant: 'destructive',
-    //   title: 'Submission Failed',
-    //   description: result.message || 'Failed to submit form. Please try again.',
-    // });
-    // Better error handling
-    if (err.response?.data) {
-      const errorData = err.response.data;
-      setFormError(errorData.message || errorData.error || 'Failed to create user');
-      
-      // Log detailed error for debugging
-      console.log('Detailed error response:', errorData);
-    } else {
-      setFormError('Failed to create user. Please try again.');
-    }
-  }
-};
+  };
 
   // Handle user deletion
   const handleDeleteUser = async (userId: number) => {
     if (!confirm('Are you sure you want to deactivate this user?')) {
       return;
     }
-    
+
     try {
       const response = await apiClient.delete(`/auth/users/${userId}`);
-      
+
       if (response.data.success) {
         // Update user status in list
-        setUsers(users.map(user => 
+        setUsers(users.map(user =>
           user.id === userId ? { ...user, is_active: false } : user
         ));
       }
@@ -872,16 +871,16 @@ const handleSubmit = async (e: React.FormEvent) => {
   };
 
   const handleRoleChange = (selectedRole: 'owner' | 'admin' | 'agent' | 'staff') => {
-    const updatedAllowedCompanies = selectedRole === 'owner' 
-      ? financeCompanies.map(c => c.id) 
+    const updatedAllowedCompanies = selectedRole === 'owner'
+      ? financeCompanies.map(c => c.id)
       : newUser.allowed_companies;
-    
-    setNewUser({ 
-      ...newUser, 
+
+    setNewUser({
+      ...newUser,
       role: selectedRole,
       allowed_companies: updatedAllowedCompanies
     });
-    
+
     // Update the "Select All" checkbox
     if (selectedRole === 'owner') {
       setSelectedAllCompanies(true);
@@ -936,7 +935,14 @@ const handleSubmit = async (e: React.FormEvent) => {
               Manage all users across your finance companies
             </p>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => navigate('/invite')}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm text-emerald-950 dark:text-emerald-100 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 transition-all duration-200"
+            >
+              <UserPlus className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              Invite
+            </button>
             <button
               onClick={() => navigate('/dashboard')}
               className="inline-flex items-center px-4 py-2 bg-gray-800 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-900 dark:hover:bg-gray-600 transition-colors duration-200"
@@ -1011,7 +1017,7 @@ const handleSubmit = async (e: React.FormEvent) => {
               </div>
             </div>
           </div>
-          
+
           {isLoading ? (
             <div className="px-6 py-12 text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 dark:border-blue-400 mx-auto"></div>
@@ -1026,7 +1032,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                   <div>
                     <p className="font-medium text-red-800 dark:text-red-300">Error Loading Data</p>
                     <p className="text-sm text-red-700 dark:text-red-400 mt-1">{error}</p>
-                    <button 
+                    <button
                       onClick={() => window.location.reload()}
                       className="mt-3 px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-600 transition-colors text-sm"
                     >
@@ -1114,14 +1120,14 @@ const handleSubmit = async (e: React.FormEvent) => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="flex justify-end space-x-2">
-                            <button 
+                            <button
                               onClick={() => toggleUserExpansion(user.id)}
                               className="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300 p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                               title={expandedUser === user.id ? "Hide details" : "Show details"}
                             >
                               {expandedUser === user.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                             </button>
-                            <button 
+                            <button
                               onClick={() => setSelectedUser(user)}
                               className="text-green-600 dark:text-green-400 hover:text-green-900 dark:hover:text-green-300 p-2 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
                               title="View full details"
@@ -1131,7 +1137,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                             <button className="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300 p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
                               <Edit className="h-4 w-4" />
                             </button>
-                            <button 
+                            <button
                               onClick={() => handleDeleteUser(user.id)}
                               className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                               disabled={!user.is_active || user.id === Number(currentUser?.id)}
@@ -1142,7 +1148,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                           </div>
                         </td>
                       </tr>
-                      
+
                       {/* Expanded details row */}
                       {expandedUser === user.id && (
                         <tr>
@@ -1168,7 +1174,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                                   )}
                                 </div>
                               </div>
-                              
+
                               <div>
                                 <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Staff Details</h4>
                                 {user.staff_details ? (
@@ -1187,7 +1193,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                                   <span className="text-sm text-gray-500 dark:text-gray-400 italic">No staff details</span>
                                 )}
                               </div>
-                              
+
                               <div>
                                 <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Account Info</h4>
                                 <div className="space-y-1">
@@ -1227,7 +1233,7 @@ const handleSubmit = async (e: React.FormEvent) => {
           )}
         </div>
       </div>
-      
+
       {/* Add User Modal with Login Time Fields */}
       {showAddForm && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
@@ -1237,14 +1243,14 @@ const handleSubmit = async (e: React.FormEvent) => {
                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Create New User</h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Add a new user to your system</p>
               </div>
-              <button 
+              <button
                 onClick={() => setShowAddForm(false)}
                 className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            
+
             <form onSubmit={handleSubmit} className="p-6">
               {formError && (
                 <div className="mb-6 bg-gradient-to-r from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-900/10 border-l-4 border-red-500 p-4 rounded-lg">
@@ -1257,7 +1263,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                   </div>
                 </div>
               )}
-              
+
               {formSuccess && (
                 <div className="mb-6 bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-900/10 border-l-4 border-green-500 p-4 rounded-lg">
                   <div className="flex items-start">
@@ -1269,7 +1275,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                   </div>
                 </div>
               )}
-              
+
               <div className="space-y-8">
                 {/* Basic Information Section */}
                 <div>
@@ -1337,7 +1343,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                       />
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Minimum 4 characters</p>
                     </div>
-                    
+
                     {/* Login Time Restrictions */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1363,7 +1369,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                         className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 transition-all bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       />
                     </div>
-                    
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         <Briefcase className="h-4 w-4 inline-block mr-1 text-gray-500" />
@@ -1384,12 +1390,12 @@ const handleSubmit = async (e: React.FormEvent) => {
                         <option value="staff">Staff</option>
                       </select>
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        {newUser.role === 'owner' ? 'Full system access' : 
-                         newUser.role === 'admin' ? 'Manage all except owners' :
-                         newUser.role === 'agent' ? 'Field operations' : 'Office staff'}
+                        {newUser.role === 'owner' ? 'Full system access' :
+                          newUser.role === 'admin' ? 'Manage all except owners' :
+                            newUser.role === 'agent' ? 'Field operations' : 'Office staff'}
                       </p>
                     </div>
-                    
+
                     {/* Finance ID for staff/agent */}
                     {(newUser.role === 'staff' || newUser.role === 'agent') && (
                       <div>
@@ -1443,7 +1449,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                           Grant access to all finance companies under your ownership
                         </p>
                       </div>
-                      
+
                       {!selectedAllCompanies && (
                         <>
                           <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
@@ -1453,11 +1459,10 @@ const handleSubmit = async (e: React.FormEvent) => {
                             {financeCompanies.map(company => (
                               <label
                                 key={company.id}
-                                className={`flex items-center space-x-3 p-4 rounded-lg border cursor-pointer transition-all hover:shadow-md ${
-                                  newUser.allowed_companies.includes(company.id)
+                                className={`flex items-center space-x-3 p-4 rounded-lg border cursor-pointer transition-all hover:shadow-md ${newUser.allowed_companies.includes(company.id)
                                     ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-600'
                                     : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600'
-                                }`}
+                                  }`}
                               >
                                 <input
                                   type="checkbox"
@@ -1478,7 +1483,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                           </div>
                         </>
                       )}
-                      
+
                       <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                         <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
                           Selected Companies: {newUser.allowed_companies.length} of {financeCompanies.length}
@@ -1589,7 +1594,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                   </div>
                 )}
               </div>
-              
+
               <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 flex justify-end space-x-4">
                 <button
                   type="button"
@@ -1609,12 +1614,12 @@ const handleSubmit = async (e: React.FormEvent) => {
           </div>
         </div>
       )}
-      
+
       {/* User Detail Modal */}
       {selectedUser && (
-        <UserDetailModal 
-          user={selectedUser} 
-          onClose={() => setSelectedUser(null)} 
+        <UserDetailModal
+          user={selectedUser}
+          onClose={() => setSelectedUser(null)}
           financeCompanies={financeCompanies}
         />
       )}

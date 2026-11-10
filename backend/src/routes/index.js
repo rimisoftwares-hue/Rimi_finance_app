@@ -71,6 +71,23 @@ router.use('/agents/area-allocations', enhancedCheckFinance, areaAllocationRoute
 const staffLoginReportRoutes = require('../modules/agents/staffLoginReport.routes');
 router.use('/agents/login-report', enhancedCheckFinance, staffLoginReportRoutes);
 
+// ─── OCR Ledger-Card Import (AI Scan) ──────────────────────────────────────────
+// Feature-flagged by OCR_ENABLED inside the router (/config always answers).
+const ocrRoutes = require('../modules/ocr/ocr.routes');
+router.use('/ocr', enhancedCheckFinance, ocrRoutes);
+
+// ─── Customer Risk (credit score + due risk) ──────────────────────────────────
+const riskRoutes = require('../modules/risk/risk.routes');
+router.use('/risk', enhancedCheckFinance, riskRoutes);
+
+// ─── Invitations (Direct Invites & Shareable Invite Codes) ────────────────────
+const invitationRoutes = require('../modules/invitations/invitation.routes');
+router.use('/invitations', invitationRoutes);
+
+// ─── User Profile Overview ────────────────────────────────────────────────────
+const userProfileRoutes = require('../modules/users/userProfile.routes');
+router.use('/user', userProfileRoutes);
+
 module.exports = router;
 
 

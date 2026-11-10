@@ -519,7 +519,7 @@ export function StaffDashboard() {
           <div className="grid grid-cols-1 gap-3">
             <QuickAction icon={FileText} label="Generate Bill" onClick={() => navigate("/reports/bill")} />
             <QuickAction icon={BookOpen} label="Add Ledger" onClick={() => navigate("/accounts/ledger")} />
-            <QuickAction icon={Car} label="Add Vehicle" onClick={() => navigate("/VehicleLoanForm")} />
+            <QuickAction icon={Car} label="Add Vehicle" onClick={() => navigate("/loanForm?type=vehicle")} />
           </div>
         </div>
       </div>

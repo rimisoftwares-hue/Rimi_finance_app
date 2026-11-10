@@ -40,7 +40,9 @@ export function useVehicles() {
       const formData = new FormData();
 
       // Add all vehicle data fields
-      formData.append('vehicle_info_id', vehicleData.vehicle_info_id.toString());
+      if (vehicleData.vehicle_info_id) {
+        formData.append('vehicle_info_id', String(vehicleData.vehicle_info_id));
+      }
       formData.append('vehicle_name', vehicleData.vehicle_name);
       formData.append('vehicle_number', vehicleData.vehicle_number);
       formData.append('vehicle_modal', vehicleData.vehicle_modal);
@@ -66,8 +68,12 @@ export function useVehicles() {
       formData.append('remarks', vehicleData.remarks || '');
 
       // Add images with correct field names
-      formData.append('front', vehicleData.images.front);
-      formData.append('side', vehicleData.images.side);
+      if (vehicleData.images?.front) {
+        formData.append('front', vehicleData.images.front);
+      }
+      if (vehicleData.images?.side) {
+        formData.append('side', vehicleData.images.side);
+      }
 
       if (vehicleData.images.back) {
         formData.append('back', vehicleData.images.back);

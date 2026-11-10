@@ -76,13 +76,15 @@ export const normalizeCustomerData = (apiData: any): NormalizedCustomerData => {
       state: rawCust.address?.state || rawCust.caddress?.state || '',
       pincode: rawCust.address?.pincode || rawCust.caddress?.pincode || '',
       location: rawCust.address?.location || rawCust.caddress?.location || '',
+      latitude: rawCust.address?.latitude != null ? String(rawCust.address.latitude) : (rawCust.caddress?.latitude != null ? String(rawCust.caddress.latitude) : ''),
+      longitude: rawCust.address?.longitude != null ? String(rawCust.address.longitude) : (rawCust.caddress?.longitude != null ? String(rawCust.caddress.longitude) : ''),
     },
     cphoto: getNormalizedImageUrl(rawCust.cphoto, ''),
     cvehiclePhoto: getNormalizedImageUrl(rawCust.cvehiclePhoto, ''),
     cpropertyPhoto: getNormalizedImageUrl(rawCust.cpropertyPhoto, ''),
-    ccontacts: Array.isArray(rawCust.ccontacts)
+    ccontacts: Array.isArray(rawCust.ccontacts) && rawCust.ccontacts.length > 0
       ? rawCust.ccontacts
-      : Array.isArray(rawCust.contacts)
+      : Array.isArray(rawCust.contacts) && rawCust.contacts.filter((c: any) => c.contact_type === 'customer').length > 0
       ? rawCust.contacts.filter((c: any) => c.contact_type === 'customer')
       : [{ type: 'mobile', number: '', contact_type: 'customer' }],
     aadhar_id: rawCust.aadhar_id || '',
@@ -118,12 +120,14 @@ export const normalizeCustomerData = (apiData: any): NormalizedCustomerData => {
         state: rawGuard.address?.state || rawGuard.gaddress?.state || rawGuard.g_state || '',
         pincode: rawGuard.address?.pincode || rawGuard.gaddress?.pincode || rawGuard.g_pincode || '',
         location: rawGuard.address?.location || rawGuard.gaddress?.location || rawGuard.g_location || '',
+        latitude: rawGuard.address?.latitude != null ? String(rawGuard.address.latitude) : (rawGuard.gaddress?.latitude != null ? String(rawGuard.gaddress.latitude) : (rawGuard.g_latitude != null ? String(rawGuard.g_latitude) : '')),
+        longitude: rawGuard.address?.longitude != null ? String(rawGuard.address.longitude) : (rawGuard.gaddress?.longitude != null ? String(rawGuard.gaddress.longitude) : (rawGuard.g_longitude != null ? String(rawGuard.g_longitude) : '')),
       },
       gphoto: getNormalizedImageUrl(rawGuard.gphoto, ''),
       gpropertyPhoto: getNormalizedImageUrl(rawGuard.gpropertyPhoto, ''),
-      gcontacts: Array.isArray(rawGuard.gcontacts)
+      gcontacts: Array.isArray(rawGuard.gcontacts) && rawGuard.gcontacts.length > 0
         ? rawGuard.gcontacts
-        : Array.isArray(rawGuard.contacts)
+        : Array.isArray(rawGuard.contacts) && rawGuard.contacts.filter((c: any) => c.contact_type === 'guardian').length > 0
         ? rawGuard.contacts.filter((c: any) => c.contact_type === 'guardian')
         : [{ type: 'mobile', number: '', contact_type: 'guardian' }],
       aadhar_id: rawGuard.aadhar_id || '',

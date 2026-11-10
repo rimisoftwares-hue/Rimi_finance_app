@@ -12,7 +12,8 @@ import UserLogin from './pages/UserLogin';
 import Dashboard from './pages/Dashboard';
 import Customers from './pages/Customers';
 import AddCustomerConsultingFrom from './pages/AddCustomerConsultingFrom';
-import AddCustomerVehicleLoanForm from './pages/AddCustomerVehicleLoanForm'
+import AddCustomerVehicleLoanForm from './pages/AddCustomerVehicleLoanForm';
+import EntryPage from './pages/EntryPage';
 import AddCustomerForm from './pages/AddCustomerForm';
 import UpdateCustomerForm from './pages/UpdateCustomerForm';
 import UnpaidLoans from './pages/UnpaidLoans';
@@ -50,7 +51,6 @@ import GodownVehicle from './components/collections/GodownVehicle';
 // Reports
 import CollectionReport from './components/reports/CollectionReport';
 import ActivityLog from './components/reports/ActivityLog';
-import Revenue from './components/reports/Revenue';
 import DueAnalysis from './components/reports/DueAnalysis';
 import Compliance from './components/reports/Compliance';
 import Charges from './components/reports/Charges';
@@ -98,6 +98,7 @@ import BadDebts from './components/master/BadDebts';
 
 //users
 import AgentManagement from './components/agents/AgentManagement';
+import InvitePage from './pages/InvitePage';
 import AssignCustomers from "./components/agents/AssignCustomers";
 import AreaAllocation from "./components/agents/AreaAllocation";
 import AssignmentHistory from "./components/agents/AssignmentHistory";
@@ -144,8 +145,8 @@ function AppContent() {
   const { owner, isLoading } = useOwnerAuth();
   const navigate = useNavigate()
   const shortcutMap = {
-    F1: '/ConsultingForm',
-    F2: '/VehicleLoanForm',
+    F1: '/loanForm',
+    F2: '/loanForm?type=vehicle',
     F3: '/unpaidloans',
     F4: '/customers',
     F5: '/dashboard',
@@ -273,14 +274,21 @@ function AppContent() {
                     <Customers />
                   </ProtectedRoute>
                 } />
+                <Route path="/loanForm" element={
+                  <ProtectedRoute>
+                    <EntryPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/loanFrom" element={<Navigate to="/loanForm" replace />} />
+                <Route path="/entry" element={<Navigate to="/loanForm" replace />} />
                 <Route path="/ConsultingForm" element={
                   <ProtectedRoute>
-                    <AddCustomerConsultingFrom />
+                    <EntryPage initialType="consulting" />
                   </ProtectedRoute>
                 } />
                 <Route path="/VehicleLoanForm" element={
                   <ProtectedRoute>
-                    <AddCustomerVehicleLoanForm />
+                    <EntryPage initialType="vehicle" />
                   </ProtectedRoute>
                 } />
                 <Route path="/AddVehicleForm" element={
@@ -418,7 +426,7 @@ function AppContent() {
                 {/* Reports */}
                 <Route path="/reports/collection" element={<ProtectedRoute><CollectionReport /></ProtectedRoute>} />
                 <Route path="/reports/activity" element={<ProtectedRoute><ActivityLog /></ProtectedRoute>} />
-                <Route path="/reports/revenue" element={<ProtectedRoute><Revenue /></ProtectedRoute>} />
+                <Route path="/reports/revenue" element={<Navigate to="/accounts/business" replace />} />
                 <Route path="/reports/due-analysis" element={<ProtectedRoute><DueAnalysis /></ProtectedRoute>} />
                 <Route path="/reports/compliance" element={<ProtectedRoute><Compliance /></ProtectedRoute>} />
                 <Route path="/reports/charges" element={<ProtectedRoute><Charges /></ProtectedRoute>} />
@@ -457,6 +465,11 @@ function AppContent() {
                 <Route path="/AgentManagement" element={
                   <ProtectedRoute allowedRoles={['owner']}>
                     <AgentManagement />
+                  </ProtectedRoute>
+                } />
+                <Route path="/invite" element={
+                  <ProtectedRoute allowedRoles={['owner', 'admin']}>
+                    <InvitePage />
                   </ProtectedRoute>
                 } />
                 <Route path="/agents/assign" element={<ProtectedRoute><AssignCustomers /></ProtectedRoute>} />

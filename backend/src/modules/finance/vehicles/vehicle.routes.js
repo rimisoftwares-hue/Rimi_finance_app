@@ -1079,6 +1079,62 @@ const getVehicleInfo = async (req, res) => {
 router.get(['/info', '/vehicle-info', '/vehicles/info', '/vehicles/vehicle-info'], getVehicleInfo);
 router.getVehicleInfo = getVehicleInfo;
 
+// ─── GET /vehicles/availability?number=<regNo>[&engine=<no>][&chassis=<no>] ───
+// Read-only. Global lookup (vehicle_number / engine_number / chassis_number are UNIQUE
+// across the whole table), deliberately ignoring the status / deal-type filters of /search.
+// Must be defined BEFORE the /:id route.
+const { classifyAvailability, normalizeRegNo, normalizeIdent } = require('./vehicleAvailability');
+router.get(['/availability', '/vehicles/availability'], enhancedCheckFinance, async (req, res) => {
+  try {
+    const number = normalizeRegNo(req.query.number);
+    const engine = normalizeIdent(req.query.engine);
+    const chassis = normalizeIdent(req.query.chassis);
+    if (!number) {
+      return res.status(400).json({ success: false, error: 'number is required' });
+    }
+
+    const { rows: numRows } = await db.query(
+      `SELECT vd.id, vd.finance_id, vd.status, vd.deal_type, vd.vehicle_number, vd.vehicle_modal, vd.color,
+              vd.engine_number, vd.chassis_number,
+              vi.brand, vi.model_name, vi.body_type AS type,
+              (EXISTS (SELECT 1 FROM customers c WHERE c.vehicle_id = vd.id)
+               OR EXISTS (SELECT 1 FROM loans l WHERE l.vehicle_id = vd.id)) AS linked
+         FROM vehicle_detail vd
+         LEFT JOIN vehicle_info vi ON vi.id = vd.vehicle_info_id
+        WHERE regexp_replace(UPPER(vd.vehicle_number), '[[:space:].-]', '', 'g') = $1
+        LIMIT 1`,
+      [number]
+    );
+    let byEngine = null;
+    let byChassis = null;
+    if (engine) {
+      const { rows } = await db.query(
+        `SELECT id FROM vehicle_detail WHERE UPPER(REPLACE(engine_number, ' ', '')) = $1 LIMIT 1`,
+        [engine]
+      );
+      byEngine = rows[0] || null;
+    }
+    if (chassis) {
+      const { rows } = await db.query(
+        `SELECT id FROM vehicle_detail WHERE UPPER(REPLACE(chassis_number, ' ', '')) = $1 LIMIT 1`,
+        [chassis]
+      );
+      byChassis = rows[0] || null;
+    }
+
+    const result = classifyAvailability({
+      financeId: req.financeId,
+      byNumber: numRows[0] || null,
+      byEngine,
+      byChassis,
+    });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('Error checking vehicle availability:', err && err.code ? err.code : '');
+    return res.status(500).json({ success: false, error: 'Failed to check vehicle availability' });
+  }
+});
+
 // GET single vehicle by ID with signed URLs
 router.get(['/:id', '/vehicles/:id'], enhancedCheckFinance, async (req, res) => {
   const client = await db.connect();

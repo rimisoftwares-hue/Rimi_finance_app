@@ -6,6 +6,7 @@ interface SelectInputProps extends React.SelectHTMLAttributes<HTMLSelectElement>
   error?: string;
   options: { value: string; label: string }[];
   containerClassName?: string;
+  labelClassName?: string;
 }
 
 export const SelectInput: React.FC<SelectInputProps> = ({
@@ -13,13 +14,14 @@ export const SelectInput: React.FC<SelectInputProps> = ({
   error,
   options,
   containerClassName,
+  labelClassName,
   className,
   ...props
 }) => {
 
   return (
     <div className={cn('w-full', containerClassName)}>
-      <label className="input-label">{label}</label>
+      <label className={cn('input-label mb-2', labelClassName)}>{label}</label>
       <select
         className={cn('input-field', error && 'input-error', className)}
         {...props}

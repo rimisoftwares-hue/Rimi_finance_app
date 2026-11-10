@@ -27,7 +27,13 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 // ─── Core middleware ──────────────────────────────────────────────────────────
-app.use(express.json());
+const jsonParser = express.json();
+app.use((req, res, next) => {
+  if (req.path === '/api/ocr/scan' || /^\/api\/ocr\/jobs\/[^/]+\/upload$/.test(req.path)) {
+    return next();
+  }
+  return jsonParser(req, res, next);
+});
 app.use(cookieParser());
 app.use(cors({
   origin: true,

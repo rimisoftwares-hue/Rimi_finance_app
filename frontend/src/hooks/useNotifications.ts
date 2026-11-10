@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { NotificationItemData, NotificationFilterCounts } from '../types/notification';
 import { notificationService } from '../services/notificationService';
+import type { Invitation } from '../types/invitations';
 
 export function useNotifications() {
   const [notifications, setNotifications] = useState<NotificationItemData[]>([]);
@@ -66,6 +67,23 @@ export function useNotifications() {
     );
   }, []);
 
+  const respondToInvite = useCallback(
+    async (
+      notificationId: string,
+      invitationId: string,
+      decision: 'accept' | 'decline'
+    ): Promise<Invitation> => {
+      const updated = await notificationService.respondToInvite(
+        notificationId,
+        invitationId,
+        decision
+      );
+      await fetchNotifications();
+      return updated;
+    },
+    [fetchNotifications]
+  );
+
   return {
     notifications,
     counts,
@@ -78,5 +96,6 @@ export function useNotifications() {
     markAllAsRead,
     archive,
     unarchive,
+    respondToInvite,
   };
 }

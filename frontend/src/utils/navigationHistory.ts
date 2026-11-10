@@ -10,7 +10,10 @@ const isSkippedPath = (path: string) =>
   path.includes('/AddCustomersForm') ||
   path.includes('/customers/edit/') ||
   path.includes('/ConsultingForm') ||
-  path.includes('/VehicleLoanForm');
+  path.includes('/VehicleLoanForm') ||
+  path.includes('/loanForm') ||
+  path.includes('/loanFrom') ||
+  path.includes('/entry');
 
 const getHistory = (): string[] =>
   JSON.parse(sessionStorage.getItem(HISTORY_KEY) || '[]');

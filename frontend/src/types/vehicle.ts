@@ -147,7 +147,7 @@ export interface VehicleImage {
 //   };
 // }
 export interface CreateVehicleRequest {
-  vehicle_info_id: number;
+  vehicle_info_id?: string | number;
   vehicle_name: string;
   vehicle_number: string;
   vehicle_modal: string;
@@ -175,9 +175,9 @@ export interface CreateVehicleRequest {
   insurance_expriry_date: string;
   remarks: string;
 
-  images: {
-    front: File;
-    side: File;
+  images?: {
+    front?: File;
+    side?: File;
     back?: File;
     interior?: File;
     additional?: File[];
