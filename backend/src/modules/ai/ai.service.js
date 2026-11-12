@@ -17,11 +17,20 @@ const { getCustomerFinancialRollup } = require('../finance/financialCalculation.
 const {
   checkVoiceSystemHealth,
   dispatchManualCallToVoiceAgent,
+  assertServerTelephonySafetyGates,
+  assertDestinationAllowlistedIfRequired,
+  classifyDispatchTransportError,
 } = require('./voiceAgent.client');
 const {
   presignCustomerPhoto,
   presignCallRecordingPlayback,
 } = require('./voiceRecording.s3');
+const {
+  validateIdempotencyKey,
+  toDbLifecycleStatus,
+  fromDbCallRowToDomainState,
+  isMockProviderCallId,
+} = require('./callLifecycle.mapper');
 
 const UUID_STRICT_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1315,22 +1324,40 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
       };
     }
 
+    function formatCallReplayFromRow(existing) {
+      const mapped = fromDbCallRowToDomainState(existing);
+      const mockTelephony = isMockProviderCallId(existing.provider_call_id);
+      return {
+        callId: existing.call_id,
+        leadId: existing.lead_id,
+        customerId: existing.customer_id,
+        loanId: existing.loan_id || null,
+        providerCallId: existing.provider_call_id,
+        callLifecycleStatus: mapped.transportLifecycleStatus,
+        callDisplayState: mapped.domainState,
+        needsReconcile: mapped.needsReconcile,
+        telephonyMode: mockTelephony ? 'mock' : 'live_allowlist',
+        mockTelephony,
+        idempotencyReplay: true,
+      };
+    }
+
     /**
      * Zero-Trust Manual Single-Call Trigger (`POST /api/ai/calls/manual`).
      *
-     * Security invariants:
-     * 1. Client request body MUST contain ONLY `{ customerId: "<uuid>" }`.
-     *    Any extra/untrusted fields (`financeId`, `phone`, `dueAmount`, `loanId`, `instructions`, etc.)
-     *    are immediately rejected with `400 Bad Request` (`untrusted_client_fields`).
-     * 2. Requires composite Voice AI health (`Dograh` + `Python Voice Agent`) to be `ready` (`503` if offline).
-     * 3. Evaluates server-side `fn_check_voice_call_eligibility(financeId, customerId)` in PostgreSQL
-     *    (IST calling window, max daily attempts, attempt cooldown, DNC suppression, active call guard, live due > 0).
-     * 4. Creates an `'initiated'` `ai_telecalling_call_logs` row and dispatches an HMAC-signed
-     *    `mock_telephony: true` request containing ONLY opaque IDs (`{ finance_id, customer_id, loan_id, lead_id, call_id }`)
-     *    to the Python Voice Agent, rolling back the row to `'failed'` if dispatch fails.
+     * Security & reliability invariants (Phase 2 — Amendments A1, A3, A4, A5, A6):
+     * 1. Client request body MUST contain ONLY `{ customerId: "<uuid>" }`; untrusted fields (`mock_telephony`, `phone`, etc.) -> `400`.
+     * 2. Persistent `(finance_id, idempotency_key)` deduplication via `uq_atcl_finance_idem`:
+     *    same customer -> replay with `idempotencyReplay: true`; different customer -> `422 idempotency_key_payload_mismatch`.
+     * 3. Server-only `VOICE_TELEPHONY_MODE` (`mock` default; invalid/unconfirmed fails closed), `VOICE_AI_KILL_SWITCH`,
+     *    `owner_features` (`ai_voice_agent` enabled & non-expired), and `TEST_ALLOWED_NUMBERS` in `live_allowlist` mode.
+     * 4. Attempt counters (`attempt_count`, `daily_attempt_count`, `last_call_at`) increment ONLY after Python's `202` ack;
+     *    pre-dial connect errors never burn attempts/cooldown, whereas ambiguous read timeouts mark `needs_reconcile` (`unknown`)
+     *    without releasing cooldown or allowing auto-retry.
      */
     async function initiateManualCustomerCall(financeId, payload, opts = {}) {
       const runner = opts.queryRunner || db;
+      const env = opts.env || process.env;
 
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         throw createHttpError(400, 'Request body must be a JSON object with { customerId }', 'invalid_body');
@@ -1351,7 +1378,49 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
         throw createHttpError(400, 'customerId must be a valid UUID', 'invalid_customer_id');
       }
 
-      // 1. Composite Voice AI Health Gate (Dograh + Python Voice Agent RO-DB & Redis)
+      const idemKey = validateIdempotencyKey(opts.idempotencyKey, {
+        required: Boolean(opts.requireIdempotencyKey),
+      });
+
+      // 1. Persistent Idempotency Lookup (`uq_atcl_finance_idem`)
+      if (idemKey) {
+        const { rows: existingRows } = await runner.query(
+          `SELECT id::text AS call_id,
+                  lead_id::text AS lead_id,
+                  finance_id::text AS finance_id,
+                  customer_id::text AS customer_id,
+                  loan_id::text AS loan_id,
+                  provider_call_id,
+                  call_status::text AS call_status,
+                  call_lifecycle_status,
+                  answered,
+                  customer_spoke,
+                  disposition,
+                  error_detail
+             FROM ai_telecalling_call_logs
+            WHERE finance_id = $1::uuid
+              AND idempotency_key = $2
+            LIMIT 1`,
+          [financeId, idemKey]
+        );
+
+        if (existingRows.length > 0) {
+          const existing = existingRows[0];
+          if (String(existing.customer_id) !== customerId) {
+            throw createHttpError(
+              422,
+              'Idempotency-Key has already been used for a different customerId',
+              'idempotency_key_payload_mismatch'
+            );
+          }
+          return formatCallReplayFromRow(existing);
+        }
+      }
+
+      // 2. Fail-Closed Server Telephony Safety Gates (Amendment A5: kill switch, mode validity, live confirmation)
+      const telephonyMode = assertServerTelephonySafetyGates(env);
+
+      // 3. Composite Voice AI Health Gate (Dograh + Python Voice Agent RO-DB & Redis)
       const checkHealthImpl = opts.checkHealthFn || checkVoiceSystemHealth;
       const health = await checkHealthImpl(opts.healthOpts || {});
       if (!health || !health.online) {
@@ -1363,7 +1432,52 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
         );
       }
 
-      // 2. Server-Side Eligibility Gate (`fn_check_voice_call_eligibility`)
+      // 4. Tenant `owner_features` Entitlement Gate (`ai_voice_agent` enabled & non-expired, Amendment A5)
+      const { rows: entRows } = await runner.query(
+        `SELECT fd.owner_id::text AS owner_id,
+                EXISTS (
+                  SELECT 1
+                    FROM owner_features ofe
+                   WHERE ofe.owner_id = fd.owner_id
+                     AND ofe.feature_code = 'ai_voice_agent'
+                     AND ofe.is_enabled = TRUE
+                     AND (ofe.starts_at IS NULL OR ofe.starts_at <= CURRENT_TIMESTAMP)
+                     AND (ofe.expires_at IS NULL OR ofe.expires_at > CURRENT_TIMESTAMP)
+                ) AS entitled
+           FROM finance_detail fd
+          WHERE fd.id = $1::uuid
+          LIMIT 1`,
+        [financeId]
+      );
+      if (entRows.length === 0 || entRows[0].entitled !== true) {
+        throw createHttpError(
+          403,
+          'Voice AI Agent entitlement (ai_voice_agent) is not enabled or has expired for this finance owner',
+          'ai_voice_agent_entitlement_missing'
+        );
+      }
+
+      // 5. Active Call Guard (`queued`, `initiated`, `ringing`, `in_progress` block concurrent dispatch, Amendment A3)
+      const { rows: activeCallRows } = await runner.query(
+        `SELECT id::text AS call_id, call_lifecycle_status
+           FROM ai_telecalling_call_logs
+          WHERE finance_id = $1::uuid
+            AND customer_id = $2::uuid
+            AND call_lifecycle_status IN ('initiated', 'queued', 'ringing', 'in_progress')
+            AND started_at >= NOW() - INTERVAL '30 minutes'
+          LIMIT 1`,
+        [financeId, customerId]
+      );
+      if (activeCallRows.length > 0) {
+        throw createHttpError(
+          409,
+          'A Voice AI call is already active for this customer',
+          'call_already_in_progress',
+          { activeCallId: activeCallRows[0].call_id }
+        );
+      }
+
+      // 6. Server-Side Eligibility Gate (`fn_check_voice_call_eligibility`)
       const { rows: eligRows } = await runner.query(
         `SELECT public.fn_check_voice_call_eligibility($1::uuid, $2::uuid, NULL, NOW()) AS eligibility`,
         [financeId, customerId]
@@ -1413,127 +1527,263 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
           ? Number(ledgerRollup.overdueDays || 0)
           : Number(elig.days_overdue || 0);
 
-      // 3. Ensure `ai_telecalling_leads` row exists & mark `connecting` + increment daily attempt counter
+      // 7. Node-Side Allowlist Enforcement in `live_allowlist` Mode (Amendment A5 — before inserting rows or calling Python!)
+      assertDestinationAllowlistedIfRequired(telephonyMode, resolvedPhoneE164, env);
+
+      // 8. Ensure `ai_telecalling_leads` row exists & mark `connecting` WITHOUT prematurely incrementing attempt counters (Amendment A3)
       const { rows: leadRows } = await runner.query(
         `INSERT INTO ai_telecalling_leads (
-        finance_id, customer_id, loan_id, phone_e164,
-        due_amount, overdue_amount, days_overdue,
-        call_status, attempt_count, daily_attempt_count, daily_attempt_date,
-        last_call_at, created_at, updated_at
-     ) VALUES (
-        $1::uuid, $2::uuid, $3::uuid, $4,
-        $5, $5, $6,
-        'connecting', 1, 1, (NOW() AT TIME ZONE 'Asia/Kolkata')::date,
-        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-     )
-     ON CONFLICT (finance_id, customer_id) DO UPDATE
-       SET loan_id = COALESCE(EXCLUDED.loan_id, ai_telecalling_leads.loan_id),
-           phone_e164 = COALESCE(EXCLUDED.phone_e164, ai_telecalling_leads.phone_e164),
-           due_amount = EXCLUDED.due_amount,
-           overdue_amount = EXCLUDED.overdue_amount,
-           days_overdue = EXCLUDED.days_overdue,
-           call_status = 'connecting',
-           attempt_count = COALESCE(ai_telecalling_leads.attempt_count, 0) + 1,
-           daily_attempt_count = CASE
-             WHEN ai_telecalling_leads.daily_attempt_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
-               THEN COALESCE(ai_telecalling_leads.daily_attempt_count, 0) + 1
-             ELSE 1
-           END,
-           daily_attempt_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date,
-           last_call_at = CURRENT_TIMESTAMP,
-           updated_at = CURRENT_TIMESTAMP
-     RETURNING id::text AS lead_id`,
+           finance_id, customer_id, loan_id, phone_e164,
+           overdue_amount, days_overdue,
+           call_status, created_at, updated_at
+         ) VALUES (
+           $1::uuid, $2::uuid, $3::uuid, $4,
+           $5, $6,
+           'connecting', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+         )
+         ON CONFLICT (finance_id, customer_id) DO UPDATE
+           SET loan_id = COALESCE(EXCLUDED.loan_id, ai_telecalling_leads.loan_id),
+               phone_e164 = COALESCE(EXCLUDED.phone_e164, ai_telecalling_leads.phone_e164),
+               overdue_amount = EXCLUDED.overdue_amount,
+               days_overdue = EXCLUDED.days_overdue,
+               call_status = 'connecting',
+               updated_at = CURRENT_TIMESTAMP
+         RETURNING id::text AS lead_id`,
         [financeId, customerId, resolvedLoanId, resolvedPhoneE164, resolvedOverdue, resolvedDaysOverdue]
       );
 
       const leadId = leadRows[0].lead_id;
       const callId = opts.callId || crypto.randomUUID();
-      const providerCallId = `af-call-${callId}`;
+      // Amendment A4: Tag mock calls explicitly with `mock-<callId>` prefix (zero DDL)
+      const providerCallId = telephonyMode === 'mock' ? `mock-${callId}` : `af-call-${callId}`;
       const rawUserId = opts.userId && UUID_STRICT_REGEX.test(String(opts.userId)) ? String(opts.userId) : null;
 
-      // 4. Insert `'initiated'` call log row (safely resolving staff `users.id` vs `owner.id`)
-      await runner.query(
-        `INSERT INTO ai_telecalling_call_logs (
-        id, lead_id, finance_id, customer_id, loan_id,
-        provider_call_id, phone_e164,
-        call_status, call_lifecycle_status, answered, customer_spoke,
-        call_duration_seconds, due_amount_at_call,
-        caller_type, called_by_user_id,
-        tts_model, stt_model, llm_model,
-        started_at, created_at
-     ) VALUES (
-        $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
-        $6, $7,
-        'connecting', 'initiated', FALSE, FALSE,
-        0, $8,
-        'ai_manual', (SELECT u.id FROM users u WHERE u.id = $9::uuid LIMIT 1),
-        $10, $11, $12,
-        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-     )`,
-        [
-          callId,
-          leadId,
-          financeId,
-          customerId,
-          resolvedLoanId,
-          providerCallId,
-          resolvedPhoneE164,
-          resolvedOverdue,
-          rawUserId,
-          elig.tts_model || 'bulbul:v4',
-          elig.stt_model || null,
-          elig.llm_model || null,
-        ]
-      );
-
-      // 5. Dispatch HMAC-signed manual call request (`mock_telephony: true`) to Python Voice Agent
-      const dispatchImpl = opts.dispatchFn || dispatchManualCallToVoiceAgent;
+      // 9. Insert `'queued'` call log row with `idempotency_key` (`uq_atcl_finance_idem`)
       try {
-        const agentAck = await dispatchImpl(
-          {
-            finance_id: financeId,
-            customer_id: customerId,
-            loan_id: resolvedLoanId,
-            lead_id: leadId,
-            call_id: callId,
-            provider_call_id: providerCallId,
-          },
-          opts.dispatchOpts || {}
+        await runner.query(
+          `INSERT INTO ai_telecalling_call_logs (
+             id, lead_id, finance_id, customer_id, loan_id,
+             provider_call_id, phone_e164,
+             call_status, call_lifecycle_status, answered, customer_spoke,
+             call_duration_seconds, due_amount_at_call,
+             caller_type, called_by_user_id,
+             tts_model, stt_model, llm_model,
+             idempotency_key,
+             started_at, created_at
+           ) VALUES (
+             $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+             $6, $7,
+             'connecting', 'queued', FALSE, FALSE,
+             0, $8,
+             'ai_manual', (SELECT u.id FROM users u WHERE u.id = $9::uuid LIMIT 1),
+             $10, $11, $12,
+             $13,
+             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+           )`,
+          [
+            callId,
+            leadId,
+            financeId,
+            customerId,
+            resolvedLoanId,
+            providerCallId,
+            resolvedPhoneE164,
+            resolvedOverdue,
+            rawUserId,
+            elig.tts_model || 'bulbul:v4',
+            elig.stt_model || null,
+            elig.llm_model || null,
+            idemKey,
+          ]
         );
+      } catch (insertErr) {
+        if (idemKey && insertErr && insertErr.code === '23505') {
+          const { rows: racedRows } = await runner.query(
+            `SELECT id::text AS call_id,
+                    lead_id::text AS lead_id,
+                    finance_id::text AS finance_id,
+                    customer_id::text AS customer_id,
+                    loan_id::text AS loan_id,
+                    provider_call_id,
+                    call_status::text AS call_status,
+                    call_lifecycle_status,
+                    answered,
+                    customer_spoke,
+                    disposition,
+                    error_detail
+               FROM ai_telecalling_call_logs
+              WHERE finance_id = $1::uuid
+                AND idempotency_key = $2
+              LIMIT 1`,
+            [financeId, idemKey]
+          );
+          if (racedRows.length > 0) {
+            if (String(racedRows[0].customer_id) !== customerId) {
+              throw createHttpError(
+                422,
+                'Idempotency-Key has already been used for a different customerId',
+                'idempotency_key_payload_mismatch'
+              );
+            }
+            return formatCallReplayFromRow(racedRows[0]);
+          }
+        }
+        throw insertErr;
+      }
+
+      // 10. Dispatch HMAC-signed manual call request to Python Voice Agent
+      const dispatchImpl = opts.dispatchFn || dispatchManualCallToVoiceAgent;
+      const outboundPayload = {
+        finance_id: financeId,
+        customer_id: customerId,
+        loan_id: resolvedLoanId,
+        lead_id: leadId,
+        call_id: callId,
+        provider_call_id: providerCallId,
+        ...(idemKey ? { idempotency_key: idemKey } : {}),
+      };
+
+      try {
+        const agentAck = await dispatchImpl(outboundPayload, {
+          ...(opts.dispatchOpts || {}),
+          telephonyMode,
+        });
+
+        const ackDbLifecycle = toDbLifecycleStatus(agentAck?.call_lifecycle_status || 'initiated');
+        const finalProviderCallId = agentAck?.provider_call_id || providerCallId;
+
+        // Amendment A3: Increment attempt_count / daily_attempt_count / last_call_at ONLY on Python 202 ack (idempotent per callId)
+        await runner.query(
+          `UPDATE ai_telecalling_leads
+              SET attempt_count = COALESCE(attempt_count, 0) + 1,
+                  daily_attempt_count = CASE
+                    WHEN daily_attempt_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+                      THEN COALESCE(daily_attempt_count, 0) + 1
+                    ELSE 1
+                  END,
+                  daily_attempt_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date,
+                  last_call_at = CURRENT_TIMESTAMP,
+                  locked_by = 'acked:' || $3,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1::uuid
+              AND finance_id = $2::uuid
+              AND COALESCE(locked_by, '') IS DISTINCT FROM ('acked:' || $3)`,
+          [leadId, financeId, callId]
+        );
+
+        await runner.query(
+          `UPDATE ai_telecalling_call_logs
+              SET call_lifecycle_status = CASE
+                    WHEN call_lifecycle_status IN ('queued', 'initiated') THEN $3
+                    ELSE call_lifecycle_status
+                  END,
+                  provider_call_id = COALESCE($4, provider_call_id)
+            WHERE id = $1::uuid
+              AND finance_id = $2::uuid`,
+          [callId, financeId, ackDbLifecycle, agentAck?.provider_call_id || null]
+        );
+
+        const mappedAck = fromDbCallRowToDomainState({
+          call_lifecycle_status: ackDbLifecycle,
+          call_status: 'connecting',
+        });
 
         return {
           callId,
           leadId,
           customerId,
           loanId: resolvedLoanId,
-          providerCallId: agentAck?.provider_call_id || providerCallId,
-          callLifecycleStatus: agentAck?.call_lifecycle_status || 'initiated',
-          mockTelephony: true,
+          providerCallId: finalProviderCallId,
+          callLifecycleStatus: mappedAck.transportLifecycleStatus,
+          callDisplayState: mappedAck.domainState,
+          telephonyMode,
+          mockTelephony: telephonyMode === 'mock',
+          idempotencyReplay: false,
         };
       } catch (dispatchErr) {
-        // Roll back stuck `connecting`/`initiated` state if Voice Agent rejected or timed out
+        const failureClass = classifyDispatchTransportError(dispatchErr);
+
+        if (failureClass === 'ambiguous_timeout') {
+          // Amendment A1: Read timeout / unknown upstream state -> mark `needs_reconcile` (`unknown`),
+          // DO NOT release cooldown, and DO NOT allow auto-retry.
+          const reconcileDetail = `dispatch_timeout_needs_reconcile: ${String(
+            dispatchErr.message || 'Read timeout'
+          ).slice(0, 450)}`;
+
+          await runner.query(
+            `UPDATE ai_telecalling_call_logs
+                SET call_status = 'connecting',
+                    call_lifecycle_status = 'initiated',
+                    disposition = 'needs_reconcile',
+                    error_detail = $3
+              WHERE id = $1::uuid AND finance_id = $2::uuid`,
+            [callId, financeId, reconcileDetail]
+          );
+          await runner.query(
+            `UPDATE ai_telecalling_leads
+                SET call_status = 'connecting',
+                    locked_by = 'reconcile:' || $3,
+                    lock_expires_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes',
+                    last_call_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = $1::uuid AND finance_id = $2::uuid`,
+            [leadId, financeId, callId]
+          );
+
+          throw createHttpError(
+            504,
+            'Voice AI dispatch timed out after request transmission; call state is unknown and queued for reconciliation (do not auto-retry)',
+            'dispatch_timeout_ambiguous',
+            {
+              callId,
+              leadId,
+              callLifecycleStatus: 'unknown',
+              needsReconcile: true,
+            }
+          );
+        }
+
+        // Amendment A1 + A3: Safe pre-dial connect/rejection failure -> mark `call_status = 'failed'` +
+        // `call_lifecycle_status = 'cancelled'` + `disposition = 'pre_dial_failed'` so `fn_check_voice_call_eligibility`
+        // NEVER burns daily attempts or cooldown (zero DDL), while `fromDbCallRowToDomainState` exposes `'failed'`.
+        const preDialDetail = `pre_dial_failed: ${String(dispatchErr.message || 'Dispatch failed').slice(
+          0,
+          450
+        )}`;
         await runner.query(
           `UPDATE ai_telecalling_call_logs
-          SET call_status = 'failed',
-              call_lifecycle_status = 'failed',
-              error_detail = $3,
-              ended_at = CURRENT_TIMESTAMP
-        WHERE id = $1::uuid AND finance_id = $2::uuid`,
-          [callId, financeId, String(dispatchErr.message || 'Dispatch failed').slice(0, 500)]
+              SET call_status = 'failed',
+                  call_lifecycle_status = 'cancelled',
+                  disposition = 'pre_dial_failed',
+                  error_detail = $3,
+                  ended_at = CURRENT_TIMESTAMP
+            WHERE id = $1::uuid AND finance_id = $2::uuid`,
+          [callId, financeId, preDialDetail]
         );
         await runner.query(
           `UPDATE ai_telecalling_leads
-          SET call_status = 'failed',
-              locked_by = NULL,
-              lock_expires_at = NULL,
-              updated_at = CURRENT_TIMESTAMP
-        WHERE id = $1::uuid AND finance_id = $2::uuid`,
+              SET call_status = 'failed',
+                  locked_by = NULL,
+                  lock_expires_at = NULL,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1::uuid AND finance_id = $2::uuid`,
           [leadId, financeId]
         );
+
+        const isConnRefused =
+          String(dispatchErr.cause?.code || dispatchErr.code || '').trim() === 'ECONNREFUSED';
+        const statusCode = dispatchErr.statusCode || (isConnRefused ? 503 : 502);
+        const errCode =
+          dispatchErr.code && dispatchErr.code !== 'ECONNREFUSED'
+            ? dispatchErr.code
+            : isConnRefused
+              ? 'voice_agent_unavailable'
+              : 'voice_dispatch_failed';
+
         throw createHttpError(
-          dispatchErr.statusCode || 502,
+          statusCode,
           dispatchErr.message || 'Failed to dispatch manual call to Voice AI Agent',
-          'voice_dispatch_failed'
+          errCode
         );
       }
     }
@@ -1698,8 +1948,9 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
         time: String(t.time || ''),
       }));
 
-      const lifecycle = String(r.call_lifecycle_status || 'initiated').toLowerCase();
-      const isTerminal = ['completed', 'failed', 'cancelled'].includes(lifecycle);
+      const mappedLifecycle = fromDbCallRowToDomainState(r);
+      const lifecycle = mappedLifecycle.transportLifecycleStatus;
+      const isTerminal = mappedLifecycle.isTerminal;
       const answered = Boolean(r.answered);
       const customerSpoke = Boolean(r.customer_spoke);
       const callOutcome = deriveBusinessCallOutcome({
@@ -1884,6 +2135,13 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
                AND vcs.customer_id = $2::uuid
                AND COALESCE(vcs.is_superseded, false) = false
                AND vcs.call_log_id IS DISTINCT FROM $3::uuid
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM ai_telecalling_call_logs cl_m
+                  WHERE cl_m.id = vcs.call_log_id
+                    AND cl_m.finance_id = vcs.finance_id
+                    AND cl_m.provider_call_id LIKE 'mock-%'
+               )
              ORDER BY
                CASE WHEN $4::uuid IS NOT NULL AND vcs.loan_id = $4::uuid THEN 0 ELSE 1 END ASC,
                vcs.call_date DESC
@@ -2007,6 +2265,8 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
           maskedPhone,
           callStatus: r.call_status,
           callLifecycleStatus: lifecycle,
+          callDisplayState: mappedLifecycle.domainState,
+          needsReconcile: mappedLifecycle.needsReconcile,
           callOutcome,
           isTerminal,
           answered,
@@ -2121,88 +2381,12 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
       return { scheduledCount, scheduledAtIso, schedulePreset };
     }
 
-    async function triggerLeadCall(financeId, leadId, opts = {}) {
-      const runner = opts.queryRunner || db;
-      if (!leadId) throw createHttpError(400, 'leadId is required');
-
-      const { rows } = await runner.query(
-        `SELECT
-        atl.id,
-        atl.customer_id,
-        atl.loan_id,
-        atl.phone_e164,
-        atl.is_suppressed,
-        atl.overdue_amount,
-        atl.days_overdue,
-        atl.earliest_unpaid_due_date,
-        c.cname AS customer_name,
-        COALESCE(c.hplno::text, atl.loan_id::text) AS loan_ref,
-        fd.finance_name,
-        EXISTS (
-          SELECT 1 FROM voice_contact_suppressions vcs
-           WHERE vcs.finance_id = atl.finance_id
-             AND vcs.customer_id = atl.customer_id
-             AND vcs.channel IN ('ai_voice_calls', 'all_automated')
-             AND vcs.status = 'active'
-        ) AS active_suppression
-       FROM ai_telecalling_leads atl
-       JOIN customers c ON c.id = atl.customer_id AND c.finance_id = atl.finance_id
-       JOIN finance_detail fd ON fd.id = atl.finance_id
-      WHERE atl.finance_id = $1 AND (atl.id = $2::uuid OR atl.customer_id = $2::uuid)
-      LIMIT 1`,
-        [financeId, leadId]
+    async function triggerLeadCall(_financeId, _leadId) {
+      throw createHttpError(
+        410,
+        'POST /api/ai/leads/:leadId/call is deprecated and disabled. Use POST /api/ai/calls/manual with { customerId } and Idempotency-Key.',
+        'endpoint_deprecated'
       );
-
-      if (rows.length === 0) {
-        throw createHttpError(404, 'Telecalling lead not found for this finance company');
-      }
-
-      const lead = rows[0];
-      if (lead.is_suppressed || lead.active_suppression) {
-        throw createHttpError(409, 'Customer is opted out (DNC suppressed) from automated AI voice calls');
-      }
-
-      const bucketMinute = Math.floor(Date.now() / 60000);
-      const idemKey = `manual-dial:${financeId}:${lead.id}:${bucketMinute}`;
-
-      const { rows: outboxRows } = await runner.query(
-        `INSERT INTO voice_outbox_events (
-        finance_id, aggregate_type, aggregate_id, event_type, payload, idempotency_key
-     ) VALUES ($1, 'telecalling_lead', $2, 'dispatch_outbound_call', $3::jsonb, $4)
-     ON CONFLICT (finance_id, idempotency_key)
-     DO UPDATE SET next_retry_at = NOW()
-     RETURNING id`,
-        [
-          financeId,
-          lead.id,
-          JSON.stringify({
-            lead_id: lead.id,
-            customer_id: lead.customer_id,
-            loan_id: lead.loan_id,
-            customer_name: lead.customer_name,
-            finance_name: lead.finance_name,
-            loan_ref: lead.loan_ref,
-            phone_e164: lead.phone_e164,
-            overdue_amount: Number(lead.overdue_amount || 0),
-            days_overdue: Number(lead.days_overdue || 0),
-          }),
-          idemKey,
-        ]
-      );
-
-      await runner.query(
-        `UPDATE ai_telecalling_leads
-        SET call_status = 'connecting',
-            updated_at = CURRENT_TIMESTAMP
-      WHERE finance_id = $1 AND id = $2`,
-        [financeId, lead.id]
-      );
-
-      return {
-        status: 'connecting',
-        leadId: String(lead.id),
-        outboxEventId: outboxRows[0]?.id ? String(outboxRows[0].id) : null,
-      };
     }
 
     async function getCallLogs(financeId, query = {}, opts = {}) {
