@@ -8,12 +8,12 @@ require('dotenv').config({
 });
 
 const express = require('express');
-const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
 const os = require('os');
 const fs = require('fs');
 
+const { createCorsMiddleware } = require('./config/cors.config');
 const { enhancedCheckFinance } = require('./middleware/auth.middleware');
 const { db } = require('./config/database.config');
 const allRoutes = require('./routes/index');
@@ -27,7 +27,13 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 // ─── Core middleware ──────────────────────────────────────────────────────────
-const jsonParser = express.json();
+const jsonParser = express.json({
+  verify: (req, _res, buf) => {
+    if (buf && buf.length > 0) {
+      req.rawBody = buf.toString('utf8');
+    }
+  },
+});
 app.use((req, res, next) => {
   if (req.path === '/api/ocr/scan' || /^\/api\/ocr\/jobs\/[^/]+\/upload$/.test(req.path)) {
     return next();
@@ -35,12 +41,7 @@ app.use((req, res, next) => {
   return jsonParser(req, res, next);
 });
 app.use(cookieParser());
-app.use(cors({
-  origin: true,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'finance-authorization', 'owner-authorization', 'finance-id']
-}));
+app.use(createCorsMiddleware());
 
 // ─── Static file serving ──────────────────────────────────────────────────────
 app.use('/uploads', express.static(uploadDir));
