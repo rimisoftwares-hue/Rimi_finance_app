@@ -100,7 +100,7 @@ async function auditMockVoiceDataDryRun(opts = {}) {
               cl.call_duration_seconds,
               p.promised_amount,
               p.promised_date::text AS promised_date,
-              p.status::text AS status,
+              p.ptp_status::text AS status,
               p.created_at
          FROM promise_to_pay p
          LEFT JOIN ai_telecalling_call_logs cl
@@ -138,8 +138,8 @@ async function auditMockVoiceDataDryRun(opts = {}) {
       `SELECT vcm.id::text AS memory_id,
               vcm.finance_id::text AS finance_id,
               vcm.customer_id::text AS customer_id,
-              vcm.total_calls_count,
-              vcm.promises_made_count,
+              vcm.total_calls AS total_calls_count,
+              (vcm.ptp_kept_count + vcm.ptp_broken_count) AS promises_made_count,
               vcm.last_call_log_id::text AS last_call_log_id,
               cl.provider_call_id AS last_provider_call_id,
               vcm.updated_at

@@ -360,7 +360,9 @@ function createStatefulCallRunner(opts = {}) {
         } else if (norm.includes('SET call_lifecycle_status = $4')) {
           row.call_lifecycle_status = params[3];
           row.call_status = params[4];
-          if (params[5]) row.provider_call_id = params[5];
+          if (params[5] && !String(row.provider_call_id || '').startsWith('mock-')) {
+            row.provider_call_id = params[5];
+          }
           if (typeof params[6] === 'boolean') row.answered = params[6];
           if (typeof params[7] === 'boolean') row.customer_spoke = params[7];
           if (params[9]) row.error_detail = params[9];
@@ -368,11 +370,16 @@ function createStatefulCallRunner(opts = {}) {
           if (['completed', 'failed', 'cancelled'].includes(row.call_lifecycle_status)) {
             row.ended_at = row.ended_at || new Date().toISOString();
           }
-        } else if (norm.includes('provider_call_id = COALESCE')) {
+        } else if (
+          norm.includes('provider_call_id = COALESCE') ||
+          norm.includes("provider_call_id LIKE 'mock-%'")
+        ) {
           if (params[2] && ['queued', 'initiated'].includes(row.call_lifecycle_status)) {
             row.call_lifecycle_status = params[2];
           }
-          if (params[3]) row.provider_call_id = params[3];
+          if (params[3] && !String(row.provider_call_id || '').startsWith('mock-')) {
+            row.provider_call_id = params[3];
+          }
         }
         return { rows: [{ ...row }] };
       }

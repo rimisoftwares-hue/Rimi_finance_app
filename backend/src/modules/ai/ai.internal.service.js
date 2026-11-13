@@ -202,7 +202,7 @@ async function updateInternalCallStatus(payload = {}, opts = {}) {
     `UPDATE ai_telecalling_call_logs
         SET call_lifecycle_status = $4,
             call_status = $5::lead_call_status_enum,
-            provider_call_id = COALESCE($6, provider_call_id),
+            provider_call_id = CASE WHEN provider_call_id LIKE 'mock-%' THEN provider_call_id ELSE COALESCE($6, provider_call_id) END,
             answered = COALESCE($7, answered),
             customer_spoke = COALESCE($8, customer_spoke),
             owning_worker_id = COALESCE($9, owning_worker_id),
@@ -713,7 +713,7 @@ async function completeInternalVoiceCall(payload = {}, opts = {}) {
     const fallbackProviderId = syncedProviderCallId || `af-call-${callId}`;
     const { rows: logRows } = await runner.query(
       `UPDATE ai_telecalling_call_logs
-          SET provider_call_id = COALESCE(provider_call_id, $4)
+          SET provider_call_id = CASE WHEN provider_call_id LIKE 'mock-%' THEN provider_call_id ELSE COALESCE(provider_call_id, $4) END
         WHERE id = $1::uuid
           AND finance_id = $2::uuid
           AND customer_id = $3::uuid

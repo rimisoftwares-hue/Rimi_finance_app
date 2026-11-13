@@ -1,12 +1,40 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
+function isLocalDbHost(rawHost) {
+  const host = String(rawHost || '').trim().toLowerCase();
+  if (!host) return true;
+  if (host === 'localhost' || host === '::1' || host === '[::1]') return true;
+  if (/^127(?:\.\d{1,3}){3}$/.test(host)) return true;
+  if (host.startsWith('/')) return true;
+  return false;
+}
+
+function assertSafeTestDbTarget(env = process.env) {
+  if (String(env.NODE_ENV || '').trim() !== 'test') {
+    return;
+  }
+  const allowRemote = String(env.ALLOW_REMOTE_DB_IN_TESTS || '').trim().toLowerCase() === 'true';
+  if (!allowRemote && !isLocalDbHost(env.DB_HOST)) {
+    const err = new Error(
+      'Refusing to connect to non-local DB host in NODE_ENV=test unless ALLOW_REMOTE_DB_IN_TESTS=true is explicitly set'
+    );
+    err.code = 'TEST_REMOTE_DB_BLOCKED';
+    throw err;
+  }
+}
+
+const blockedAtInit =
+  String(process.env.NODE_ENV || '').trim() === 'test' &&
+  String(process.env.ALLOW_REMOTE_DB_IN_TESTS || '').trim().toLowerCase() !== 'true' &&
+  !isLocalDbHost(process.env.DB_HOST);
+
 const db = new Pool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
+  host: blockedAtInit ? '127.0.0.1' : process.env.DB_HOST,
+  user: blockedAtInit ? 'blocked_test_user' : process.env.DB_USER,
+  password: blockedAtInit ? '' : process.env.DB_PASSWORD,
+  database: blockedAtInit ? 'blocked_test_db' : process.env.DB_NAME,
+  port: blockedAtInit ? 1 : process.env.DB_PORT,
 
   max: 10, // Equivalent to connectionLimit
   idleTimeoutMillis: 30000,
@@ -14,7 +42,7 @@ const db = new Pool({
 
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000, // 10s keepalive to prevent firewall/NAT drops
-  ssl: process.env.DB_SSLMODE === 'require' ? { rejectUnauthorized: false } : false,
+  ssl: !blockedAtInit && process.env.DB_SSLMODE === 'require' ? { rejectUnauthorized: false } : false,
 });
 
 // Handle idle client errors gracefully
@@ -78,9 +106,16 @@ function wrapQueryResult(res) {
   return res;
 }
 
-// Wrap db.query
+// Wrap db.connect, db.query, db.execute, and db.getConnection to enforce test remote-DB safety guard
+const origPoolConnect = db.connect.bind(db);
+db.connect = async function (...args) {
+  assertSafeTestDbTarget(process.env);
+  return origPoolConnect(...args);
+};
+
 const origPoolQuery = db.query.bind(db);
 db.query = async function (text, params) {
+  assertSafeTestDbTarget(process.env);
   const norm = normalizeQuery(text, params);
   try {
     const res = await (norm.params !== undefined ? origPoolQuery(norm.text, norm.params) : origPoolQuery(norm.text));
@@ -97,6 +132,7 @@ db.query = async function (text, params) {
 
 // Wrap db.execute
 db.execute = async function (text, params) {
+  assertSafeTestDbTarget(process.env);
   const norm = normalizeQuery(text, params);
   try {
     const res = await (norm.params !== undefined ? origPoolQuery(norm.text, norm.params) : origPoolQuery(norm.text));
@@ -113,6 +149,7 @@ db.execute = async function (text, params) {
 
 // Connection provider for transactions and legacy getConnection calls
 db.getConnection = async function () {
+  assertSafeTestDbTarget(process.env);
   const client = await db.connect();
   const origClientQuery = client.query.bind(client);
   const origRelease = client.release.bind(client);
@@ -168,5 +205,7 @@ db.getConnection = async function () {
 
 module.exports = {
   db,
-  isConnected: () => isConnected
+  isConnected: () => isConnected,
+  isLocalDbHost,
+  assertSafeTestDbTarget,
 };

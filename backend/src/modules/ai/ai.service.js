@@ -1650,7 +1650,9 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
         });
 
         const ackDbLifecycle = toDbLifecycleStatus(agentAck?.call_lifecycle_status || 'initiated');
-        const finalProviderCallId = agentAck?.provider_call_id || providerCallId;
+        const finalProviderCallId = isMockProviderCallId(providerCallId)
+          ? providerCallId
+          : agentAck?.provider_call_id || providerCallId;
 
         // Amendment A3: Increment attempt_count / daily_attempt_count / last_call_at ONLY on Python 202 ack (idempotent per callId)
         await runner.query(
@@ -1677,7 +1679,7 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
                     WHEN call_lifecycle_status IN ('queued', 'initiated') THEN $3
                     ELSE call_lifecycle_status
                   END,
-                  provider_call_id = COALESCE($4, provider_call_id)
+                  provider_call_id = CASE WHEN provider_call_id LIKE 'mock-%' THEN provider_call_id ELSE COALESCE($4, provider_call_id) END
             WHERE id = $1::uuid
               AND finance_id = $2::uuid`,
           [callId, financeId, ackDbLifecycle, agentAck?.provider_call_id || null]
