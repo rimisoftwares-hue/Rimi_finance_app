@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Settings, Calendar, MessageSquare, Bell, ShieldAlert, Save, RotateCcw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
@@ -11,6 +11,7 @@ import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Badge } from "../ui/badge";
 import { toast } from '../../hooks/use-toast';
+import { aiApi } from "../../api/aiApi";
 
 export default function AISettings() {
 
@@ -37,8 +38,40 @@ export default function AISettings() {
     autoFollowUp: true,
   });
 
-  const handleSave = () => {
-    toast({ title: "Settings saved", description: "AI Assistant settings updated successfully." });
+  useEffect(() => {
+    let mounted = true;
+    aiApi
+      .getSettings()
+      .then((res) => {
+        if (!mounted || !res?.settings) return;
+        setCompanyRules(res.settings.companyRules);
+        setAiInstructions(res.settings.aiInstructions);
+        setBehavior(res.settings.behavior);
+        setEscalation(res.settings.escalation);
+      })
+      .catch(() => {
+        /* preserve initial UI defaults when offline */
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    try {
+      const res = await aiApi.updateSettings({
+        companyRules,
+        aiInstructions,
+        behavior,
+        escalation,
+      });
+      toast({
+        title: "Settings saved",
+        description: `AI Assistant settings updated (v${res.settings?.configVersion ?? 1}).`,
+      });
+    } catch {
+      toast({ title: "Settings saved locally", description: "Backend unavailable; kept current changes in view." });
+    }
   };
 
   const handleReset = () => {

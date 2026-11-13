@@ -2,6 +2,52 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../../config/database.config');
 const { checkFinance, enhancedCheckFinance } = require('../../middleware/auth.middleware');
+const homeDashboardService = require('./homeDashboard.service');
+const staffDashboardService = require('./staffDashboard.service');
+
+// Home Dashboard Overview (MainDashboard.tsx)
+const handleGetHomeOverview = async (req, res) => {
+  try {
+    const financeId = req.financeId;
+    const overview = await homeDashboardService.getHomeDashboardOverview(financeId);
+    res.json({
+      success: true,
+      ...overview,
+    });
+  } catch (err) {
+    console.error('Error fetching home dashboard overview:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch home dashboard overview',
+      details: err.message,
+    });
+  }
+};
+
+router.get(['/home-overview', '/dashboard/home-overview'], enhancedCheckFinance, handleGetHomeOverview);
+router.handleGetHomeOverview = handleGetHomeOverview;
+
+// Staff Dashboard Overview (StaffDashboard.tsx)
+const handleGetStaffOverview = async (req, res) => {
+  try {
+    const financeId = req.financeId;
+    const overview = await staffDashboardService.getStaffDashboardOverview(db, financeId, req.user);
+    res.json({
+      success: true,
+      ...overview,
+    });
+  } catch (err) {
+    console.error('Error fetching staff dashboard overview:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch staff dashboard overview',
+      details: err.message,
+    });
+  }
+};
+
+router.get(['/staff-overview', '/dashboard/staff-overview'], enhancedCheckFinance, handleGetStaffOverview);
+router.handleGetStaffOverview = handleGetStaffOverview;
 
 // Dashboard Stats
 router.get(['/stats', '/dashboard/stats'], enhancedCheckFinance, async (req, res) => {
@@ -316,9 +362,14 @@ router.get(['/monthly-income-breakdown', '/income-breakdown'], enhancedCheckFina
         AND p.payment_date <= dr.check_date
         AND p.finance_id = $1
 
-      LEFT JOIN loans l 
-        ON l.customer_id = p.customer_id
-        AND l.finance_id = p.finance_id
+      LEFT JOIN LATERAL (
+        SELECT l_sub.interest_rate
+        FROM loans l_sub
+        WHERE l_sub.customer_id = p.customer_id
+          AND l_sub.finance_id = p.finance_id
+        ORDER BY l_sub.hp_date DESC NULLS LAST, l_sub.id DESC
+        LIMIT 1
+      ) l ON true
 
       GROUP BY m.month_num, m.month_name, dr.current_month, dr.current_year
       ORDER BY year, m.month_num
@@ -368,61 +419,62 @@ router.get(['/monthly-outcome-breakdown', '/outcome-breakdown'], enhancedCheckFi
           CURRENT_DATE AS check_date,
           EXTRACT(YEAR FROM CURRENT_DATE) AS current_year,
           EXTRACT(MONTH FROM CURRENT_DATE) AS current_month
+      ),
+      loans_by_month AS (
+        SELECT
+          EXTRACT(MONTH FROM l.hp_date)::int AS month_num,
+          EXTRACT(YEAR FROM l.hp_date)::int AS year_num,
+          COALESCE(SUM(
+            CASE
+              WHEN v.deal_type = 'finance' THEN l.hp_amount
+              ELSE 0
+            END
+          ), 0) AS loan_distributed
+        FROM loans l
+        LEFT JOIN customers c ON c.id = l.customer_id
+        LEFT JOIN vehicle_detail v ON v.id = c.vehicle_id AND v.finance_id = l.finance_id
+        CROSS JOIN date_ranges dr
+        WHERE l.finance_id = $1
+          AND l.hp_date IS NOT NULL
+          AND l.hp_date <= dr.check_date
+        GROUP BY EXTRACT(MONTH FROM l.hp_date)::int, EXTRACT(YEAR FROM l.hp_date)::int
+      ),
+      expenses_by_month AS (
+        SELECT
+          EXTRACT(MONTH FROM oe.expense_date)::int AS month_num,
+          EXTRACT(YEAR FROM oe.expense_date)::int AS year_num,
+          COALESCE(SUM(oe.amount), 0) AS other_expenses
+        FROM office_expenses oe
+        CROSS JOIN date_ranges dr
+        WHERE oe.finance_id = $1
+          AND oe.expense_date IS NOT NULL
+          AND oe.expense_date <= dr.check_date
+        GROUP BY EXTRACT(MONTH FROM oe.expense_date)::int, EXTRACT(YEAR FROM oe.expense_date)::int
       )
       SELECT
         m.month_name AS month,
-
-        /* Loan Distributed (Finance Only) */
-        COALESCE(SUM(
-          CASE 
-            WHEN v.deal_type = 'finance' THEN l.hp_amount
-            ELSE 0
-          END
-        ), 0) AS loan_distributed,
-
-        /* Other Expenses - Office Expenses */
-        COALESCE(SUM(oe.amount), 0) AS other_expenses,
-
-        /* Financial Year */
+        COALESCE(lbm.loan_distributed, 0) AS loan_distributed,
+        COALESCE(ebm.other_expenses, 0) AS other_expenses,
         CASE
           WHEN m.month_num > dr.current_month THEN dr.current_year - 1
           ELSE dr.current_year
         END AS year
-
       FROM months m
       CROSS JOIN date_ranges dr
-
-      /* Loans */
-      LEFT JOIN loans l
-        ON EXTRACT(MONTH FROM l.hp_date) = m.month_num
-        AND EXTRACT(YEAR FROM l.hp_date) =
-            CASE
-              WHEN m.month_num > dr.current_month THEN dr.current_year - 1
-              ELSE dr.current_year
-            END
-        AND l.hp_date <= dr.check_date
-        AND l.finance_id = $1
-
-      /* Vehicle Details (for deal_type) - Fixed join condition */
-      LEFT JOIN customers c
-        ON c.id = l.customer_id
-
-      LEFT JOIN vehicle_detail v
-        ON v.id = c.vehicle_id
-        AND v.finance_id = l.finance_id
-
-      /* Office Expenses */
-      LEFT JOIN office_expenses oe
-        ON EXTRACT(MONTH FROM oe.expense_date) = m.month_num
-        AND EXTRACT(YEAR FROM oe.expense_date) =
-            CASE
-              WHEN m.month_num > dr.current_month THEN dr.current_year - 1
-              ELSE dr.current_year
-            END
-        AND oe.expense_date <= dr.check_date
-        AND oe.finance_id = $1
-
-      GROUP BY m.month_num, m.month_name, dr.current_month, dr.current_year
+      LEFT JOIN loans_by_month lbm
+        ON lbm.month_num = m.month_num
+        AND lbm.year_num =
+          CASE
+            WHEN m.month_num > dr.current_month THEN dr.current_year - 1
+            ELSE dr.current_year
+          END
+      LEFT JOIN expenses_by_month ebm
+        ON ebm.month_num = m.month_num
+        AND ebm.year_num =
+          CASE
+            WHEN m.month_num > dr.current_month THEN dr.current_year - 1
+            ELSE dr.current_year
+          END
       ORDER BY year, m.month_num
     `, [financeId]);
 

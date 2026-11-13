@@ -1,62 +1,34 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Filter, MessageSquare, X, Bot, User, Tag, AlertTriangle } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Search, Filter, MessageSquare, X, Bot, User, Tag, AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
+import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
+import { TableSkeletonRows } from "../common";
+import { aiApi } from "../../api/aiApi";
 
 interface LogEntry {
-  id: number; customer: string; phone: string; hpl: string; vehicle: string;
-  date: string; sentiment: "positive" | "negative" | "neutral"; status: "Resolved" | "Pending";
+  id: number;
+  callId?: string;
+  logUuid?: string;
+  customerId?: string;
+  customer: string;
+  phone: string;
+  hpl: string;
+  vehicle: string;
+  date: string;
+  sentiment: "positive" | "negative" | "neutral";
+  status: "Resolved" | "Pending";
+  callLifecycleStatus?: string;
+  callOutcome?: string;
+  summaryText?: string | null;
   messages: { role: "ai" | "customer"; text: string; time: string }[];
   tags: string[];
 }
-
-const dummyLogs: LogEntry[] = [
-  {
-    id: 1, customer: "Rajesh Kumar", phone: "9876543210", hpl: "HPL-2024-001", vehicle: "KA-01-AB-1234", date: "2026-03-23 10:30", sentiment: "positive", status: "Resolved", tags: ["Payment Reminder"], messages: [
-      { role: "ai", text: "Hello Rajesh! This is a reminder that your EMI of ₹8,500 is due on 25th March. Would you like to make the payment now?", time: "10:30 AM" },
-      { role: "customer", text: "Yes, I'll pay today evening. Thank you for the reminder.", time: "10:32 AM" },
-      { role: "ai", text: "Great! I've noted that. You'll receive a payment link shortly. Have a good day! 😊", time: "10:32 AM" },
-    ]
-  },
-  {
-    id: 2, customer: "Priya Sharma", phone: "9123456789", hpl: "HPL-2024-015", vehicle: "MH-02-CD-5678", date: "2026-03-23 09:15", sentiment: "negative", status: "Pending", tags: ["Overdue", "Complaint"], messages: [
-      { role: "ai", text: "Hi Priya, we noticed your EMI payment of ₹12,000 is overdue by 5 days. Please clear it to avoid late charges.", time: "9:15 AM" },
-      { role: "customer", text: "I already told your agent I need more time. Stop calling me!", time: "9:18 AM" },
-      { role: "ai", text: "I understand your concern, Priya. Let me connect you with our team to discuss a revised schedule. We're here to help.", time: "9:18 AM" },
-    ]
-  },
-  {
-    id: 3, customer: "Anil Verma", phone: "9988776655", hpl: "HPL-2024-032", vehicle: "DL-03-EF-9012", date: "2026-03-22 14:45", sentiment: "neutral", status: "Resolved", tags: ["Inquiry"], messages: [
-      { role: "customer", text: "What is my current outstanding balance?", time: "2:45 PM" },
-      { role: "ai", text: "Your current outstanding balance is ₹1,45,000 with 12 EMIs remaining. Next EMI due: April 1st.", time: "2:45 PM" },
-    ]
-  },
-  {
-    id: 4, customer: "Sunita Devi", phone: "9012345678", hpl: "HPL-2024-044", vehicle: "UP-04-GH-3456", date: "2026-03-22 11:20", sentiment: "positive", status: "Resolved", tags: ["Payment Reminder"], messages: [
-      { role: "ai", text: "Namaste Sunita ji! Your monthly EMI of ₹6,200 is due in 3 days.", time: "11:20 AM" },
-      { role: "customer", text: "Thank you. I will pay tomorrow.", time: "11:25 AM" },
-    ]
-  },
-  {
-    id: 5, customer: "Mohit Singh", phone: "9876501234", hpl: "HPL-2024-058", vehicle: "RJ-05-IJ-7890", date: "2026-03-21 16:00", sentiment: "negative", status: "Pending", tags: ["Overdue", "Recovery Needed"], messages: [
-      { role: "ai", text: "Hi Mohit, your EMI is overdue by 15 days. Please clear ₹9,800 immediately to avoid further penalties.", time: "4:00 PM" },
-      { role: "customer", text: "I don't have money right now. Do whatever you want.", time: "4:05 PM" },
-      { role: "ai", text: "I understand the difficulty. Our recovery team will contact you to discuss options. Please cooperate for the best resolution.", time: "4:06 PM" },
-    ]
-  },
-  {
-    id: 6, customer: "Kavita Patel", phone: "9543216789", hpl: "HPL-2024-071", vehicle: "GJ-06-KL-2345", date: "2026-03-21 08:50", sentiment: "positive", status: "Resolved", tags: ["Payment Reminder"], messages: [
-      { role: "ai", text: "Good morning Kavita! Quick reminder: EMI of ₹7,100 is due on 24th March.", time: "8:50 AM" },
-      { role: "customer", text: "Already paid via UPI. Please check.", time: "8:55 AM" },
-      { role: "ai", text: "Payment confirmed! ₹7,100 received. Thank you! 🙏", time: "8:56 AM" },
-    ]
-  },
-];
 
 const sentimentBadge = (s: string) => {
   if (s === "positive") return <Badge className="bg-green-500/15 text-green-700 border-green-500/30">Positive</Badge>;
@@ -64,11 +36,23 @@ const sentimentBadge = (s: string) => {
   return <Badge className="bg-yellow-500/15 text-yellow-700 border-yellow-500/30">Neutral</Badge>;
 };
 
-const statusBadge = (s: string) => s === "Resolved"
-  ? <Badge className="bg-green-500/15 text-green-700 border-green-500/30">Resolved</Badge>
-  : <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30">Pending</Badge>;
+const statusBadge = (log: LogEntry) => {
+  const lifecycle = log.callLifecycleStatus || (log.status === "Resolved" ? "completed" : "pending");
+  if (lifecycle === "completed" && log.status === "Resolved") {
+    return <Badge className="bg-green-500/15 text-green-700 border-green-500/30">Completed</Badge>;
+  }
+  if (lifecycle === "failed") {
+    return <Badge className="bg-red-500/15 text-red-700 border-red-500/30">Failed</Badge>;
+  }
+  return <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 capitalize">{lifecycle.replace(/_/g, " ")}</Badge>;
+};
 
 export default function AILogs() {
+  const navigate = useNavigate();
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [search, setSearch] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -76,35 +60,78 @@ export default function AILogs() {
   const [page, setPage] = useState(1);
   const perPage = 10;
 
-  const debounceTimer = useState<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setError(null);
+    aiApi
+      .getLogs(100)
+      .then((res) => {
+        if (!mounted) return;
+        setLogs(Array.isArray(res?.logs) ? res.logs : []);
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        setError(err?.response?.data?.error || err?.message || "Failed to load AI call logs");
+        setLogs([]);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [reloadKey]);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const handleSearch = useCallback((val: string) => {
     setSearch(val);
-    if (debounceTimer[0]) clearTimeout(debounceTimer[0]);
-    debounceTimer[0] = setTimeout(() => setDebouncedSearch(val), 300);
+    setPage(1);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(val), 300);
   }, []);
 
   const filtered = useMemo(() => {
-    return dummyLogs.filter((l) => {
+    return logs.filter((l) => {
       const q = debouncedSearch.toLowerCase();
-      const matchSearch = !q || l.customer.toLowerCase().includes(q) || l.phone.includes(q) || l.hpl.toLowerCase().includes(q) || l.vehicle.toLowerCase().includes(q);
+      const matchSearch =
+        !q ||
+        l.customer.toLowerCase().includes(q) ||
+        l.phone.includes(q) ||
+        l.hpl.toLowerCase().includes(q) ||
+        l.vehicle.toLowerCase().includes(q);
       const matchSentiment = sentimentFilter === "all" || l.sentiment === sentimentFilter;
       const matchStatus = statusFilter === "all" || l.status === statusFilter;
       return matchSearch && matchSentiment && matchStatus;
     });
-  }, [debouncedSearch, sentimentFilter, statusFilter]);
+  }, [logs, debouncedSearch, sentimentFilter, statusFilter]);
 
   const paginated = filtered.slice((page - 1) * perPage, page * perPage);
   const totalPages = Math.ceil(filtered.length / perPage);
 
+  const openCallDetails = (log: LogEntry) => {
+    const id = log.callId || log.logUuid;
+    if (id) {
+      navigate(`/ai/calls/${encodeURIComponent(id)}`);
+    } else {
+      setSelectedLog(log);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-          <MessageSquare className="h-7 w-7 text-primary" /> Conversation Logs
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">Review all AI-customer interactions</p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <MessageSquare className="h-7 w-7 text-primary" /> Conversation Logs
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">Review all verified AI-customer call interactions</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
+          <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+        </Button>
       </motion.div>
 
       {/* Filters */}
@@ -115,10 +142,15 @@ export default function AILogs() {
               <div className="flex-1 min-w-[200px]">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search customer, phone, HPL, vehicle..." value={search} onChange={(e) => handleSearch(e.target.value)} className="pl-9" />
+                  <Input
+                    placeholder="Search customer, phone, HPL, vehicle..."
+                    value={search}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    className="pl-9"
+                  />
                 </div>
               </div>
-              <Select value={sentimentFilter} onValueChange={setSentimentFilter}>
+              <Select value={sentimentFilter} onValueChange={(v) => { setSentimentFilter(v); setPage(1); }}>
                 <SelectTrigger className="w-[140px]"><SelectValue placeholder="Sentiment" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Sentiment</SelectItem>
@@ -127,7 +159,7 @@ export default function AILogs() {
                   <SelectItem value="negative">Negative</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
                 <SelectTrigger className="w-[130px]"><SelectValue placeholder="Status" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
@@ -135,7 +167,17 @@ export default function AILogs() {
                   <SelectItem value="Pending">Pending</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="sm" onClick={() => { setSearch(""); setDebouncedSearch(""); setSentimentFilter("all"); setStatusFilter("all"); }}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setDebouncedSearch("");
+                  setSentimentFilter("all");
+                  setStatusFilter("all");
+                  setPage(1);
+                }}
+              >
                 <Filter className="h-4 w-4 mr-1" /> Reset
               </Button>
             </div>
@@ -157,37 +199,86 @@ export default function AILogs() {
                     <TableHead>Vehicle</TableHead>
                     <TableHead>Date/Time</TableHead>
                     <TableHead>Sentiment</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Lifecycle</TableHead>
+                    <TableHead>Outcome</TableHead>
                     <TableHead>Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginated.map((log) => (
-                    <TableRow key={log.id} className="hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => setSelectedLog(log)}>
+                  {loading && (
+                    <TableSkeletonRows columns={9} rows={6} />
+                  )}
+                  {!loading && error && (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-center py-10 text-red-600">
+                        {error}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {!loading && !error && paginated.map((log) => (
+                    <TableRow
+                      key={log.logUuid || log.id}
+                      className="hover:bg-muted/50 cursor-pointer transition-colors"
+                      onClick={() => openCallDetails(log)}
+                    >
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           {log.customer}
                           {log.tags.includes("Recovery Needed") && <AlertTriangle className="h-4 w-4 text-red-500" />}
                         </div>
                       </TableCell>
-                      <TableCell>{log.phone}</TableCell>
+                      <TableCell>{log.phone || "—"}</TableCell>
                       <TableCell>{log.hpl}</TableCell>
                       <TableCell>{log.vehicle}</TableCell>
                       <TableCell className="text-sm">{log.date}</TableCell>
                       <TableCell>{sentimentBadge(log.sentiment)}</TableCell>
-                      <TableCell>{statusBadge(log.status)}</TableCell>
-                      <TableCell><Button variant="ghost" size="sm">View</Button></TableCell>
+                      <TableCell>{statusBadge(log)}</TableCell>
+                      <TableCell className="text-xs capitalize text-muted-foreground">
+                        {(log.callOutcome || "no_response").replace(/_/g, " ")}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedLog(log);
+                            }}
+                          >
+                            Transcript
+                          </Button>
+                          {(log.callId || log.logUuid) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openCallDetails(log);
+                              }}
+                            >
+                              Details <ExternalLink className="h-3 w-3 ml-1" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
-                  {paginated.length === 0 && (
-                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No logs found</TableCell></TableRow>
+                  {!loading && !error && paginated.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
+                        No AI call logs recorded yet for this finance company
+                      </TableCell>
+                    </TableRow>
                   )}
                 </TableBody>
               </Table>
             </div>
             {totalPages > 1 && (
               <div className="flex items-center justify-between p-4 border-t">
-                <p className="text-sm text-muted-foreground">Showing {(page - 1) * perPage + 1}-{Math.min(page * perPage, filtered.length)} of {filtered.length}</p>
+                <p className="text-sm text-muted-foreground">
+                  Showing {(page - 1) * perPage + 1}-{Math.min(page * perPage, filtered.length)} of {filtered.length}
+                </p>
                 <div className="flex gap-1">
                   <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(page - 1)}>Prev</Button>
                   <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(page + 1)}>Next</Button>
@@ -198,12 +289,23 @@ export default function AILogs() {
         </Card>
       </motion.div>
 
-      {/* Chat Detail Modal */}
+      {/* Quick Transcript Modal */}
       <AnimatePresence>
         {selectedLog && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSelectedLog(null)}>
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-card rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-              {/* Header */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 backdrop-blur-[1px] bg-black/25 z-50 flex items-center justify-center p-4"
+            onClick={() => setSelectedLog(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-card rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="p-4 border-b flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold text-foreground">{selectedLog.customer}</h3>
@@ -211,30 +313,49 @@ export default function AILogs() {
                 </div>
                 <div className="flex items-center gap-2">
                   {sentimentBadge(selectedLog.sentiment)}
+                  {(selectedLog.callId || selectedLog.logUuid) && (
+                    <Button size="sm" variant="outline" onClick={() => openCallDetails(selectedLog)}>
+                      Full Details <ExternalLink className="h-3 w-3 ml-1" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="sm" onClick={() => setSelectedLog(null)}><X className="h-4 w-4" /></Button>
                 </div>
               </div>
 
-              {/* Tags */}
+              {selectedLog.summaryText && (
+                <div className="px-4 pt-3">
+                  <div className="p-3 rounded-lg bg-muted/40 text-xs text-foreground">
+                    <span className="font-semibold">Summary: </span>{selectedLog.summaryText}
+                  </div>
+                </div>
+              )}
+
               <div className="px-4 pt-3 flex gap-2 flex-wrap">
                 {selectedLog.tags.map((tag) => (
-                  <Badge key={tag} variant="outline" className="text-xs"><Tag className="h-3 w-3 mr-1" />{tag}</Badge>
+                  <Badge key={tag} variant="outline" className="text-xs capitalize">
+                    <Tag className="h-3 w-3 mr-1" />{tag.replace(/_/g, " ")}
+                  </Badge>
                 ))}
               </div>
 
-              {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {selectedLog.messages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === "customer" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${msg.role === "ai" ? "bg-primary/10 text-foreground rounded-bl-sm" : "bg-muted text-foreground rounded-br-sm"}`}>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        {msg.role === "ai" ? <Bot className="h-3.5 w-3.5 text-primary" /> : <User className="h-3.5 w-3.5 text-muted-foreground" />}
-                        <span className="text-[10px] text-muted-foreground">{msg.time}</span>
+                {selectedLog.messages.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-6">
+                    No transcript turns recorded for this call attempt.
+                  </p>
+                ) : (
+                  selectedLog.messages.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === "customer" ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${msg.role === "ai" ? "bg-primary/10 text-foreground rounded-bl-sm" : "bg-muted text-foreground rounded-br-sm"}`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          {msg.role === "ai" ? <Bot className="h-3.5 w-3.5 text-primary" /> : <User className="h-3.5 w-3.5 text-muted-foreground" />}
+                          <span className="text-[10px] text-muted-foreground">{msg.time}</span>
+                        </div>
+                        {msg.text}
                       </div>
-                      {msg.text}
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </motion.div>
           </motion.div>

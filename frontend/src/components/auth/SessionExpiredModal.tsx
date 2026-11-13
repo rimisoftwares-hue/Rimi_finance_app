@@ -47,7 +47,7 @@ export default function SessionExpiredModal() {
   if (!isVisible || !data) return null;
 
   return (
-    <div className="fixed inset-0 bg-foreground/60 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 backdrop-blur-[1px] bg-black/25 flex items-center justify-center z-[100] p-4">
       <div className="bg-card rounded-2xl shadow-2xl max-w-md w-full border border-border overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Header gradient */}
         <div

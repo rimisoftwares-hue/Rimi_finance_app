@@ -43,6 +43,8 @@ import {
   StaffLoginReportKpis,
 } from "../../types/staffLoginReport";
 import { fetchStaffLoginReport } from "../../api/staffLoginReportApi";
+import { useClientPagination } from "../../hooks/useClientPagination";
+import { TablePagination, TableSkeletonRows } from "../common";
 
 function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds || 0));
@@ -141,6 +143,7 @@ export default function StaffLoginReport() {
         description: "From Date cannot be later than To Date.",
         variant: "destructive",
       });
+      setIsLoading(false);
       return;
     }
 
@@ -189,7 +192,9 @@ export default function StaffLoginReport() {
         variant: "destructive",
       });
     } finally {
-      setIsLoading(false);
+      if (!controller.signal.aborted) {
+        setIsLoading(false);
+      }
     }
   }, [dateFromStr, dateToStr, roleFilter, debouncedSearch, fromDate, toDate, toast]);
 
@@ -215,6 +220,18 @@ export default function StaffLoginReport() {
   const hasFinanceColumn = useMemo(() => {
     return items.some((item) => item.financeName !== undefined);
   }, [items]);
+
+  const {
+    paginatedItems: pagedItems,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(items, { initialPageSize: 15 });
 
   // CSV Export across all filtered records (up to 5000 max)
   const handleExportCsv = async () => {
@@ -411,7 +428,7 @@ export default function StaffLoginReport() {
               />
             </div>
             <Select value={roleFilter} onValueChange={setRoleFilter}>
-              <SelectTrigger>
+              <SelectTrigger className="h-9 min-w-[130px] bg-background border-input">
                 <SelectValue placeholder="Role" />
               </SelectTrigger>
               <SelectContent>
@@ -480,15 +497,7 @@ export default function StaffLoginReport() {
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={hasFinanceColumn ? 11 : 10}
-                      className="p-12 text-center text-muted-foreground"
-                    >
-                      <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-primary" />
-                      Loading staff login report...
-                    </TableCell>
-                  </TableRow>
+                  <TableSkeletonRows columns={hasFinanceColumn ? 11 : 10} rows={6} />
                 ) : items.length === 0 ? (
                   <TableRow>
                     <TableCell
@@ -499,7 +508,7 @@ export default function StaffLoginReport() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  items.map((entry) => {
+                  pagedItems.map((entry) => {
                     const latestLoginTime =
                       entry.timeline && entry.timeline.length > 0
                         ? entry.timeline[entry.timeline.length - 1].login
@@ -703,10 +712,19 @@ export default function StaffLoginReport() {
               </TableBody>
             </Table>
           </div>
-          {!isLoading && items.length > 0 && (
-            <div className="p-3 text-xs text-muted-foreground text-center border-t border-border">
-              Showing {items.length} of {total} {total === 1 ? "record" : "records"}
-            </div>
+          {!isLoading && totalItems > 0 && (
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              totalItems={total || totalItems}
+              startIndex={startIndex}
+              endIndex={endIndex}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              pageSizeOptions={[15, 25, 50]}
+              disabled={isLoading}
+            />
           )}
         </CardContent>
       </Card>

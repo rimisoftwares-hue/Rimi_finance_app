@@ -11,7 +11,7 @@ import { Button } from "./ui/button";
 import { Progress } from "./ui/progress";
 import { Skeleton } from "./ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
-import { getRiskBadgeVariant, mockLocationHistory } from "./data/customerLocatorData";
+import { getRiskBadgeVariant } from "./data/customerLocatorData";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import {
   fetchCustomerDeepView, getRiskErrorMessage, isRiskCustomerId,
@@ -103,12 +103,14 @@ export function CustomerDeepView({ customer, open, onClose }: Props) {
   const loan = data?.loan ?? null;
   const risk = data?.risk;
   const monthlyPayments = data?.monthlyPayments ?? [];
-  const locations = mockLocationHistory.filter((l) => l.customerId === customer.id);
+  const locations = data?.locationHistory ?? [];
   const paidPct = loan && loan.totalLoan > 0 ? Math.min(100, Math.round((loan.paidAmount / loan.totalLoan) * 100)) : 0;
   const overdueDays = loan?.overdueDays ?? 0;
 
-  const openMaps = (lat: number, lng: number) =>
+  const openMaps = (lat: number | null | undefined, lng: number | null | undefined) => {
+    if (lat == null || lng == null) return;
     window.open(`https://www.google.com/maps?q=${lat},${lng}`, "_blank");
+  };
 
   const riskLevel: RiskLevel | undefined = risk?.riskLevel ?? customer.riskLevel;
   const riskBadgeCls = riskLevel ? getRiskBadgeVariant(riskLevel) : "";
@@ -178,7 +180,7 @@ export function CustomerDeepView({ customer, open, onClose }: Props) {
                   { label: "Phone", value: c.phone ?? "—", icon: Phone },
                   { label: "Finance", value: c.financeName, icon: CreditCard },
                   { label: "Vehicle", value: c.vehicleNumber ?? "—", icon: MapPin },
-                  { label: "Distance", value: `${c.distanceFromHome} KM`, icon: Navigation },
+                  { label: "Distance", value: c.distanceFromHome != null ? `${c.distanceFromHome} KM` : "—", icon: Navigation },
                   { label: "Overdue", value: formatINR(loan?.overdueAmount), icon: AlertTriangle },
                   { label: "Overdue Days", value: `${overdueDays} days`, icon: Calendar },
                 ].map((item) => (
@@ -226,32 +228,37 @@ export function CustomerDeepView({ customer, open, onClose }: Props) {
                   <p className="text-sm font-medium">Current Location</p>
                 </div>
                 <p className="text-sm text-muted-foreground">{c.currentLocation.address}</p>
-                <Button size="sm" variant="link" className="p-0 h-auto text-xs gap-1" onClick={() => openMaps(c.currentLocation.latitude, c.currentLocation.longitude)}>
-                  Open in Maps <ExternalLink className="h-3 w-3" />
-                </Button>
+                {c.currentLocation.latitude != null && c.currentLocation.longitude != null && (
+                  <Button size="sm" variant="link" className="p-0 h-auto text-xs gap-1" onClick={() => openMaps(c.currentLocation.latitude, c.currentLocation.longitude)}>
+                    Open in Maps <ExternalLink className="h-3 w-3" />
+                  </Button>
+                )}
               </div>
             </TabsContent>
 
             {/* TAB 2: Location History */}
             <TabsContent value="location" className="space-y-3">
-              {(locations.length > 0 ? locations : mockLocationHistory).map((loc) => (
-                <motion.div key={loc.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
-                  className="flex gap-3 p-3 rounded-xl border border-border bg-card hover:shadow-sm transition-shadow cursor-pointer"
-                  onClick={() => openMaps(loc.latitude, loc.longitude)}>
-                  <div className={`mt-1 h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${loc.isHomeLocation ? "bg-green-100 text-green-600" : loc.distanceFromHome > 25 ? "bg-red-100 text-red-600" : "bg-yellow-100 text-yellow-700"}`}>
-                    {loc.isHomeLocation ? <Home className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{loc.address}</p>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{loc.timestamp}</span>
-                      <span>{loc.distanceFromHome} KM</span>
-                      {loc.durationStayed && <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{loc.durationStayed}</span>}
+              {locations.length > 0 ? (
+                locations.map((loc) => (
+                  <motion.div key={loc.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
+                    className="flex gap-3 p-3 rounded-xl border border-border bg-card hover:shadow-sm transition-shadow cursor-pointer"
+                    onClick={() => openMaps(loc.latitude, loc.longitude)}>
+                    <div className={`mt-1 h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${loc.isHomeLocation ? "bg-green-100 text-green-600" : (loc.distanceFromHome ?? 0) > 25 ? "bg-red-100 text-red-600" : "bg-yellow-100 text-yellow-700"}`}>
+                      {loc.isHomeLocation ? <Home className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}
                     </div>
-                  </div>
-                  <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
-                </motion.div>
-              ))}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{loc.address}</p>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{loc.timestamp}</span>
+                        {loc.distanceFromHome != null && <span>{loc.distanceFromHome} KM</span>}
+                      </div>
+                    </div>
+                    <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
+                  </motion.div>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-8">No live GPS history reported for this customer yet</p>
+              )}
             </TabsContent>
 
             {/* TAB 3: Payment */}
@@ -361,7 +368,11 @@ export function CustomerDeepView({ customer, open, onClose }: Props) {
                   value: risk.breakdown.creditScoreRisk,
                   desc: `On-time payments ${Math.round(risk.metrics.onTimePaymentRatio * 100)}% · Broken promises ${risk.metrics.brokenPromises} · Seizure ${risk.metrics.seizureHistory ? "Yes" : "No"}`,
                 },
-                { label: "Distance Risk (Mock)", value: risk.breakdown.distanceRisk, desc: `${c.distanceFromHome} KM from home` },
+                {
+                  label: "Location Distance Risk",
+                  value: risk.breakdown.distanceRisk,
+                  desc: c.distanceFromHome != null ? `${c.distanceFromHome} KM from home` : "Live GPS not reported",
+                },
               ].map((r) => (
                 <div key={r.label} className="p-3 rounded-xl border border-border bg-card">
                   <div className="flex justify-between mb-1.5">

@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle, Clock, Download, Printer, Copy, Search } fr
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { DatePicker } from "../ui/date-picker";
+import { TableSkeletonRows } from "../common";
 import apiClient from "../../api/apiClient";
 import { useToast } from "../../hooks/use-toast";
 
@@ -249,9 +250,7 @@ export default function Compliance() {
             </thead>
             <tbody>
               {loading ? (
-                <tr className="border-b border-border/50">
-                  <td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading compliance records...</td>
-                </tr>
+                <TableSkeletonRows columns={6} rows={6} />
               ) : error ? (
                 <tr className="border-b border-border/50">
                   <td colSpan={6} className="px-4 py-6 text-center text-sm text-expense">{error}</td>

@@ -10,6 +10,14 @@ import { useAuth } from '../contexts/AuthContext';
 import apiClient from '../api/apiClient';
 import { useNavigate } from 'react-router-dom';
 import { DatePicker } from '../components/ui/date-picker';
+import { AppSelect } from '../components/common/AppSelect';
+
+const AGENT_MGMT_ROLE_OPTIONS = [
+  { value: 'owner', label: 'Owner' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'agent', label: 'Agent' },
+  { value: 'staff', label: 'Staff' },
+];
 
 const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3004').replace(/\/+$/, '');
 
@@ -21,7 +29,7 @@ interface UserData {
   username: string;
   phone_no: string;
   role: 'owner' | 'admin' | 'agent' | 'staff';
-  allowed_companies: number[];
+  allowed_companies: (string | number)[];
   login_time_from: string | null;
   login_time_to: string | null;
   is_active: boolean;
@@ -32,7 +40,7 @@ interface UserData {
 
 interface StaffDetails {
   id: string;
-  finance_id: number;
+  finance_id: string | number;
   staff_name: string;
   staff_code: string;
   father_spouse_name: string;
@@ -44,12 +52,12 @@ interface StaffDetails {
 
 // Update the FinanceCompany interface to match your actual data structure
 interface FinanceCompany {
-  id: number;
+  id: string | number;
   name: string;
-  owner_id: number;
-  phone_number: string | string[]; // Changed to support both string and array
+  owner_id?: string | number;
+  phone_number?: string | string[]; // Changed to support both string and array
   phone_numbers?: string[]; // Optional for compatibility
-  address: string;
+  address?: string;
 }
 
 // Create a UserDetailModal component
@@ -58,9 +66,9 @@ const UserDetailModal = ({ user, onClose, financeCompanies }: {
   onClose: () => void,
   financeCompanies: FinanceCompany[]
 }) => {
-  const getCompanyNames = (companyIds: number[]) => {
+  const getCompanyNames = (companyIds: (string | number)[]) => {
     return companyIds.map(id => {
-      const company = financeCompanies.find(c => c.id === id);
+      const company = financeCompanies.find(c => String(c.id) === String(id));
       return company ? company.name : `Company ${id}`;
     });
   };
@@ -72,7 +80,7 @@ const UserDetailModal = ({ user, onClose, financeCompanies }: {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 backdrop-blur-[1px] bg-black/25 flex items-center justify-center z-50 p-4">
       <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex justify-between items-center rounded-t-2xl">
           <div>
@@ -317,7 +325,7 @@ const AgentManagement = () => {
     phone_no: '',
     password: '',
     role: 'agent' as 'owner' | 'admin' | 'agent' | 'staff',
-    allowed_companies: [] as number[],
+    allowed_companies: [] as (string | number)[],
     user_id: '',
     login_time_from: '',
     login_time_to: '',
@@ -386,11 +394,17 @@ const AgentManagement = () => {
         if (financeList && financeList.length > 0) {
           setFinanceCompanies(financeList.map(f => ({
             id: f.id,
-            name: f.name || f.name,
+            name: f.name || f.finance_name || '',
             owner_id: f.owner_id,
-            phone_number: Array.isArray(f.phone_numbers) ? f.phone_numbers[0] : f.phone_numbers,
-            phone_numbers: Array.isArray(f.phone_numbers) ? f.phone_numbers : [f.phone_numbers],
-            address: f.address
+            phone_number: Array.isArray(f.phone_numbers)
+              ? f.phone_numbers[0]
+              : f.phone || '',
+            phone_numbers: Array.isArray(f.phone_numbers)
+              ? f.phone_numbers
+              : f.phone
+                ? [f.phone]
+                : [],
+            address: f.address || ''
           })));
 
           // Set default finance_id for new user form
@@ -481,7 +495,7 @@ const AgentManagement = () => {
   };
 
   // Handle individual company selection
-  const handleCompanyToggle = (companyId: number) => {
+  const handleCompanyToggle = (companyId: string | number) => {
     setSelectedAllCompanies(false);
     const newCompanies = newUser.allowed_companies.includes(companyId)
       ? newUser.allowed_companies.filter(id => id !== companyId)
@@ -1236,7 +1250,7 @@ const AgentManagement = () => {
 
       {/* Add User Modal with Login Time Fields */}
       {showAddForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 backdrop-blur-[1px] bg-black/25 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex justify-between items-center rounded-t-2xl">
               <div>
@@ -1375,20 +1389,14 @@ const AgentManagement = () => {
                         <Briefcase className="h-4 w-4 inline-block mr-1 text-gray-500" />
                         Role *
                       </label>
-                      <select
+                      <AppSelect
                         value={newUser.role}
-                        onChange={(e) => {
-                          const selectedRole = e.target.value as any;
-                          handleRoleChange(selectedRole);
+                        onValueChange={(val) => {
+                          handleRoleChange(val as any);
                         }}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 transition-all bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                        required
-                      >
-                        <option value="owner">Owner</option>
-                        <option value="admin">Admin</option>
-                        <option value="agent">Agent</option>
-                        <option value="staff">Staff</option>
-                      </select>
+                        options={AGENT_MGMT_ROLE_OPTIONS}
+                        triggerClassName="w-full h-[46px] px-4 py-3 rounded-lg text-sm"
+                      />
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         {newUser.role === 'owner' ? 'Full system access' :
                           newUser.role === 'admin' ? 'Manage all except owners' :
@@ -1403,19 +1411,19 @@ const AgentManagement = () => {
                           <Building className="h-4 w-4 inline-block mr-1 text-gray-500" />
                           Assign to Finance Company *
                         </label>
-                        <select
-                          value={newUser.finance_id}
-                          onChange={(e) => setNewUser({ ...newUser, finance_id: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:focus:ring-blue-400 dark:focus:border-blue-400 transition-all bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                          required
-                        >
-                          <option value="">Select Finance Company</option>
-                          {financeCompanies.map(company => (
-                            <option key={company.id} value={company.id}>
-                              {company.name} - {company.address}
-                            </option>
-                          ))}
-                        </select>
+                        <AppSelect
+                          value={String(newUser.finance_id ?? '')}
+                          onValueChange={(val) => setNewUser({ ...newUser, finance_id: val })}
+                          options={[
+                            { value: '', label: 'Select Finance Company' },
+                            ...financeCompanies.map((company) => ({
+                              value: String(company.id),
+                              label: `${company.name} - ${company.address}`,
+                            })),
+                          ]}
+                          placeholder="Select Finance Company"
+                          triggerClassName="w-full h-[46px] px-4 py-3 rounded-lg text-sm"
+                        />
                         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           This will be the user's default finance company
                         </p>

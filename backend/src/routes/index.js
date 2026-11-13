@@ -80,6 +80,14 @@ router.use('/ocr', enhancedCheckFinance, ocrRoutes);
 const riskRoutes = require('../modules/risk/risk.routes');
 router.use('/risk', enhancedCheckFinance, riskRoutes);
 
+// ─── AutoFinex Voice AI (Dashboard, Settings, Logs, Insights, Lead Queue) ─────
+const aiRoutes = require('../modules/ai/ai.routes');
+router.use('/ai', enhancedCheckFinance, aiRoutes);
+
+// ─── AutoFinex Internal Voice AI Write Plane (HMAC-SHA256 Service-to-Service) ─
+const aiInternalRoutes = require('../modules/ai/ai.internal.routes');
+router.use('/internal/voice-ai', aiInternalRoutes);
+
 // ─── Invitations (Direct Invites & Shareable Invite Codes) ────────────────────
 const invitationRoutes = require('../modules/invitations/invitation.routes');
 router.use('/invitations', invitationRoutes);

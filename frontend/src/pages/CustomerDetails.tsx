@@ -264,7 +264,8 @@ const CustomerDetails = () => {
         hand_loan_remark: p.hand_loan_remark || '',
         remarks: p.remarks || '',
         status: p.status || 'pending',
-        sub_dues: p.sub_dues || [],
+        payment_status: p.payment_status || 'active',
+        sub_dues: p.sub_dues || p.sub_due || [],
       }));
 
       setPayments(formatted);
@@ -288,19 +289,37 @@ const CustomerDetails = () => {
     }
   };
 
-  // ─── Totals ──────────────────────────────────────────────────────────────
+  const isPaymentCancelled = (p: any) =>
+    String(p?.payment_status || 'active').toLowerCase() === 'cancelled' ||
+    String(p?.status || 'paid').toLowerCase() === 'cancelled';
+
+  // ─── Totals (excludes cancelled receipts & includes active sub_due top-ups) ─
   const totalPaidAmount = useMemo(
-    () => payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0),
+    () =>
+      payments.reduce((sum, p: any) => {
+        if (isPaymentCancelled(p)) return sum;
+        const subDueSum = Array.isArray(p.sub_dues)
+          ? p.sub_dues.reduce((s: number, sd: any) => {
+              if (String(sd?.status || 'active').toLowerCase() === 'cancelled') return s;
+              return s + (Number(sd?.paid_amount ?? sd?.amount) || 0);
+            }, 0)
+          : 0;
+        return sum + (Number(p.amount) || 0) + subDueSum;
+      }, 0),
     [payments]
   );
   const totalPenalty = useMemo(
-    () => payments.reduce((sum, p) => sum + (Number(p.penalty) || 0), 0),
+    () =>
+      payments.reduce((sum, p: any) => {
+        if (isPaymentCancelled(p)) return sum;
+        return sum + (Number(p.penalty) || 0);
+      }, 0),
     [payments]
   );
 
   const calculatePenaltyDays = (index: number) => {
-    const payment = payments[index];
-    if (!payment?.dueDate || !payment?.paymentDate) return 0;
+    const payment: any = payments[index];
+    if (!payment || isPaymentCancelled(payment) || !payment?.dueDate || !payment?.paymentDate) return 0;
     const due = new Date(payment.dueDate);
     const paid = new Date(payment.paymentDate);
     if (paid > due && payment.amount > 0) {
@@ -314,21 +333,26 @@ const CustomerDetails = () => {
     [payments]
   );
 
-  // ─── Next due date (+1 month from last due) ───────────────────────────────
+  // ─── Next due date (+1 clamped calendar month from anchor / last valid due) ─
   const calculateNextDueDate = () => {
-    const hpDate = loan?.hp_date || loan?.hpDate;
-    if (!hpDate) return new Date().toISOString().split('T')[0];
+    const anchorDate = loan?.due_date || loan?.dueDate || loan?.hp_date || loan?.hpDate;
+    if (!anchorDate) return new Date().toISOString().split('T')[0];
     const lastPayment = payments
-      .filter(p => p.dueDate && p.dueDate !== '-')
+      .filter((p: any) => !isPaymentCancelled(p) && p.dueDate && p.dueDate !== '-')
       .sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime())[0];
-    const baseDate = lastPayment?.dueDate || hpDate;
+    const baseDate = String(lastPayment?.dueDate || anchorDate).split('T')[0];
     const parts = baseDate.split('-');
     let year = parseInt(parts[0], 10);
     let month = parseInt(parts[1], 10);
     const day = parseInt(parts[2], 10);
+    if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) {
+      return new Date().toISOString().split('T')[0];
+    }
     month += 1;
     if (month > 12) { month = 1; year += 1; }
-    return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+    const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const clampedDay = Math.min(day, maxDay);
+    return `${year}-${month.toString().padStart(2, '0')}-${clampedDay.toString().padStart(2, '0')}`;
   };
 
   const calculateFormPenaltyDays = (dueDate: string, paymentDate: string) => {

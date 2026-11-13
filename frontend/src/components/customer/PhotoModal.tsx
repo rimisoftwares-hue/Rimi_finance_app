@@ -1,5 +1,4 @@
-import { X } from 'lucide-react';
-import { Dialog, DialogContent } from '../ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog';
 
 interface PhotoModalProps {
   isOpen: boolean;
@@ -10,14 +9,10 @@ interface PhotoModalProps {
 
 const PhotoModal = ({ isOpen, onClose, src, alt }: PhotoModalProps) => {
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-3xl p-2 bg-card border-border">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 z-10 p-2 rounded-full bg-background/80 backdrop-blur-sm text-foreground hover:bg-background transition-colors"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        <DialogTitle className="sr-only">{alt || 'Customer Photo'}</DialogTitle>
+        <DialogDescription className="sr-only">Preview of {alt || 'Customer Photo'}</DialogDescription>
         <img
           src={src}
           alt={alt}

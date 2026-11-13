@@ -15,7 +15,22 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { AppSelect } from "@/components/common/AppSelect";
 import { toast } from "sonner";
+
+const LOAN_REQ_STATUS_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "Pending", label: "Pending" },
+  { value: "Approved", label: "Approved" },
+  { value: "Rejected", label: "Rejected" },
+  { value: "Hold", label: "Hold" },
+];
+
+const LOAN_REQ_VEHICLE_TYPE_OPTIONS = [
+  { value: "", label: "All Types" },
+  { value: "Two Wheeler", label: "Two Wheeler" },
+  { value: "Four Wheeler", label: "Four Wheeler" },
+];
 
 /* ─────────────────────────────── Mock data ─────────────────────────────── */
 
@@ -345,14 +360,18 @@ function TermsEditor({ value, onChange }: { value: string; onChange: (v: string)
         </label>
         <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={handleDownload}><FileDown className="h-3.5 w-3.5" /> Download</Button>
         <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={saveTemplate}><Save className="h-3.5 w-3.5" /> Save Template</Button>
-        <select
-          className="input-field text-xs py-1 h-8 ml-auto"
-          onChange={e => { const t = savedTemplates.find(t => t.name === e.target.value); if (t) onChange(t.content); }}
-          defaultValue=""
-        >
-          <option value="" disabled>Load template…</option>
-          {savedTemplates.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
-        </select>
+        <AppSelect
+          size="sm"
+          value=""
+          onValueChange={val => {
+            const t = savedTemplates.find(t => t.name === val);
+            if (t) onChange(t.content);
+          }}
+          options={savedTemplates.map(t => ({ value: t.name, label: t.name }))}
+          placeholder="Load template…"
+          className="ml-auto w-40"
+          triggerClassName="w-full"
+        />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <Textarea ref={ref} value={value} onChange={e => onChange(e.target.value)} className="font-mono text-xs min-h-[380px] resize-y" />
@@ -919,29 +938,49 @@ export default function LoanRequests() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-border">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Status</label>
-                  <select className="input-field text-sm py-2" value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value as any }))}>
-                    <option value="">All</option><option>Pending</option><option>Approved</option><option>Rejected</option><option>Hold</option>
-                  </select>
+                  <AppSelect
+                    value={filters.status}
+                    onValueChange={val => setFilters(f => ({ ...f, status: val as any }))}
+                    options={LOAN_REQ_STATUS_OPTIONS}
+                    placeholder="All"
+                    triggerClassName="w-full"
+                  />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Agent</label>
-                  <select className="input-field text-sm py-2" value={filters.agent} onChange={e => setFilters(f => ({ ...f, agent: e.target.value }))}>
-                    <option value="">All Agents</option>
-                    {uniq("agent").map(a => <option key={a}>{a}</option>)}
-                  </select>
+                  <AppSelect
+                    value={filters.agent}
+                    onValueChange={val => setFilters(f => ({ ...f, agent: val }))}
+                    options={[
+                      { value: "", label: "All Agents" },
+                      ...uniq("agent").map(a => ({ value: a, label: a })),
+                    ]}
+                    placeholder="All Agents"
+                    triggerClassName="w-full"
+                  />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Branch</label>
-                  <select className="input-field text-sm py-2" value={filters.branch} onChange={e => setFilters(f => ({ ...f, branch: e.target.value }))}>
-                    <option value="">All Branches</option>
-                    {uniq("branch").map(b => <option key={b}>{b}</option>)}
-                  </select>
+                  <AppSelect
+                    value={filters.branch}
+                    onValueChange={val => setFilters(f => ({ ...f, branch: val }))}
+                    options={[
+                      { value: "", label: "All Branches" },
+                      ...uniq("branch").map(b => ({ value: b, label: b })),
+                    ]}
+                    placeholder="All Branches"
+                    triggerClassName="w-full"
+                  />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Vehicle Type</label>
-                  <select className="input-field text-sm py-2" value={filters.vehicleType} onChange={e => setFilters(f => ({ ...f, vehicleType: e.target.value }))}>
-                    <option value="">All Types</option><option>Two Wheeler</option><option>Four Wheeler</option>
-                  </select>
+                  <AppSelect
+                    value={filters.vehicleType}
+                    onValueChange={val => setFilters(f => ({ ...f, vehicleType: val }))}
+                    options={LOAN_REQ_VEHICLE_TYPE_OPTIONS}
+                    placeholder="All Types"
+                    triggerClassName="w-full"
+                  />
                 </div>
               </div>
             </motion.div>

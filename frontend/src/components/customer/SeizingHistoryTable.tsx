@@ -15,6 +15,13 @@ import { Input } from '../ui/input';
 import { DatePicker } from '../ui/date-picker';
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
+import { AppSelect } from '../common/AppSelect';
+
+const SEIZING_STATUS_OPTIONS = [
+    { value: 'Pending', label: 'Pending' },
+    { value: 'Paid', label: 'Paid' },
+    { value: 'Cancelled', label: 'Cancelled' },
+];
 import {
     Dialog,
     DialogContent,
@@ -35,8 +42,9 @@ import {
 } from '../ui/alert-dialog';
 import { toast } from '../../hooks/use-toast';
 import { useAuth } from '../../contexts/AuthContext';
+import { API_ORIGIN } from '../../api/apiClient';
 
-const BASE_URL = `${import.meta.env.VITE_API_URL}`;
+const BASE_URL = API_ORIGIN;
 
 export interface SeizingRecord {
     id: number | string;
@@ -332,16 +340,13 @@ const SeizingHistoryTable = ({ records, customerId, onRefresh }: SeizingHistoryT
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">
                                 <Label htmlFor="ez_status">Status</Label>
-                                <select
+                                <AppSelect
                                     id="ez_status"
                                     value={editForm.status}
-                                    onChange={e => setEditForm(p => ({ ...p, status: e.target.value as any }))}
-                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                                >
-                                    <option value="Pending">Pending</option>
-                                    <option value="Paid">Paid</option>
-                                    <option value="Cancelled">Cancelled</option>
-                                </select>
+                                    onValueChange={val => setEditForm(p => ({ ...p, status: val as any }))}
+                                    options={SEIZING_STATUS_OPTIONS}
+                                    triggerClassName="w-full"
+                                />
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="ez_release">Release Date</Label>

@@ -4,7 +4,14 @@ import { Filter, ChevronDown, ChevronUp, RotateCcw, Search, Download, Printer, C
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { DatePicker } from "../ui/date-picker";
+import { AppSelect, TableSkeletonRows } from "../common";
 import apiClient from "../../api/apiClient";
+
+const DEAL_TYPE_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "Consulting", label: "Consulting" },
+  { value: "Finance", label: "Finance" },
+];
 import { useToast } from "../../hooks/use-toast";
 
 interface ChargeRecord {
@@ -251,7 +258,16 @@ export default function Charges() {
                 <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Street</label><Input list="charges-streets-list" className="text-sm" value={filters.street} onChange={e => handleFilter("street", e.target.value)} placeholder="Street..." /></div>
                 <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Village</label><Input list="charges-villages-list" className="text-sm" value={filters.village} onChange={e => handleFilter("village", e.target.value)} placeholder="Village..." /></div>
                 <div><label className="text-xs font-medium text-muted-foreground mb-1 block">City</label><Input list="charges-cities-list" className="text-sm" value={filters.city} onChange={e => handleFilter("city", e.target.value)} placeholder="City..." /></div>
-                <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Deal Type</label><select className="input-field text-sm py-2" value={filters.dealType} onChange={e => handleFilter("dealType", e.target.value)}><option value="">All</option><option value="Consulting">Consulting</option><option value="Finance">Finance</option></select></div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Deal Type</label>
+                  <AppSelect
+                    value={filters.dealType}
+                    onValueChange={val => handleFilter("dealType", val)}
+                    options={DEAL_TYPE_OPTIONS}
+                    placeholder="All"
+                    triggerClassName="w-full"
+                  />
+                </div>
               </div>
             </motion.div>
           )}
@@ -285,9 +301,7 @@ export default function Charges() {
             </thead>
             <tbody>
               {loading ? (
-                <tr className="border-b border-border/50">
-                  <td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading charges...</td>
-                </tr>
+                <TableSkeletonRows columns={7} rows={6} />
               ) : error ? (
                 <tr className="border-b border-border/50">
                   <td colSpan={7} className="px-4 py-6 text-center text-sm text-expense">{error}</td>

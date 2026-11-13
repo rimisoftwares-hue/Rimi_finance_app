@@ -7,6 +7,21 @@ import {
   Search, Phone, Car, CreditCard, MessageSquare, UserCheck, FileEdit 
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext'; // Import the auth context
+import { AppSelect } from './common/AppSelect';
+
+const PRIMARY_PAYMENT_MODE_OPTIONS = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'online', label: 'Online' },
+  { value: 'bank', label: 'Bank' },
+  { value: 'upi', label: 'UPI' },
+  { value: 'cheque', label: 'Cheque' },
+  { value: 'other', label: 'Other' },
+];
+
+const SECONDARY_PAYMENT_MODE_OPTIONS = [
+  { value: '', label: 'None' },
+  ...PRIMARY_PAYMENT_MODE_OPTIONS,
+];
 
 interface CrudModalProps {
   isOpen: boolean;
@@ -306,7 +321,7 @@ const CrudModal = ({ isOpen, onClose }: CrudModalProps) => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-[1px] bg-black/25 overflow-y-auto"
       onClick={onClose}
     >
       <div
@@ -515,29 +530,26 @@ const CrudModal = ({ isOpen, onClose }: CrudModalProps) => {
               <div>
                 <label className="input-label text-xs">Collected By *</label>
                 <div className="relative">
-                  <UserCheck className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <select
+                  <UserCheck className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground z-10 pointer-events-none" />
+                  <AppSelect
                     value={newPayment.collected_by}
-                    onChange={(e) =>
-                      setNewPayment({ ...newPayment, collected_by: e.target.value })
+                    onValueChange={(val) =>
+                      setNewPayment({ ...newPayment, collected_by: val })
                     }
-                    className="input-field text-sm py-2 pl-9"
-                    required
-                  >
-                    {/* Show current user as default */}
-                    <option value={user?.username || ''}>
-                      {user?.username} (Current User)
-                    </option>
-                    
-                    {/* Show all users for this finance (excluding current user) */}
-                    {allUsers
-                      .filter(u => u.username !== user?.username)
-                      .map(user => (
-                        <option key={user.id} value={user.username}>
-                          {user.username} ({user.role})
-                        </option>
-                      ))}
-                  </select>
+                    options={[
+                      {
+                        value: user?.username || '',
+                        label: `${user?.username} (Current User)`,
+                      },
+                      ...allUsers
+                        .filter((u) => u.username !== user?.username)
+                        .map((u) => ({
+                          value: u.username,
+                          label: `${u.username} (${u.role})`,
+                        })),
+                    ]}
+                    triggerClassName="w-full pl-9 text-sm"
+                  />
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Logged in as: <span className="font-medium">{user?.username}</span> ({user?.role})
@@ -556,46 +568,33 @@ const CrudModal = ({ isOpen, onClose }: CrudModalProps) => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="input-label text-xs">Primary Payment Mode *</label>
-                  <select
-                    required
+                  <AppSelect
                     value={newPayment.payment_mode}
-                    onChange={(e) =>
-                      setNewPayment({ 
-                        ...newPayment, 
-                        payment_mode: e.target.value as any 
+                    onValueChange={(val) =>
+                      setNewPayment({
+                        ...newPayment,
+                        payment_mode: val as any,
                       })
                     }
-                    className="input-field text-sm py-2"
-                  >
-                    <option value="cash">Cash</option>
-                    <option value="online">Online</option>
-                    <option value="bank">Bank</option>
-                    <option value="upi">UPI</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="other">Other</option>
-                  </select>
+                    options={PRIMARY_PAYMENT_MODE_OPTIONS}
+                    triggerClassName="w-full text-sm"
+                  />
                 </div>
                 
                 <div>
                   <label className="input-label text-xs">Secondary Payment Mode (Optional)</label>
-                  <select
+                  <AppSelect
                     value={newPayment.payment_mode_1}
-                    onChange={(e) =>
-                      setNewPayment({ 
-                        ...newPayment, 
-                        payment_mode_1: e.target.value as any 
+                    onValueChange={(val) =>
+                      setNewPayment({
+                        ...newPayment,
+                        payment_mode_1: val as any,
                       })
                     }
-                    className="input-field text-sm py-2"
-                  >
-                    <option value="">None</option>
-                    <option value="cash">Cash</option>
-                    <option value="online">Online</option>
-                    <option value="bank">Bank</option>
-                    <option value="upi">UPI</option>
-                    <option value="cheque">Cheque</option>
-                    <option value="other">Other</option>
-                  </select>
+                    options={SECONDARY_PAYMENT_MODE_OPTIONS}
+                    placeholder="None"
+                    triggerClassName="w-full text-sm"
+                  />
                 </div>
               </div>
 

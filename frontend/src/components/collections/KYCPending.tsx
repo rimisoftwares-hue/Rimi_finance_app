@@ -8,9 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   Phone,
-  Loader2,
   AlertCircle,
-  FileX,
   X,
   Camera,
   FileText,
@@ -25,10 +23,10 @@ import {
   Table as TableIcon,
   Car,
   IndianRupee,
-  BadgeCheck,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { AppSelect, TablePagination, TableSkeletonRows, CardGridSkeleton } from "../common";
 import {
   KycPendingItem,
   KycPendingType,
@@ -72,7 +70,7 @@ export default function KYCPending() {
   const [records, setRecords] = useState<KycPendingItem[]>([]);
   const [pagination, setPagination] = useState<KycPendingPagination>({
     page: 1,
-    limit: 12,
+    limit: 15,
     totalCount: 0,
     totalPages: 1,
     hasNextPage: false,
@@ -110,7 +108,7 @@ export default function KYCPending() {
     state: "",
     broker: "",
     page: 1,
-    limit: 12,
+    limit: 15,
   });
 
   // Debounce search
@@ -144,9 +142,9 @@ export default function KYCPending() {
       console.error("KYC Pending fetch error:", err);
       setError(
         err.response?.data?.error ||
-          err.response?.data?.message ||
-          err.message ||
-          "Network error while connecting to server"
+        err.response?.data?.message ||
+        err.message ||
+        "Network error while connecting to server"
       );
     } finally {
       setLoading(false);
@@ -179,7 +177,7 @@ export default function KYCPending() {
       state: "",
       broker: "",
       page: 1,
-      limit: 12,
+      limit: 15,
     });
   };
 
@@ -362,22 +360,20 @@ export default function KYCPending() {
           <div className="flex items-center bg-secondary/60 rounded-lg p-1 border border-border">
             <button
               onClick={() => setViewMode("grid")}
-              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
-                viewMode === "grid"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+              className={`p-1.5 rounded-md text-xs font-medium transition-all ${viewMode === "grid"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+                }`}
               title="Card Grid View"
             >
               <LayoutGrid className="w-4 h-4" />
             </button>
             <button
               onClick={() => setViewMode("table")}
-              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
-                viewMode === "table"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+              className={`p-1.5 rounded-md text-xs font-medium transition-all ${viewMode === "table"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+                }`}
               title="Data Table View"
             >
               <TableIcon className="w-4 h-4" />
@@ -522,11 +518,10 @@ export default function KYCPending() {
                 <button
                   key={pt}
                   onClick={() => handleFilterChange("pendingType", pt)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all border ${
-                    active
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                      : "bg-secondary/40 text-muted-foreground border-border hover:bg-secondary hover:text-foreground"
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all border ${active
+                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                    : "bg-secondary/40 text-muted-foreground border-border hover:bg-secondary hover:text-foreground"
+                    }`}
                 >
                   {pt}
                 </button>
@@ -582,16 +577,16 @@ export default function KYCPending() {
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">
                     Entity Type
                   </label>
-                  <select
-                    className="w-full text-xs h-9 px-2.5 rounded-md border border-input bg-background text-foreground"
+                  <AppSelect
                     value={filters.entityType || "All"}
-                    onChange={(e) => handleFilterChange("entityType", e.target.value)}
-                  >
-                    <option value="All">All Entities</option>
-                    <option value="Customer">Customer</option>
-                    <option value="Staff">Staff</option>
-                    <option value="Agent">Agent</option>
-                  </select>
+                    onValueChange={(val) => handleFilterChange("entityType", val)}
+                    options={[
+                      { value: "All", label: "All Entities" },
+                      { value: "Customer", label: "Customer" },
+                      { value: "Staff", label: "Staff" },
+                      { value: "Agent", label: "Agent" },
+                    ]}
+                  />
                 </div>
 
                 {/* Street AutoSuggest */}
@@ -640,12 +635,7 @@ export default function KYCPending() {
       </div>
 
       {/* Main Content Area: Loading / Error / Empty / Data */}
-      {loading ? (
-        <div className="py-20 flex flex-col items-center justify-center space-y-3">
-          <Loader2 className="w-8 h-8 text-primary animate-spin" />
-          <p className="text-sm text-muted-foreground">Loading KYC pending records from database...</p>
-        </div>
-      ) : error ? (
+      {!loading && error ? (
         <div className="py-16 px-4 flex flex-col items-center justify-center text-center space-y-3 bg-destructive/5 rounded-2xl border border-destructive/20">
           <AlertCircle className="w-10 h-10 text-destructive" />
           <h3 className="text-base font-semibold text-foreground">Failed to Load KYC Pending Records</h3>
@@ -654,7 +644,7 @@ export default function KYCPending() {
             <RotateCcw className="w-3.5 h-3.5" /> Retry Request
           </Button>
         </div>
-      ) : records.length === 0 ? (
+      ) : !loading && records.length === 0 ? (
         <div className="py-20 px-4 flex flex-col items-center justify-center text-center space-y-3 bg-secondary/20 rounded-2xl border border-dashed border-border">
           <CheckCircle2 className="w-12 h-12 text-emerald-500" />
           <h3 className="text-lg font-semibold text-foreground">
@@ -672,8 +662,11 @@ export default function KYCPending() {
           )}
         </div>
       ) : viewMode === "grid" ? (
-        /* Card Grid View */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        loading ? (
+          <CardGridSkeleton count={6} />
+        ) : (
+          /* Card Grid View */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {records.map((item, idx) => {
             return (
               <motion.div
@@ -711,9 +704,8 @@ export default function KYCPending() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
                         <span
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
-                            entityTypeStyles[item.entityType] || "bg-secondary text-foreground"
-                          }`}
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${entityTypeStyles[item.entityType] || "bg-secondary text-foreground"
+                            }`}
                         >
                           {item.entityType}
                         </span>
@@ -788,9 +780,8 @@ export default function KYCPending() {
                       return (
                         <span
                           key={p}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-                            badge?.bg || "bg-secondary text-foreground"
-                          }`}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${badge?.bg || "bg-secondary text-foreground"
+                            }`}
                         >
                           <Icon className="w-3 h-3" /> {badge?.text || p}
                         </span>
@@ -815,6 +806,7 @@ export default function KYCPending() {
             );
           })}
         </div>
+        )
       ) : (
         /* Table View */
         <div className="card-elevated rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
@@ -833,7 +825,10 @@ export default function KYCPending() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
-                {records.map((item) => (
+                {loading ? (
+                  <TableSkeletonRows columns={8} rows={6} />
+                ) : (
+                  records.map((item) => (
                   <tr
                     key={item.id}
                     onClick={() => handleRowClick(item)}
@@ -861,9 +856,8 @@ export default function KYCPending() {
                             {item.name}
                           </div>
                           <span
-                            className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-bold border mt-0.5 ${
-                              entityTypeStyles[item.entityType] || "bg-secondary text-foreground"
-                            }`}
+                            className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-bold border mt-0.5 ${entityTypeStyles[item.entityType] || "bg-secondary text-foreground"
+                              }`}
                           >
                             {item.entityType}
                           </span>
@@ -908,9 +902,8 @@ export default function KYCPending() {
                           return (
                             <span
                               key={p}
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                badge?.bg || "bg-secondary text-foreground"
-                              }`}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${badge?.bg || "bg-secondary text-foreground"
+                                }`}
                             >
                               <Icon className="w-2.5 h-2.5" /> {p}
                             </span>
@@ -960,7 +953,8 @@ export default function KYCPending() {
                       </Button>
                     </td>
                   </tr>
-                ))}
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -968,57 +962,25 @@ export default function KYCPending() {
       )}
 
       {/* Pagination Footer */}
-      {!loading && !error && records.length > 0 && pagination.totalPages > 1 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
-          <p className="text-xs text-muted-foreground">
-            Showing{" "}
-            <span className="font-semibold text-foreground">
-              {(pagination.page - 1) * pagination.limit + 1}
-            </span>{" "}
-            to{" "}
-            <span className="font-semibold text-foreground">
-              {Math.min(pagination.page * pagination.limit, pagination.totalCount)}
-            </span>{" "}
-            of <span className="font-semibold text-foreground">{pagination.totalCount}</span> pending records
-          </p>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!pagination.hasPrevPage}
-              onClick={() => handleFilterChange("page", String(pagination.page - 1))}
-              className="text-xs h-8 px-3"
-            >
-              Previous
-            </Button>
-
-            <div className="flex items-center gap-1">
-              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => handleFilterChange("page", String(p))}
-                  className={`w-8 h-8 rounded-lg text-xs font-medium transition-all ${
-                    pagination.page === p
-                      ? "bg-primary text-primary-foreground font-bold shadow-sm"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!pagination.hasNextPage}
-              onClick={() => handleFilterChange("page", String(pagination.page + 1))}
-              className="text-xs h-8 px-3"
-            >
-              Next
-            </Button>
-          </div>
+      {!loading && !error && records.length > 0 && (
+        <div className="rounded-xl border border-border overflow-hidden bg-card">
+          <TablePagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            pageSize={filters.limit || pagination.limit || 15}
+            totalItems={pagination.totalCount}
+            startIndex={(pagination.page - 1) * (filters.limit || pagination.limit || 15) + 1}
+            endIndex={Math.min(
+              pagination.page * (filters.limit || pagination.limit || 15),
+              pagination.totalCount
+            )}
+            onPageChange={(p) => setFilters((prev) => ({ ...prev, page: p }))}
+            onPageSizeChange={(limit) =>
+              setFilters((prev) => ({ ...prev, limit, page: 1 }))
+            }
+            pageSizeOptions={[15, 25, 50]}
+            disabled={loading}
+          />
         </div>
       )}
     </div>

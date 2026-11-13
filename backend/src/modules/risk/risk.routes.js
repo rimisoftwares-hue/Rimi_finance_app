@@ -37,6 +37,16 @@ router.get('/alerts', async (req, res) => {
   }
 });
 
+// 1b. GET /locator — unified live customer/agent locator, map coords, activity & insights
+router.get('/locator', async (req, res) => {
+  try {
+    const data = await service.getLocatorOverview(req.financeId, req.query);
+    res.json({ success: true, ...data });
+  } catch (err) {
+    sendError(res, err, 'Failed to fetch locator overview');
+  }
+});
+
 // 2. GET /customers/:customerId/deep-view — full risk profile for one customer
 router.get('/customers/:customerId/deep-view', async (req, res) => {
   try {

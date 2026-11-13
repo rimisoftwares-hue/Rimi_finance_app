@@ -4,6 +4,7 @@ import { Download, Printer, Copy, Search } from "lucide-react";
 import { Button } from "../ui/button";
 import { DatePicker } from "../ui/date-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { TableSkeletonRows } from "../common";
 import apiClient from "../../api/apiClient";
 import { useToast } from "../../hooks/use-toast";
 
@@ -70,11 +71,7 @@ function BalanceTable({
           </thead>
           <tbody>
             {loading ? (
-              <tr className="border-b border-border/50">
-                <td colSpan={5} className="px-4 py-6 text-center text-sm text-muted-foreground">
-                  Loading balances...
-                </td>
-              </tr>
+              <TableSkeletonRows columns={5} rows={6} />
             ) : error ? (
               <tr className="border-b border-border/50">
                 <td colSpan={5} className="px-4 py-6 text-center text-sm text-expense">

@@ -31,6 +31,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { AppSelect, TablePagination, TableSkeletonRows, CardGridSkeleton } from "../common";
 import { toast } from "../../hooks/use-toast";
 import {
   aiApi,
@@ -1515,79 +1516,83 @@ export default function LeadCalling() {
 
           {/* Call Status Filter */}
           <div>
-            <select
+            <AppSelect
               value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
+              onValueChange={(val) => {
+                setStatusFilter(val);
                 setPage(1);
               }}
-              className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            >
-              <option value="all">Status: All Active</option>
-              <option value="ready_to_call">Ready to Call</option>
-              <option value="uncalled">Never Called</option>
-              <option value="called_today">Called Today</option>
-              <option value="no_response">No Response</option>
-              <option value="completed">Completed</option>
-              <option value="scheduled">Scheduled</option>
-              <option value="failed">Failed</option>
-              <option value="suppressed">Opted Out (DNC)</option>
-            </select>
+              triggerClassName="h-10"
+              options={[
+                { value: "all", label: "Status: All Active" },
+                { value: "ready_to_call", label: "Ready to Call" },
+                { value: "uncalled", label: "Never Called" },
+                { value: "called_today", label: "Called Today" },
+                { value: "no_response", label: "No Response" },
+                { value: "completed", label: "Completed" },
+                { value: "scheduled", label: "Scheduled" },
+                { value: "failed", label: "Failed" },
+                { value: "suppressed", label: "Opted Out (DNC)" },
+              ]}
+            />
           </div>
 
           {/* Authoritative Risk Level Filter */}
           <div>
-            <select
+            <AppSelect
               value={riskFilter}
-              onChange={(e) => {
-                setRiskFilter(e.target.value);
+              onValueChange={(val) => {
+                setRiskFilter(val);
                 setPage(1);
               }}
-              className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            >
-              <option value="all">Risk: All Levels</option>
-              <option value="critical">Critical Risk</option>
-              <option value="high">High Risk</option>
-              <option value="warning">Warning</option>
-              <option value="safe">Safe</option>
-            </select>
+              triggerClassName="h-10"
+              options={[
+                { value: "all", label: "Risk: All Levels" },
+                { value: "critical", label: "Critical Risk" },
+                { value: "high", label: "High Risk" },
+                { value: "warning", label: "Warning" },
+                { value: "safe", label: "Safe" },
+              ]}
+            />
           </div>
 
           {/* Overdue Bucket Filter */}
           <div>
-            <select
+            <AppSelect
               value={overdueBucket}
-              onChange={(e) => {
-                setOverdueBucket(e.target.value);
+              onValueChange={(val) => {
+                setOverdueBucket(val);
                 setPage(1);
               }}
-              className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            >
-              <option value="all">Overdue: All Days</option>
-              <option value="1-30">1–30 days</option>
-              <option value="31-60">31–60 days</option>
-              <option value="61-90">61–90 days</option>
-              <option value="90+">90+ days</option>
-            </select>
+              triggerClassName="h-10"
+              options={[
+                { value: "all", label: "Overdue: All Days" },
+                { value: "1-30", label: "1–30 days" },
+                { value: "31-60", label: "31–60 days" },
+                { value: "61-90", label: "61–90 days" },
+                { value: "90+", label: "90+ days" },
+              ]}
+            />
           </div>
 
           {/* Sort By Selector */}
           <div>
-            <select
+            <AppSelect
               value={sortOption}
-              onChange={(e) => {
-                setSortOption(e.target.value);
+              onValueChange={(val) => {
+                setSortOption(val);
                 setPage(1);
               }}
-              className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            >
-              <option value="daysOverdue:desc">Most Days Overdue</option>
-              <option value="dueAmount:desc">Highest Overdue Amount</option>
-              <option value="dueAmount:asc">Lowest Overdue Amount</option>
-              <option value="riskScore:desc">Highest Risk Score</option>
-              <option value="totalBalance:desc">Highest Total Balance</option>
-              <option value="lastCallAt:desc">Recently Called</option>
-            </select>
+              triggerClassName="h-10"
+              options={[
+                { value: "daysOverdue:desc", label: "Most Days Overdue" },
+                { value: "dueAmount:desc", label: "Highest Overdue Amount" },
+                { value: "dueAmount:asc", label: "Lowest Overdue Amount" },
+                { value: "riskScore:desc", label: "Highest Risk Score" },
+                { value: "totalBalance:desc", label: "Highest Total Balance" },
+                { value: "lastCallAt:desc", label: "Recently Called" },
+              ]}
+            />
           </div>
         </div>
 
@@ -1692,12 +1697,7 @@ export default function LeadCalling() {
             </thead>
             <tbody>
               {isLoadingLeads && leads.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="text-center py-12 text-muted-foreground text-sm">
-                    <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-primary" />
-                    Loading live overdue customer accounts...
-                  </td>
-                </tr>
+                <TableSkeletonRows columns={10} rows={6} />
               ) : leads.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="text-center py-12 text-muted-foreground">
@@ -1916,58 +1916,28 @@ export default function LeadCalling() {
 
         {/* Pagination Footer */}
         {pagination.totalItems > 0 && (
-          <div className="px-4 py-3 border-t border-border bg-secondary/20 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span>
-                Page <strong className="text-foreground">{pagination.page}</strong> of{" "}
-                <strong className="text-foreground">{pagination.totalPages}</strong>
-              </span>
-              <span>•</span>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-                className="h-7 px-2 rounded border border-border bg-background text-foreground text-xs"
-              >
-                <option value={15}>15 / page</option>
-                <option value={25}>25 / page</option>
-                <option value={50}>50 / page</option>
-              </select>
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!pagination.hasPrevPage || isLoadingLeads}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="h-7 px-2.5 text-xs gap-1"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" /> Prev
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!pagination.hasNextPage || isLoadingLeads}
-                onClick={() => setPage((p) => p + 1)}
-                className="h-7 px-2.5 text-xs gap-1"
-              >
-                Next <ChevronRight className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
+          <TablePagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            pageSize={pageSize}
+            totalItems={pagination.totalItems}
+            startIndex={(pagination.page - 1) * pageSize + 1}
+            endIndex={Math.min(pagination.page * pageSize, pagination.totalItems)}
+            onPageChange={(p) => setPage(p)}
+            onPageSizeChange={(sz) => {
+              setPageSize(sz);
+              setPage(1);
+            }}
+            pageSizeOptions={[15, 25, 50]}
+            disabled={isLoadingLeads}
+          />
         )}
       </motion.div>
 
       {/* 5. Mobile Cards View */}
       <div className="md:hidden space-y-3">
         {isLoadingLeads && leads.length === 0 ? (
-          <div className="dashboard-card text-center py-8 text-muted-foreground text-sm">
-            <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-primary" />
-            Loading live overdue customer accounts...
-          </div>
+          <CardGridSkeleton count={3} />
         ) : leads.length === 0 ? (
           <div className="dashboard-card text-center py-8 text-muted-foreground">
             <p className="text-sm font-medium text-foreground">No matching overdue leads</p>
@@ -2061,26 +2031,29 @@ export default function LeadCalling() {
           })
         )}
 
-        {pagination.totalPages > 1 && (
+        {pagination.totalItems > 0 && (
           <div className="flex items-center justify-between pt-2 text-xs">
             <Button
               variant="outline"
               size="sm"
               disabled={!pagination.hasPrevPage || isLoadingLeads}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="h-7 px-2.5 text-xs gap-1"
             >
-              Prev
+              <ChevronLeft className="h-3.5 w-3.5" /> Prev
             </Button>
             <span className="text-muted-foreground">
-              Page {pagination.page} / {pagination.totalPages}
+              Page <strong className="text-foreground">{pagination.page}</strong> of{" "}
+              <strong className="text-foreground">{pagination.totalPages}</strong>
             </span>
             <Button
               variant="outline"
               size="sm"
               disabled={!pagination.hasNextPage || isLoadingLeads}
               onClick={() => setPage((p) => p + 1)}
+              className="h-7 px-2.5 text-xs gap-1"
             >
-              Next
+              Next <ChevronRight className="h-3.5 w-3.5" />
             </Button>
           </div>
         )}

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, Calendar } from 'lucide-react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Search, Calendar } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { getDaysBetweenDates } from '../utils/calculations';
 import axios from 'axios';
 import { useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TablePagination, PageTableSkeleton } from '../components/common/table';
 type PhotoUrl = {
   signed_url?: string;
   original_url?: string;
@@ -29,6 +31,18 @@ interface Customer {
   dueAmount: number;
   loanStatus: 'active' | 'close' | 'seized'; // Added 'seized'
   dueMonth: number;
+  overdueDays?: number;
+  daysUntilDue?: number | null;
+  pendingAmount?: number;
+  currentOverdueEmiAmount?: number;
+  pendingEmiCount?: number;
+  installmentsCovered?: number;
+  earliestUnpaidDueDate?: string | null;
+  nextEmiDueDate?: string | null;
+  remainingScheduledEmiAmount?: number;
+  outstandingPenaltyAmount?: number;
+  totalOutstandingLoanBalance?: number;
+  totalAmountPaid?: number;
 }
 
 interface CustomerWithDueDate extends Customer {
@@ -196,10 +210,18 @@ const UnpaidLoans = () => {
     }
 
     let processedCustomers = customers.map(customer => {
+      if (typeof customer.daysUntilDue === 'number') {
+        return { ...customer, daysUntilDue: customer.daysUntilDue };
+      }
+      if (typeof customer.overdueDays === 'number' && customer.overdueDays > 0) {
+        return { ...customer, daysUntilDue: customer.overdueDays };
+      }
       const dueDatesArray = customer.dueDates || [];
       let daysUntilDue: number | null = -1;
       let lastDueDate: string | null = null;
-      if (dueDatesArray.length > 0) {
+      if (customer.earliestUnpaidDueDate) {
+        lastDueDate = customer.earliestUnpaidDueDate;
+      } else if (dueDatesArray.length > 0) {
         lastDueDate = getLastValidDateInOrder(dueDatesArray);
       } else if (customer.due_date) {
         lastDueDate = customer.due_date;
@@ -266,6 +288,18 @@ const UnpaidLoans = () => {
   const [pendingUnpaidCustomerCount, setPendingUnpaidCustomerCount] = useState(0);
   const [seizedUnpaidCustomerCount, setSeizedUnpaidCustomerCount] = useState(0); // Added state
 
+  const {
+    paginatedItems: pagedCustomers,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filteredCustomers, { initialPageSize: 15 });
+
   const printRef = useRef<HTMLDivElement>(null);
   const handlePrint = () => {
     if (printRef.current && filteredCustomers.length > 0) {
@@ -300,14 +334,20 @@ const UnpaidLoans = () => {
           </thead>
           <tbody>
             ${filteredCustomers.map(customer => {
-                const paidMonths = customer.hasPaidDues !== undefined
-                  ? (customer.hasPaidDues ? (customer.paidDueDates?.length || customer.dueDates?.length || 0) : 0)
-                  : (customer.dueDates?.filter(date => date.trim() !== '').length || 0);
+                const paidMonths = typeof customer.installmentsCovered === 'number'
+                  ? customer.installmentsCovered
+                  : (customer.hasPaidDues !== undefined
+                    ? (customer.hasPaidDues ? (customer.paidDueDates?.length || customer.dueDates?.length || 0) : 0)
+                    : (customer.dueDates?.filter(date => date.trim() !== '').length || 0));
                 const effectiveDueDates = (customer.dueDates && customer.dueDates.length > 0)
                   ? customer.dueDates
                   : (customer.due_date ? [customer.due_date] : []);
-                const pendingMonths = getMonthDifference(getLastValidDateInOrder(effectiveDueDates), currentDate);
-                const pendingAmount = Math.max(0, pendingMonths) * (customer.dueAmount || 0);
+                const pendingMonths = typeof customer.pendingEmiCount === 'number'
+                  ? customer.pendingEmiCount
+                  : getMonthDifference(getLastValidDateInOrder(effectiveDueDates), currentDate);
+                const pendingAmount = typeof customer.pendingAmount === 'number'
+                  ? customer.pendingAmount
+                  : Math.max(0, pendingMonths) * (customer.dueAmount || 0);
 
                 return `
                 <tr>
@@ -487,7 +527,7 @@ const UnpaidLoans = () => {
     }
   };
 
-  if (loading) return <div className="text-center py-8 dark:text-gray-300">Loading unpaid customers...</div>;
+  if (loading) return <PageTableSkeleton statCardsCount={4} columns={6} rows={6} showSearch />;
   if (error) return <div className="text-center py-8 text-red-600 dark:text-red-400">{error}</div>;
 
   return (
@@ -511,14 +551,6 @@ const UnpaidLoans = () => {
             <Calendar className="w-4 h-4" />
             <span className="hidden sm:inline">Print Report</span>
           </button>
-
-          <Link
-            to={"/AddCustomersForm"}
-            className="flex items-center justify-center px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-all duration-200"
-          >
-            <Plus className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">Add Customer</span>
-          </Link>
         </div>
       </div>
 
@@ -578,7 +610,6 @@ const UnpaidLoans = () => {
           />
         </div>
       </div>
-
       {/* Customer List */}
       <div
         ref={printRef}
@@ -593,114 +624,131 @@ const UnpaidLoans = () => {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-border">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Customer
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Contact
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Vehicle Number
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Payment Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Vehicle Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Pending Amount
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-card divide-y divide-border">
-                {filteredCustomers.map((customer) => {
-                  const effectiveDueDates = (customer.dueDates && customer.dueDates.length > 0)
-                    ? customer.dueDates
-                    : (customer.due_date ? [customer.due_date] : []);
-                  const pendingMonths = getMonthDifference(getLastValidDateInOrder(effectiveDueDates), currentDate);
-                  const pendingAmount = Math.max(0, pendingMonths) * (customer.dueAmount || 0);
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-border">
+                <thead className="bg-secondary/50 border-b border-border text-muted-foreground uppercase text-xs tracking-wider font-semibold">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Customer
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Contact
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Vehicle Number
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Payment Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Vehicle Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Pending Amount
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-card divide-y divide-border">
+                  {pagedCustomers.map((customer) => {
+                    const effectiveDueDates = (customer.dueDates && customer.dueDates.length > 0)
+                      ? customer.dueDates
+                      : (customer.due_date ? [customer.due_date] : []);
+                    const pendingMonths = typeof customer.pendingEmiCount === 'number'
+                      ? customer.pendingEmiCount
+                      : getMonthDifference(getLastValidDateInOrder(effectiveDueDates), currentDate);
+                    const pendingAmount = typeof customer.pendingAmount === 'number'
+                      ? customer.pendingAmount
+                      : Math.max(0, pendingMonths) * (customer.dueAmount || 0);
 
-                  return (
-                    <tr
-                      key={customer.hplno}
-                      onClick={() => handleRowClick(customer.id)}
-                      className="cursor-pointer hover:bg-muted/30 transition-colors duration-150"
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="h-10 w-10 rounded-full bg-muted overflow-hidden flex-shrink-0">
-                            {customer.cphoto ? (
-                              <img
-                                src={getImageUrl(customer.cphoto, 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop')}
-                                alt="Customer"
-                                className="h-10 w-10 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="h-full w-full rounded-full bg-muted-foreground/20 flex items-center justify-center">
-                                <span className="text-xs text-muted-foreground">
-                                  {customer.cname?.charAt(0).toUpperCase() || '?'}
-                                </span>
+                    return (
+                      <tr
+                        key={customer.hplno}
+                        onClick={() => handleRowClick(customer.id)}
+                        className="cursor-pointer hover:bg-muted/30 transition-colors duration-150"
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="h-10 w-10 rounded-full bg-muted overflow-hidden flex-shrink-0">
+                              {customer.cphoto ? (
+                                <img
+                                  src={getImageUrl(customer.cphoto, 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop')}
+                                  alt="Customer"
+                                  className="h-10 w-10 rounded-full object-cover"
+                                />
+                              ) : (
+                                <div className="h-full w-full rounded-full bg-muted-foreground/20 flex items-center justify-center">
+                                  <span className="text-xs text-muted-foreground">
+                                    {customer.cname?.charAt(0).toUpperCase() || '?'}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-foreground">
+                                {customer.cname || 'N/A'}
                               </div>
-                            )}
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-foreground">
-                              {customer.cname || 'N/A'}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              <span>HPL No: </span>{customer.hplno}
+                              <div className="text-sm text-muted-foreground">
+                                <span>HPL No: </span>{customer.hplno}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap max-w-[200px]">
-                        <div className="text-sm text-foreground">
-                          {customer.contactNumbers && customer.contactNumbers.length > 0
-                            ? customer.contactNumbers[0]
-                            : 'N/A'}
-                        </div>
-                        <div className="text-sm text-muted-foreground truncate">
-                          {customer.caddress || 'N/A'}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-foreground">
-                          {customer.vehicleNumber || 'N/A'}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {customer.daysUntilDue !== null ?
-                          getStatusBadge(customer.daysUntilDue, customer.loanStatus) :
-                          <span className="px-2 py-1 text-xs rounded-full bg-warning/10 text-warning dark:bg-warning/20">
-                            {customer.loanStatus}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap max-w-[200px]">
+                          <div className="text-sm text-foreground">
+                            {customer.contactNumbers && customer.contactNumbers.length > 0
+                              ? customer.contactNumbers[0]
+                              : 'N/A'}
+                          </div>
+                          <div className="text-sm text-muted-foreground truncate">
+                            {customer.caddress || 'N/A'}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-foreground">
+                            {customer.vehicleNumber || 'N/A'}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {customer.daysUntilDue !== null ?
+                            getStatusBadge(customer.daysUntilDue, customer.loanStatus) :
+                            <span className="px-2 py-1 text-xs rounded-full bg-warning/10 text-warning dark:bg-warning/20">
+                              {customer.loanStatus}
+                            </span>
+                          }
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap max-w-[220px]">
+                          <span className="text-sm text-foreground">
+                            {customer.vehicleName || 'N/A'}
+                            {customer.modelName && ` - ${customer.modelName}`}
                           </span>
-                        }
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap max-w-[220px]">
-                        <span className="text-sm text-foreground">
-                          {customer.vehicleName || 'N/A'}
-                          {customer.modelName && ` - ${customer.modelName}`}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-foreground">
-                          ₹{pendingAmount.toLocaleString()}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {pendingMonths} month(s) pending
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-foreground">
+                            ₹{pendingAmount.toLocaleString()}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {pendingMonths} month(s) pending
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              totalItems={totalItems}
+              startIndex={startIndex}
+              endIndex={endIndex}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              pageSizeOptions={[15, 25, 50]}
+            />
+          </>
         )}
       </div>
     </div>

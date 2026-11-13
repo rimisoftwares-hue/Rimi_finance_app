@@ -305,3 +305,4 @@ Immediately after completing the single Test C verification:
    curl -s http://127.0.0.1:8100/health | python3 -m json.tool
    ```
    Must report `"telephony_mode": "mock"`, `"mock_telephony_only": true`, and `"dograh_dispatcher_ready": false`.
+

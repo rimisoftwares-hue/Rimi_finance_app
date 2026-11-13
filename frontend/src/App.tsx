@@ -14,7 +14,6 @@ import Customers from './pages/Customers';
 import AddCustomerConsultingFrom from './pages/AddCustomerConsultingFrom';
 import AddCustomerVehicleLoanForm from './pages/AddCustomerVehicleLoanForm';
 import EntryPage from './pages/EntryPage';
-import AddCustomerForm from './pages/AddCustomerForm';
 import UpdateCustomerForm from './pages/UpdateCustomerForm';
 import UnpaidLoans from './pages/UnpaidLoans';
 import LoanApplications from './pages/LoanApplications';
@@ -76,6 +75,7 @@ import LeadCalling from './components/ai/LeadCalling';
 import AILogs from './components/ai/AILogs';
 import AIInsights from './components/ai/AIInsights';
 import AISettings from './components/ai/AISettings';
+import CallDetailsPage from './pages/CallDetailsPage';
 
 // Customer Locator
 import CustomerTrack from './components/locator/Track';
@@ -387,11 +387,6 @@ function AppContent() {
                       <ChangePasswordForm onClose={20000 }/>
                     </ProtectedRoute>
                   } /> */}
-                <Route path="/AddCustomersForm" element={
-                  <ProtectedRoute allowedRoles={['owner']}>
-                    <AddCustomerForm />
-                  </ProtectedRoute>
-                } />
                 <Route path="/owner/customers/:customerId" element={
                   <ProtectedRoute allowedRoles={['owner']}>
                     <CustomerDetails />
@@ -450,6 +445,7 @@ function AppContent() {
                 <Route path="/ai/dashboard" element={<ProtectedRoute><AIDashboard /></ProtectedRoute>} />
                 <Route path="/ai/lead-calling" element={<ProtectedRoute><LeadCalling /></ProtectedRoute>} />
                 <Route path="/ai/logs" element={<ProtectedRoute><AILogs /></ProtectedRoute>} />
+                <Route path="/ai/calls/:callId" element={<ProtectedRoute><CallDetailsPage /></ProtectedRoute>} />
                 <Route path="/ai/insights" element={<ProtectedRoute><AIInsights /></ProtectedRoute>} />
                 <Route path="/ai/settings" element={<ProtectedRoute><AISettings /></ProtectedRoute>} />
                 {/* Customer Locator */}

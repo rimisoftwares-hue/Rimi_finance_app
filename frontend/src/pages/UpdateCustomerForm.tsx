@@ -8,6 +8,31 @@ import apiClient from '../api/apiClient';
 import { useParams } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import { DatePicker } from '../components/ui/date-picker';
+import { AppSelect } from '../components/common/AppSelect';
+
+const LOAN_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'close', label: 'Close' },
+];
+
+const CUSTOMER_UNIT_OPTIONS = [
+  { value: 's/o', label: 'S/O' },
+  { value: 'w/o', label: 'W/O' },
+  { value: 'h/o', label: 'H/O' },
+];
+
+const GUARDIAN_UNIT_OPTIONS = [
+  { value: 's/o', label: 'S/O' },
+  { value: 'w/o', label: 'W/O' },
+  { value: 'h/o', label: 'H/O' },
+  { value: 'c/o', label: 'C/O' },
+];
+
+const UPDATE_VEHICLE_TYPE_OPTIONS = [
+  { value: 'bike', label: 'Bike' },
+  { value: 'car', label: 'Car' },
+  { value: 'document', label: 'Document' },
+];
 
 const UpdateCustomerForm = () => {
   const { hplno } = useParams<{ hplno: string }>();
@@ -353,20 +378,16 @@ const UpdateCustomerForm = () => {
             </div>
             <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700">Lone Status <span className="text-red-500">*</span></label>
-                <select
-                  required
+                <AppSelect
                   value={formData.customer.loanStatus}
-                  onChange={(e) => {if (!formData) return; setFormData({
+                  onValueChange={(val) => {if (!formData) return; setFormData({
                     ...formData,
-                    customer: { ...formData.customer, loanStatus: e.target.value as 'active' | 'close' }
+                    customer: { ...formData.customer, loanStatus: val as 'active' | 'close' }
                    });
                   }}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
-                >
-                  <option value="active">Active</option>
-                  <option value="close">Close</option>
-                  
-              </select>
+                  options={LOAN_STATUS_OPTIONS}
+                  className="mt-1 w-full"
+                />
               </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">
@@ -406,21 +427,18 @@ const UpdateCustomerForm = () => {
             <div className="flex space-x-4">
               <div className="flex-1">
                   <label className="block text-sm font-medium text-gray-700">Unit</label>
-                  <select
+                  <AppSelect
                     value={formData.customer.cfname.unit}
-                    onChange={(e) => {if (!formData) return; setFormData({
+                    onValueChange={(val) => {if (!formData) return; setFormData({
                       ...formData,
                       customer: {
                         ...formData.customer,
-                        cfname: { ...formData.customer.cfname, unit: e.target.value as 's/o' | 'w/o' | 'h/o' }
+                        cfname: { ...formData.customer.cfname, unit: val as 's/o' | 'w/o' | 'h/o' }
                       }
                     });}}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
-                  >
-                    <option value="s/o">S/O</option>
-                    <option value="w/o">W/O</option>
-                    <option value="h/o">H/O</option>
-                  </select>
+                    options={CUSTOMER_UNIT_OPTIONS}
+                    className="mt-1 w-full"
+                  />
                 </div>
               <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700">
@@ -504,22 +522,18 @@ const UpdateCustomerForm = () => {
             <div className="flex space-x-4">
               <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700">Unit</label>
-                <select
+                <AppSelect
                   value={formData.guardian.gfname.unit}
-                  onChange={(e) => {if (!formData) return; setFormData({
+                  onValueChange={(val) => {if (!formData) return; setFormData({
                     ...formData,
                     guardian: {
                       ...formData.guardian,
-                      gfname: { ...formData.guardian.gfname, unit: e.target.value as 's/o' | 'w/o' | 'h/o' | 'c/o'}
+                      gfname: { ...formData.guardian.gfname, unit: val as 's/o' | 'w/o' | 'h/o' | 'c/o'}
                     }
                   });}}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
-                >
-                  <option value="s/o">S/O</option>
-                  <option value="w/o">W/O</option>
-                  <option value="h/o">H/O</option>
-                  <option value="c/o">C/O</option>
-                </select>
+                  options={GUARDIAN_UNIT_OPTIONS}
+                  className="mt-1 w-full"
+                />
               </div>
               <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700">
@@ -732,19 +746,15 @@ const UpdateCustomerForm = () => {
               <label className="block text-sm font-medium text-gray-700">
                 Vehicle Type <span className="text-red-500">*</span>
               </label>
-              <select
-                required
+              <AppSelect
                 value={formData.vehicle.type}
-                onChange={(e) => {if (!formData) return; setFormData({
+                onValueChange={(val) => {if (!formData) return; setFormData({
                   ...formData,
-                  vehicle: { ...formData.vehicle, type: e.target.value as 'bike' | 'car' | 'document' }
+                  vehicle: { ...formData.vehicle, type: val as 'bike' | 'car' | 'document' }
                 });}}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
-              >
-                <option value="bike">Bike</option>
-                <option value="car">Car</option>
-                <option value="document">Document</option>
-              </select>
+                options={UPDATE_VEHICLE_TYPE_OPTIONS}
+                className="mt-1 w-full"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">

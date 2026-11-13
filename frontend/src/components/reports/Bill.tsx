@@ -4,6 +4,8 @@ import { Download, Printer, Copy, Search } from "lucide-react";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { DatePicker } from "../ui/date-picker";
+import { AppSelect, TablePagination, TableSkeletonRows } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
 import apiClient from "../../api/apiClient";
 import { useToast } from "../../hooks/use-toast";
 
@@ -104,6 +106,18 @@ export default function Bill() {
       return true;
     });
   }, [bills, fromDate, toDate, statusFilter, search]);
+
+  const {
+    paginatedItems: paginatedBills,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, { initialPageSize: 15 });
 
   const totals = useMemo(() => {
     return filtered
@@ -248,13 +262,18 @@ export default function Bill() {
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">Status</label>
-            <select className="input-field text-sm py-2" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              <option value="All">All</option>
-              <option value="Paid">Paid</option>
-              <option value="Partial">Partial</option>
-              <option value="Pending">Pending</option>
-              <option value="Cancelled">Cancelled</option>
-            </select>
+            <AppSelect
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              triggerClassName="w-[140px]"
+              options={[
+                { value: "All", label: "All" },
+                { value: "Paid", label: "Paid" },
+                { value: "Partial", label: "Partial" },
+                { value: "Pending", label: "Pending" },
+                { value: "Cancelled", label: "Cancelled" },
+              ]}
+            />
           </div>
           <Button size="sm" className="gap-2" style={{ background: "var(--gradient-primary)" }} onClick={fetchBills}>Show</Button>
           <div className="ml-auto flex items-center gap-2">
@@ -288,9 +307,7 @@ export default function Bill() {
             </thead>
             <tbody>
               {loading ? (
-                <tr className="border-b border-border/50">
-                  <td colSpan={13} className="px-4 py-3 text-center text-sm text-muted-foreground">Loading bill records...</td>
-                </tr>
+                <TableSkeletonRows columns={13} rows={6} />
               ) : error ? (
                 <tr className="border-b border-border/50">
                   <td colSpan={13} className="px-4 py-3 text-center text-sm text-expense">{error}</td>
@@ -300,7 +317,7 @@ export default function Bill() {
                   <td colSpan={13} className="px-4 py-3 text-center text-sm text-muted-foreground">No records found</td>
                 </tr>
               ) : (
-                filtered.map((r, i) => (
+                paginatedBills.map((r, i) => (
                   <motion.tr key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.02 * i }} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
                     <td className="px-4 py-3 text-sm font-medium text-primary">{r.receiptNo}</td>
                     <td className="px-4 py-3 text-sm font-medium text-foreground">{r.hpAcNo}</td>
@@ -347,6 +364,20 @@ export default function Bill() {
             </tfoot>
           </table>
         </div>
+        {!loading && !error && totalItems > 0 && (
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalItems}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[15, 25, 50]}
+            disabled={loading}
+          />
+        )}
       </motion.div>
     </div>
   );

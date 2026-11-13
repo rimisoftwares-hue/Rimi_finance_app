@@ -380,9 +380,15 @@ export function Sidebar() {
                 <div key={item.name} className="flex justify-center">
                   <HoverCard
                     open={activeFlyout === item.name}
-                    onOpenChange={(open) => setActiveFlyout(open ? item.name : null)}
-                    openDelay={80}
-                    closeDelay={180}
+                    onOpenChange={(open) => {
+                      if (open) {
+                        setActiveFlyout(item.name);
+                      } else {
+                        setActiveFlyout((prev) => (prev === item.name ? null : prev));
+                      }
+                    }}
+                    openDelay={activeFlyout ? 0 : 70}
+                    closeDelay={120}
                   >
                     <HoverCardTrigger asChild>
                       {hasSubmenu ? (
@@ -438,10 +444,7 @@ export function Sidebar() {
                         /* Case A: Item WITH Sub-headings/Sub-items (Flyout Menu) */
                         <div className="flex flex-col">
                           {/* Flyout Header */}
-                          <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-border/70 bg-muted/40 rounded-t-xl">
-                            <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 text-primary">
-                              <item.icon className="h-3.5 w-3.5 shrink-0" />
-                            </div>
+                          <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-border/70 bg-muted/40 rounded-t-xl">
                             <span className="font-semibold text-xs tracking-wider uppercase text-foreground">
                               {item.name}
                             </span>
@@ -635,9 +638,15 @@ export function Sidebar() {
               <div className="w-full flex justify-center">
                 <HoverCard
                   open={activeFlyout === "logout"}
-                  onOpenChange={(open) => setActiveFlyout(open ? "logout" : null)}
-                  openDelay={80}
-                  closeDelay={180}
+                  onOpenChange={(open) => {
+                    if (open) {
+                      setActiveFlyout("logout");
+                    } else {
+                      setActiveFlyout((prev) => (prev === "logout" ? null : prev));
+                    }
+                  }}
+                  openDelay={activeFlyout ? 0 : 70}
+                  closeDelay={120}
                 >
                   <HoverCardTrigger asChild>
                     <button

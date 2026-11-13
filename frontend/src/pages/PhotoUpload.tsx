@@ -112,7 +112,7 @@ export function PhotoUpload({ label, required = false, onChange, preview }: Phot
 
       {/* Cropping Modal */}
       {isModalOpen && tempImage && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 backdrop-blur-[1px] bg-black/25 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg max-w-2xl w-full">
             <h3 className="text-lg font-semibold mb-4">Crop Image</h3>
             <div className="max-h-[60vh] overflow-auto">

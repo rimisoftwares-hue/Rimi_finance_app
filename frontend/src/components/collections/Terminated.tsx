@@ -8,7 +8,6 @@ import {
   ChevronDown,
   ChevronUp,
   Phone,
-  Loader2,
   AlertCircle,
   X,
   ExternalLink,
@@ -27,6 +26,20 @@ import {
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { DatePicker } from "../ui/date-picker";
+import { AppSelect, TableSkeletonRows, CardGridSkeleton } from "../common";
+
+const TERMINATED_DATE_TYPE_OPTIONS = [
+  { value: "any", label: "Any Date (Final Due or Termination)" },
+  { value: "contractual", label: "Contractual Final Due Date" },
+  { value: "actual", label: "Actual Termination Date" },
+];
+
+const TERMINATED_LIMIT_OPTIONS = [
+  { value: "10", label: "10" },
+  { value: "12", label: "12" },
+  { value: "25", label: "25" },
+  { value: "50", label: "50" },
+];
 import {
   TerminatedAccountItem,
   TerminatedAccountsFilterParams,
@@ -588,20 +601,17 @@ export default function Terminated() {
                   <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
                     Broker
                   </label>
-                  <select
+                  <AppSelect
                     value={filters.broker || "All"}
-                    onChange={(e) =>
-                      setFilters((prev) => ({ ...prev, broker: e.target.value, page: 1 }))
+                    onValueChange={(val) =>
+                      setFilters((prev) => ({ ...prev, broker: val, page: 1 }))
                     }
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="All">All Brokers</option>
-                    {filterOptions.brokers.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "All", label: "All Brokers" },
+                      ...filterOptions.brokers.map((b) => ({ value: b, label: b })),
+                    ]}
+                    triggerClassName="w-full"
+                  />
                 </div>
 
                 {/* Status Filter */}
@@ -609,20 +619,17 @@ export default function Terminated() {
                   <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
                     Termination Status / Reason
                   </label>
-                  <select
+                  <AppSelect
                     value={filters.status || "All"}
-                    onChange={(e) =>
-                      setFilters((prev) => ({ ...prev, status: e.target.value, page: 1 }))
+                    onValueChange={(val) =>
+                      setFilters((prev) => ({ ...prev, status: val, page: 1 }))
                     }
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="All">All Statuses</option>
-                    {filterOptions.statuses.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "All", label: "All Statuses" },
+                      ...filterOptions.statuses.map((s) => ({ value: s, label: s })),
+                    ]}
+                    triggerClassName="w-full"
+                  />
                 </div>
 
                 {/* Due Amount (Min) */}
@@ -662,21 +669,18 @@ export default function Terminated() {
                   <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
                     Date Range Type
                   </label>
-                  <select
+                  <AppSelect
                     value={filters.dateType || "any"}
-                    onChange={(e) =>
+                    onValueChange={(val) =>
                       setFilters((prev) => ({
                         ...prev,
-                        dateType: e.target.value as any,
+                        dateType: val as any,
                         page: 1,
                       }))
                     }
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="any">Any Date (Final Due or Termination)</option>
-                    <option value="contractual">Contractual Final Due Date</option>
-                    <option value="actual">Actual Termination Date</option>
-                  </select>
+                    options={TERMINATED_DATE_TYPE_OPTIONS}
+                    triggerClassName="w-full"
+                  />
                 </div>
 
                 {/* Date From */}
@@ -714,20 +718,17 @@ export default function Terminated() {
                   <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
                     Street
                   </label>
-                  <select
+                  <AppSelect
                     value={filters.street || "All"}
-                    onChange={(e) =>
-                      setFilters((prev) => ({ ...prev, street: e.target.value, page: 1 }))
+                    onValueChange={(val) =>
+                      setFilters((prev) => ({ ...prev, street: val, page: 1 }))
                     }
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="All">All Streets</option>
-                    {filterOptions.streets.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "All", label: "All Streets" },
+                      ...filterOptions.streets.map((s) => ({ value: s, label: s })),
+                    ]}
+                    triggerClassName="w-full"
+                  />
                 </div>
 
                 {/* Village Filter */}
@@ -735,20 +736,17 @@ export default function Terminated() {
                   <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
                     Village
                   </label>
-                  <select
+                  <AppSelect
                     value={filters.village || "All"}
-                    onChange={(e) =>
-                      setFilters((prev) => ({ ...prev, village: e.target.value, page: 1 }))
+                    onValueChange={(val) =>
+                      setFilters((prev) => ({ ...prev, village: val, page: 1 }))
                     }
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="All">All Villages</option>
-                    {filterOptions.villages.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "All", label: "All Villages" },
+                      ...filterOptions.villages.map((v) => ({ value: v, label: v })),
+                    ]}
+                    triggerClassName="w-full"
+                  />
                 </div>
 
                 {/* City Filter */}
@@ -756,20 +754,17 @@ export default function Terminated() {
                   <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
                     City
                   </label>
-                  <select
+                  <AppSelect
                     value={filters.city || "All"}
-                    onChange={(e) =>
-                      setFilters((prev) => ({ ...prev, city: e.target.value, page: 1 }))
+                    onValueChange={(val) =>
+                      setFilters((prev) => ({ ...prev, city: val, page: 1 }))
                     }
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="All">All Cities</option>
-                    {filterOptions.cities.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "All", label: "All Cities" },
+                      ...filterOptions.cities.map((c) => ({ value: c, label: c })),
+                    ]}
+                    triggerClassName="w-full"
+                  />
                 </div>
 
                 {/* State Filter */}
@@ -777,20 +772,17 @@ export default function Terminated() {
                   <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
                     State
                   </label>
-                  <select
+                  <AppSelect
                     value={filters.state || "All"}
-                    onChange={(e) =>
-                      setFilters((prev) => ({ ...prev, state: e.target.value, page: 1 }))
+                    onValueChange={(val) =>
+                      setFilters((prev) => ({ ...prev, state: val, page: 1 }))
                     }
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="All">All States</option>
-                    {filterOptions.states.map((st) => (
-                      <option key={st} value={st}>
-                        {st}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "All", label: "All States" },
+                      ...filterOptions.states.map((st) => ({ value: st, label: st })),
+                    ]}
+                    triggerClassName="w-full"
+                  />
                 </div>
               </div>
             </motion.div>
@@ -799,17 +791,7 @@ export default function Terminated() {
       </motion.div>
 
       {/* ─── Main Content Area: Loading, Error, Empty, and Data ───────────────── */}
-      {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 bg-card rounded-xl border border-border shadow-sm">
-          <Loader2 className="h-10 w-10 text-primary animate-spin mb-4" />
-          <p className="text-base font-semibold text-foreground">
-            Loading terminated accounts from PostgreSQL...
-          </p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Computing contractual installment schedules and penalty balances
-          </p>
-        </div>
-      ) : error ? (
+      {!loading && error ? (
         <div className="p-8 bg-destructive/10 border border-destructive/20 rounded-xl text-center shadow-sm">
           <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-3" />
           <h3 className="text-lg font-bold text-foreground">
@@ -823,7 +805,7 @@ export default function Terminated() {
             Retry Connection
           </Button>
         </div>
-      ) : records.length === 0 ? (
+      ) : !loading && records.length === 0 ? (
         <div className="py-16 px-4 text-center bg-card rounded-xl border border-border shadow-sm">
           <div className="w-16 h-16 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center mx-auto mb-4 border border-border">
             {hasActiveFilters ? <Search className="h-8 w-8" /> : <Clock className="h-8 w-8" />}
@@ -863,7 +845,10 @@ export default function Terminated() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border text-sm">
-                {records.map((customer) => {
+                {loading ? (
+                  <TableSkeletonRows columns={8} rows={6} />
+                ) : (
+                  records.map((customer) => {
                   const badge =
                     statusBadgeStyles[customer.terminationStatus] ||
                     statusBadgeStyles.Default;
@@ -1003,11 +988,14 @@ export default function Terminated() {
                       </td>
                     </tr>
                   );
-                })}
+                })
+                )}
               </tbody>
             </table>
           </div>
         </div>
+      ) : loading ? (
+        <CardGridSkeleton count={6} />
       ) : (
         /* ─── Grid Cards View ────────────────────────────────────────────────── */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1142,22 +1130,20 @@ export default function Terminated() {
             </span>
             <span className="mx-1">•</span>
             <span>Items per page:</span>
-            <select
-              value={filters.limit || 12}
-              onChange={(e) =>
+            <AppSelect
+              size="sm"
+              value={String(filters.limit || 12)}
+              onValueChange={(val) =>
                 setFilters((prev) => ({
                   ...prev,
-                  limit: Number(e.target.value),
+                  limit: Number(val),
                   page: 1,
                 }))
               }
-              className="h-7 rounded border border-input bg-background px-2 text-xs shadow-sm focus:outline-none"
-            >
-              <option value={10}>10</option>
-              <option value={12}>12</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-            </select>
+              options={TERMINATED_LIMIT_OPTIONS}
+              className="w-[70px]"
+              triggerClassName="h-7 px-2 text-xs"
+            />
           </div>
 
           <div className="flex items-center gap-2">

@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { CapitalizedInput } from "../common/CapitalizedInput";
+import { TableSkeletonRows } from "../common";
 import { Badge } from "../ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "../ui/dialog";
@@ -313,12 +314,7 @@ export default function AreaAllocation() {
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={isOwner ? 5 : 4} className="h-32 text-center text-muted-foreground">
-                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-primary" />
-                    Loading area allocations...
-                  </TableCell>
-                </TableRow>
+                <TableSkeletonRows columns={isOwner ? 5 : 4} rows={6} />
               ) : filteredAgents.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={isOwner ? 5 : 4} className="h-32 text-center text-muted-foreground">

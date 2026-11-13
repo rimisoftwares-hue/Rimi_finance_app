@@ -28,7 +28,8 @@ import {
   inlineImageAsDataUri,
   triggerPrintDocument,
   exportWordDocument,
-} from "../../utils/printTemplates";
+} from "@/components/common/print";
+import { AppSelect, TablePagination, TableSkeletonRows } from "../common";
 
 // ---------- 5 Unified Document Types ----------
 const docTypes: { id: PrintDocTypeId; name: string; desc: string }[] = [
@@ -236,7 +237,7 @@ export default function Notices() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const itemsPerPage = 10;
+  const [itemsPerPage, setItemsPerPage] = useState(15);
 
   // Server data state
   const [records, setRecords] = useState<PendingCollectionRecord[]>([]);
@@ -337,7 +338,7 @@ export default function Notices() {
     } finally {
       setLoadingList(false);
     }
-  }, [buildFilterParams, page, toast]);
+  }, [buildFilterParams, page, itemsPerPage, toast]);
 
   useEffect(() => {
     loadCustomers();
@@ -1002,60 +1003,58 @@ export default function Notices() {
                   {/* Broker */}
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Broker</label>
-                    <select
-                      className="input-field text-sm h-9 py-1 w-full"
+                    <AppSelect
                       value={filters.broker || ""}
-                      onChange={(e) => updateFilter("broker", e.target.value)}
-                    >
-                      <option value="">All Brokers</option>
-                      {filterOptions.brokers.map((b) => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                    </select>
+                      onValueChange={(val) => updateFilter("broker", val)}
+                      options={[
+                        { value: "", label: "All Brokers" },
+                        ...filterOptions.brokers.map((b) => ({ value: b, label: b })),
+                      ]}
+                    />
                   </div>
                   {/* Vehicle Type */}
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Vehicle Type</label>
-                    <select
-                      className="input-field text-sm h-9 py-1 w-full"
+                    <AppSelect
                       value={filters.vehicleType}
-                      onChange={(e) => updateFilter("vehicleType", e.target.value)}
-                    >
-                      <option value="all">All Vehicles</option>
-                      <option value="two_wheeler">Two Wheeler</option>
-                      <option value="three_wheeler">Three Wheeler</option>
-                      <option value="four_wheeler">Four Wheeler</option>
-                      <option value="commercial">Commercial</option>
-                    </select>
+                      onValueChange={(val) => updateFilter("vehicleType", val)}
+                      options={[
+                        { value: "all", label: "All Vehicles" },
+                        { value: "two_wheeler", label: "Two Wheeler" },
+                        { value: "three_wheeler", label: "Three Wheeler" },
+                        { value: "four_wheeler", label: "Four Wheeler" },
+                        { value: "commercial", label: "Commercial" },
+                      ]}
+                    />
                   </div>
                   {/* Deal Type */}
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Deal Type</label>
-                    <select
-                      className="input-field text-sm h-9 py-1 w-full"
+                    <AppSelect
                       value={filters.dealType}
-                      onChange={(e) => updateFilter("dealType", e.target.value)}
-                    >
-                      <option value="all">All Deal Types</option>
-                      <option value="finance">Finance</option>
-                      <option value="consulting">Consulting</option>
-                    </select>
+                      onValueChange={(val) => updateFilter("dealType", val)}
+                      options={[
+                        { value: "all", label: "All Deal Types" },
+                        { value: "finance", label: "Finance" },
+                        { value: "consulting", label: "Consulting" },
+                      ]}
+                    />
                   </div>
                   {/* Status Filter */}
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Status</label>
-                    <select
-                      className="input-field text-sm h-9 py-1 w-full"
+                    <AppSelect
                       value={filters.statusFilter}
-                      onChange={(e) => updateFilter("statusFilter", e.target.value)}
-                    >
-                      <option value="all">All Status</option>
-                      <option value="active">Active</option>
-                      <option value="pending">Pending</option>
-                      <option value="overdue">Overdue</option>
-                      <option value="seized">Seized</option>
-                      <option value="closed">Closed</option>
-                    </select>
+                      onValueChange={(val) => updateFilter("statusFilter", val)}
+                      options={[
+                        { value: "all", label: "All Status" },
+                        { value: "active", label: "Active" },
+                        { value: "pending", label: "Pending" },
+                        { value: "overdue", label: "Overdue" },
+                        { value: "seized", label: "Seized" },
+                        { value: "closed", label: "Closed" },
+                      ]}
+                    />
                   </div>
                   {/* Street */}
                   <div className="relative">
@@ -1168,12 +1167,7 @@ export default function Notices() {
               </thead>
               <tbody>
                 {loadingList ? (
-                  <tr>
-                    <td colSpan={7} className="text-center py-8 text-sm text-muted-foreground">
-                      <Loader2 className="h-5 w-5 animate-spin inline mr-2 text-primary" />
-                      Loading customer accounts...
-                    </td>
-                  </tr>
+                  <TableSkeletonRows columns={7} rows={6} />
                 ) : records.length > 0 ? (
                   records.map((c) => {
                     const rowKey = getRecordKey(c);
@@ -1220,51 +1214,21 @@ export default function Notices() {
           </div>
 
           {/* Pagination Footer */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 py-3 bg-card border-t border-border text-xs text-muted-foreground">
-            <div>
-              Showing <strong className="text-foreground">{startIndex}</strong> to{" "}
-              <strong className="text-foreground">{endIndex}</strong> of{" "}
-              <strong className="text-foreground">{totalRecords}</strong> customers
-            </div>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2.5 text-xs gap-1"
-                disabled={page <= 1 || loadingList}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                <ChevronLeft className="h-3.5 w-3.5" /> Previous
-              </Button>
-              {Array.from({ length: Math.min(5, totalPagesCount) }, (_, idx) => {
-                let pageNum = idx + 1;
-                if (totalPagesCount > 5 && page > 3) {
-                  pageNum = Math.min(totalPagesCount - 4, page - 2) + idx;
-                }
-                return (
-                  <Button
-                    key={pageNum}
-                    variant={page === pageNum ? "default" : "outline"}
-                    size="sm"
-                    className="h-7 w-7 p-0 text-xs"
-                    disabled={loadingList}
-                    onClick={() => setPage(pageNum)}
-                  >
-                    {pageNum}
-                  </Button>
-                );
-              })}
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2.5 text-xs gap-1"
-                disabled={page >= totalPagesCount || loadingList}
-                onClick={() => setPage((p) => Math.min(totalPagesCount, p + 1))}
-              >
-                Next <ChevronRight className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
+          <TablePagination
+            page={page}
+            totalPages={totalPagesCount}
+            pageSize={itemsPerPage}
+            totalItems={totalRecords}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            onPageChange={(p) => setPage(p)}
+            onPageSizeChange={(sz) => {
+              setItemsPerPage(sz);
+              setPage(1);
+            }}
+            pageSizeOptions={[15, 25, 50]}
+            disabled={loadingList}
+          />
         </div>
       </motion.section>
 

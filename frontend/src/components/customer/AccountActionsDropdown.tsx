@@ -10,6 +10,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { Button } from '../ui/button';
+import { AppSelect } from '../common/AppSelect';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,8 +40,9 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Badge } from '../ui/badge';
 import { useAuth } from '../../contexts/AuthContext';
+import { API_ORIGIN } from '../../api/apiClient';
 
-const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3004').replace(/\/+$/, '');
+const BASE_URL = API_ORIGIN;
 
 interface AccountActionsDropdownProps {
   customerName: string;
@@ -686,19 +688,20 @@ const AccountActionsDropdown = ({
               <Label htmlFor="godown_id">
                 Godown <span className="text-destructive">*</span>
               </Label>
-              <select
+              <AppSelect
                 id="godown_id"
                 value={seizeForm.godown_id}
-                onChange={e => setSeizeForm(prev => ({ ...prev, godown_id: e.target.value }))}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="">-- Select Godown --</option>
-                {godownList.map(g => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}{g.city ? ` (${g.city})` : ''}
-                  </option>
-                ))}
-              </select>
+                onValueChange={val => setSeizeForm(prev => ({ ...prev, godown_id: val }))}
+                options={[
+                  { value: '', label: '-- Select Godown --' },
+                  ...godownList.map(g => ({
+                    value: String(g.id),
+                    label: `${g.name}${g.city ? ` (${g.city})` : ''}`,
+                  })),
+                ]}
+                placeholder="-- Select Godown --"
+                triggerClassName="w-full"
+              />
               {godownList.length === 0 && (
                 <p className="text-xs text-muted-foreground">No active godowns found.</p>
               )}

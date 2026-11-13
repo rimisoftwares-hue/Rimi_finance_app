@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
@@ -10,7 +10,6 @@ import {
   ChevronDown,
   ChevronUp,
   Phone,
-  Loader2,
   AlertCircle,
   FileX,
   X,
@@ -18,6 +17,7 @@ import {
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { DatePicker } from "../ui/date-picker";
+import { AppSelect, TablePagination, TableSkeletonRows } from "../common";
 import {
   PendingCollectionRecord,
   PendingCollectionsFilterParams,
@@ -93,7 +93,7 @@ export default function PendingCollections() {
   const [pagination, setPagination] = useState<PendingCollectionsPagination>({
     total: 0,
     page: 1,
-    limit: 20,
+    limit: 15,
     totalPages: 1,
   });
 
@@ -534,35 +534,31 @@ export default function PendingCollections() {
                 {/* Broker Filter */}
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Broker</label>
-                  <select
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  <AppSelect
                     value={filters.broker ?? ""}
-                    onChange={e => handleFilterChange("broker", e.target.value)}
-                  >
-                    <option value="">All Brokers</option>
-                    {filterOptions.brokers.map(b => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={val => handleFilterChange("broker", val)}
+                    options={[
+                      { value: "", label: "All Brokers" },
+                      ...filterOptions.brokers.map(b => ({ value: b, label: b })),
+                    ]}
+                  />
                 </div>
 
                 {/* Vehicle Type Filter */}
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Vehicle Type</label>
-                  <select
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  <AppSelect
                     value={filters.vehicleType ?? ""}
-                    onChange={e => handleFilterChange("vehicleType", e.target.value)}
-                  >
-                    <option value="">All Types</option>
-                    <option value="bike">Two Wheeler (Bike)</option>
-                    <option value="scooter">Scooter</option>
-                    <option value="car">Four Wheeler (Car)</option>
-                    <option value="three_wheeler">Three Wheeler</option>
-                    <option value="commercial">Commercial</option>
-                  </select>
+                    onValueChange={val => handleFilterChange("vehicleType", val)}
+                    options={[
+                      { value: "", label: "All Types" },
+                      { value: "bike", label: "Two Wheeler (Bike)" },
+                      { value: "scooter", label: "Scooter" },
+                      { value: "car", label: "Four Wheeler (Car)" },
+                      { value: "three_wheeler", label: "Three Wheeler" },
+                      { value: "commercial", label: "Commercial" },
+                    ]}
+                  />
                 </div>
 
                 {/* Address AutoSuggests */}
@@ -588,16 +584,16 @@ export default function PendingCollections() {
                 {/* Status Filter */}
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Status</label>
-                  <select
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  <AppSelect
                     value={filters.statusFilter ?? ""}
-                    onChange={e => handleFilterChange("statusFilter", e.target.value)}
-                  >
-                    <option value="">All</option>
-                    <option value="Action">Action (1 Due)</option>
-                    <option value="Pending">Pending (2+ Dues)</option>
-                    <option value="Close">Close (Paid / Inactive)</option>
-                  </select>
+                    onValueChange={val => handleFilterChange("statusFilter", val)}
+                    options={[
+                      { value: "", label: "All" },
+                      { value: "Action", label: "Action (1 Due)" },
+                      { value: "Pending", label: "Pending (2+ Dues)" },
+                      { value: "Close", label: "Close (Paid / Inactive)" },
+                    ]}
+                  />
                 </div>
 
                 {/* HP / HB Amount Range */}
@@ -647,15 +643,15 @@ export default function PendingCollections() {
                 {/* Deal Type Filter */}
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Deal Type</label>
-                  <select
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  <AppSelect
                     value={filters.dealType ?? ""}
-                    onChange={e => handleFilterChange("dealType", e.target.value)}
-                  >
-                    <option value="">All</option>
-                    <option value="Finance">Finance</option>
-                    <option value="Consulting">Consulting</option>
-                  </select>
+                    onValueChange={val => handleFilterChange("dealType", val)}
+                    options={[
+                      { value: "", label: "All" },
+                      { value: "Finance", label: "Finance" },
+                      { value: "Consulting", label: "Consulting" },
+                    ]}
+                  />
                 </div>
               </div>
             </motion.div>
@@ -670,16 +666,6 @@ export default function PendingCollections() {
         transition={{ delay: 0.2 }}
         className="dashboard-card p-0 overflow-hidden border border-border shadow-sm"
       >
-        {/* Loading State */}
-        {loading && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground mt-3 font-medium">
-              Loading collection records from PostgreSQL database...
-            </p>
-          </div>
-        )}
-
         {/* Error State */}
         {!loading && error && (
           <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
@@ -714,8 +700,8 @@ export default function PendingCollections() {
           </div>
         )}
 
-        {/* Success Data Table */}
-        {!loading && !error && loans.length > 0 && (
+        {/* Data Table */}
+        {(loading || (!error && loans.length > 0)) && (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="sticky top-0 z-10">
@@ -759,77 +745,79 @@ export default function PendingCollections() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
-                {loans.map((loan, i) => (
-                  <motion.tr
-                    key={loan.id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: 0.02 * i }}
-                    onClick={() => handleRowClick(loan)}
-                    className="hover:bg-secondary/40 transition-colors cursor-pointer group"
-                  >
-                    <td className="px-4 py-3 text-sm text-muted-foreground">
-                      {(pagination.page - 1) * pagination.limit + i + 1}
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="text-sm font-semibold text-primary group-hover:underline">
-                        {loan.loanNo}
-                      </p>
-                      <p className="text-xs font-medium text-foreground mt-0.5">{loan.name}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="text-sm font-medium text-foreground">{loan.vehicle}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {loan.vehicleName && loan.vehicleName !== "-" ? loan.vehicleName : "—"}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">
-                      {loan.phone && loan.phone !== "-" ? (
-                        <span className="flex items-center gap-1.5 text-foreground/90 font-mono text-xs">
-                          <Phone className="h-3 w-3 text-muted-foreground" /> {loan.phone}
+                {loading ? (
+                  <TableSkeletonRows columns={12} rows={6} />
+                ) : (
+                  loans.map((loan, i) => (
+                    <motion.tr
+                      key={loan.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: 0.02 * i }}
+                      onClick={() => handleRowClick(loan)}
+                      className="hover:bg-secondary/40 transition-colors cursor-pointer group"
+                    >
+                      <td className="px-4 py-3 text-sm text-muted-foreground">
+                        {(pagination.page - 1) * pagination.limit + i + 1}
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-sm font-semibold text-primary group-hover:underline">
+                          {loan.loanNo}
+                        </p>
+                        <p className="text-xs font-medium text-foreground mt-0.5">{loan.name}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-sm font-medium text-foreground">{loan.vehicle}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {loan.vehicleName && loan.vehicleName !== "-" ? loan.vehicleName : "—"}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">
+                        {loan.phone && loan.phone !== "-" ? (
+                          <span className="flex items-center gap-1.5 text-foreground/90 font-mono text-xs">
+                            <Phone className="h-3 w-3 text-muted-foreground" /> {loan.phone}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground font-mono text-xs">
+                        {loan.loanDate || loan.hpDate || "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <EmiProgressBar paid={loan.paidEmi} total={loan.totalEmi} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-medium text-foreground">
+                        ₹{loan.totalDue.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-medium text-emerald-600 dark:text-emerald-400">
+                        ₹{loan.paid.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-semibold text-rose-600 dark:text-rose-400">
+                        ₹{loan.pending.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right text-muted-foreground font-medium">
+                        ₹{loan.balance.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${dealTypeColors[loan.dealType] || "bg-secondary text-foreground"
+                            }`}
+                        >
+                          {loan.dealType}
                         </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground font-mono text-xs">
-                      {loan.loanDate || loan.hpDate || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <EmiProgressBar paid={loan.paidEmi} total={loan.totalEmi} />
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right font-medium text-foreground">
-                      ₹{loan.totalDue.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right font-medium text-emerald-600 dark:text-emerald-400">
-                      ₹{loan.paid.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right font-semibold text-rose-600 dark:text-rose-400">
-                      ₹{loan.pending.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-muted-foreground font-medium">
-                      ₹{loan.balance.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                          dealTypeColors[loan.dealType] || "bg-secondary text-foreground"
-                        }`}
-                      >
-                        {loan.dealType}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${
-                          statusBadgeStyles[loan.status] || "bg-secondary text-muted-foreground border-border"
-                        }`}
-                      >
-                        {loan.statusLabel || loan.status}
-                      </span>
-                    </td>
-                  </motion.tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${statusBadgeStyles[loan.status] || "bg-secondary text-muted-foreground border-border"
+                            }`}
+                        >
+                          {loan.statusLabel || loan.status}
+                        </span>
+                      </td>
+                    </motion.tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -837,65 +825,18 @@ export default function PendingCollections() {
 
         {/* Footer with Pagination */}
         {!loading && !error && pagination.total > 0 && (
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3.5 border-t border-border bg-card">
-            <span className="text-xs sm:text-sm text-muted-foreground">
-              Showing{" "}
-              <span className="font-medium text-foreground">
-                {(pagination.page - 1) * pagination.limit + 1}
-              </span>{" "}
-              to{" "}
-              <span className="font-medium text-foreground">
-                {Math.min(pagination.page * pagination.limit, pagination.total)}
-              </span>{" "}
-              of <span className="font-medium text-foreground">{pagination.total}</span> records
-            </span>
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPagination(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-                disabled={pagination.page <= 1}
-                className="h-8 px-2.5 text-xs"
-              >
-                Previous
-              </Button>
-              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1)
-                .filter(p => {
-                  if (pagination.totalPages <= 5) return true;
-                  return Math.abs(p - pagination.page) <= 1 || p === 1 || p === pagination.totalPages;
-                })
-                .map((p, idx, arr) => {
-                  const prevPage = arr[idx - 1];
-                  const showEllipsis = prevPage && p - prevPage > 1;
-                  return (
-                    <div key={p} className="flex items-center">
-                      {showEllipsis && <span className="px-1 text-xs text-muted-foreground">...</span>}
-                      <Button
-                        variant={p === pagination.page ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setPagination(prev => ({ ...prev, page: p }))}
-                        className={`h-8 w-8 p-0 text-xs ${
-                          p === pagination.page ? "bg-primary text-primary-foreground font-bold shadow-sm" : ""
-                        }`}
-                      >
-                        {p}
-                      </Button>
-                    </div>
-                  );
-                })}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setPagination(prev => ({ ...prev, page: Math.min(prev.totalPages, prev.page + 1) }))
-                }
-                disabled={pagination.page >= pagination.totalPages}
-                className="h-8 px-2.5 text-xs"
-              >
-                Next
-              </Button>
-            </div>
-          </div>
+          <TablePagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            pageSize={pagination.limit}
+            totalItems={pagination.total}
+            startIndex={(pagination.page - 1) * pagination.limit + 1}
+            endIndex={Math.min(pagination.page * pagination.limit, pagination.total)}
+            onPageChange={(p) => setPagination(prev => ({ ...prev, page: p }))}
+            onPageSizeChange={(limit) => setPagination(prev => ({ ...prev, limit, page: 1 }))}
+            pageSizeOptions={[15, 25, 50]}
+            disabled={loading}
+          />
         )}
       </motion.div>
     </div>

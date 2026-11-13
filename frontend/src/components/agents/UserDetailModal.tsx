@@ -56,7 +56,7 @@ const UserDetailModal = ({ user, onClose, financeCompanies }: {
   financeCompanies: FinanceCompany[];
 }) => {
   return (
-    <div className="fixed inset-0 bg-foreground/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 backdrop-blur-[1px] bg-black/25 flex items-center justify-center z-50 p-4">
       <div className="bg-card rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-border">
         {/* Header */}
         <div className="sticky top-0 bg-card border-b border-border px-6 py-5 flex justify-between items-center rounded-t-2xl">

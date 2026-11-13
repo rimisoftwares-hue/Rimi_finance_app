@@ -571,7 +571,7 @@ export const FileInput: React.FC<FileInputProps> = ({
 
       {/* ══════════════════════ CAMERA MODAL (PORTAL) ══════════════════════ */}
       {cameraOpen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[99999] pointer-events-auto flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-0 sm:p-4">
+        <div className="fixed inset-0 z-[99999] pointer-events-auto flex items-end sm:items-center justify-center backdrop-blur-[1px] bg-black/25 p-0 sm:p-4">
           <div className="bg-gray-950 text-white rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl flex flex-col w-full sm:max-w-md border border-gray-800 animate-in fade-in zoom-in-95 duration-150">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
@@ -674,7 +674,7 @@ export const FileInput: React.FC<FileInputProps> = ({
 
       {/* ══════════════════════ CROP MODAL (PORTAL) ══════════════════════ */}
       {cropOpen && tempImage && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[99999] pointer-events-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+        <div className="fixed inset-0 z-[99999] pointer-events-auto backdrop-blur-[1px] bg-black/25 flex items-center justify-center p-3 sm:p-5">
           <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95 duration-150 flex flex-col">
             <div className="p-5 space-y-4">
               {/* Header */}

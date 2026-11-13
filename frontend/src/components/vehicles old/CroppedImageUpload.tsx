@@ -115,7 +115,7 @@ export function CroppedImageUpload({
 
       {/* CROP MODAL */}
       {openCrop && tempImage && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+        <div className="fixed inset-0 backdrop-blur-[1px] bg-black/25 flex items-center justify-center z-50">
           <div className="bg-white p-4 rounded-lg max-w-xl w-full">
             <ReactCrop
               crop={crop}

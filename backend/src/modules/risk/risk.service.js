@@ -24,7 +24,6 @@ const {
   creditBand,
   scoreCustomer,
   monthlyPaymentStatus,
-  mockDistanceKm,
   distanceRisk,
   creditRecommendation,
   todayIso,
@@ -121,8 +120,7 @@ function normalizePhones(raw) {
  */
 function buildCustomerRiskSql(whereSql, { requireLoan = true } = {}) {
   const loanJoin = requireLoan ? 'JOIN LATERAL' : 'LEFT JOIN LATERAL';
-  // base_date = COALESCE(hp_date, due_date, customer.created_at::date)
-  const baseDate = 'COALESCE(l.hp_date, l.due_date, c.created_at::date)';
+  const baseDate = 'public.fn_clamped_installment_date(COALESCE(l.due_date, l.hp_date, c.created_at::date), 1)';
   const delay = `(p.payment_date - COALESCE(p.due_date, ${baseDate}))`;
 
   return `
@@ -153,7 +151,7 @@ function buildCustomerRiskSql(whereSql, { requireLoan = true } = {}) {
       COALESCE(ph.phones, '[]'::json) AS phones,
       caa.agent_id,
       COALESCE(ud.staff_name, u.username) AS agent_name,
-      COALESCE(pay.total_paid, 0) AS total_paid,
+      (COALESCE(pay.total_paid, 0) + COALESCE(sub_pay.sub_paid, 0)) AS total_paid,
       COALESCE(pay.total_penalty, 0) AS total_penalty,
       COALESCE(pay.payment_count, 0)::int AS payment_count,
       COALESCE(pay.on_time_count, 0)::int AS on_time_count,
@@ -162,15 +160,30 @@ function buildCustomerRiskSql(whereSql, { requireLoan = true } = {}) {
       COALESCE(pay.late_over_60, 0)::int AS late_over_60,
       COALESCE(ptp.broken_ptp_count, 0)::int AS broken_ptp_count,
       COALESCE(sz.has_seizure, false) AS has_seizure,
-      cll.distance_from_home
+      cll.distance_from_home,
+      cll.latitude AS live_latitude,
+      cll.longitude AS live_longitude,
+      cll.last_ping_at,
+      cll.is_online AS live_is_online,
+      addr_curr.house_no AS curr_house_no,
+      addr_curr.street AS curr_street,
+      addr_curr.street_name AS curr_street_name,
+      addr_curr.village AS curr_village,
+      addr_curr.address AS curr_address,
+      addr_curr.city AS curr_city,
+      addr_curr.district AS curr_district,
+      addr_curr.state AS curr_state,
+      addr_curr.pincode AS curr_pincode,
+      addr_curr.latitude AS curr_addr_latitude,
+      addr_curr.longitude AS curr_addr_longitude
     FROM customers c
     JOIN finance_detail f ON f.id = c.finance_id
     ${loanJoin} (
       SELECT l_sub.*
       FROM loans l_sub
       WHERE l_sub.customer_id = c.id
-        AND l_sub.finance_id = $1::uuid
-      ORDER BY l_sub.hp_date DESC NULLS LAST, l_sub.id DESC
+        AND (l_sub.finance_id = $1::uuid OR l_sub.finance_id IS NULL)
+      ORDER BY l_sub.due_date DESC NULLS LAST, l_sub.hp_date DESC NULLS LAST, l_sub.id DESC
       LIMIT 1
     ) l ON true
     LEFT JOIN vehicle_detail v ON v.id = COALESCE(l.vehicle_id, c.vehicle_id)
@@ -214,8 +227,19 @@ function buildCustomerRiskSql(whereSql, { requireLoan = true } = {}) {
       FROM payments p
       WHERE p.customer_id = c.id
         AND (p.finance_id = $1::uuid OR p.finance_id IS NULL)
-        AND COALESCE(p.payment_status::text, 'active') = 'active'
+        AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+        AND COALESCE(p.status::text, 'paid') <> 'cancelled'
     ) pay ON true
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(COALESCE(sd.paid_amount, 0)), 0) AS sub_paid
+      FROM sub_due sd
+      JOIN payments p_sd ON p_sd.id = sd.payment_id
+      WHERE sd.customer_id = c.id
+        AND sd.finance_id = $1::uuid
+        AND COALESCE(sd.status::text, 'active') <> 'cancelled'
+        AND COALESCE(p_sd.payment_status::text, 'active') <> 'cancelled'
+        AND COALESCE(p_sd.status::text, 'paid') <> 'cancelled'
+    ) sub_pay ON true
     LEFT JOIN LATERAL (
       SELECT GREATEST(
                COUNT(*) FILTER (WHERE ptp_x.ptp_status::text = 'broken'),
@@ -235,6 +259,18 @@ function buildCustomerRiskSql(whereSql, { requireLoan = true } = {}) {
       ) AS has_seizure
     ) sz ON true
     LEFT JOIN customer_live_locations cll ON cll.customer_id = c.id
+    LEFT JOIN LATERAL (
+      SELECT
+        a.house_no, a.street, a.street_name, a.village, a.address,
+        a.city, a.district, a.state, a.pincode, a.latitude, a.longitude
+      FROM address_history ah
+      JOIN addresses a ON a.id = ah.address_id
+      WHERE ah.entity_type = 'customer'
+        AND ah.entity_id = c.id::text
+        AND ah.is_current = 1
+      ORDER BY ah.changed_at DESC NULLS LAST, ah.id DESC
+      LIMIT 1
+    ) addr_curr ON true
     WHERE c.finance_id = $1::uuid
       AND ${whereSql}
     ORDER BY c.hplno ASC NULLS LAST, c.id ASC
@@ -282,7 +318,7 @@ function scoreRow(r, asOfDate) {
   );
 
   const hasLiveDistance = r.distance_from_home !== null && r.distance_from_home !== undefined;
-  const distanceFromHome = hasLiveDistance ? round1(r.distance_from_home) : mockDistanceKm(r.customer_id);
+  const distanceFromHome = hasLiveDistance ? round1(r.distance_from_home) : null;
   const allPhones = normalizePhones(r.phones);
 
   return {
@@ -293,7 +329,7 @@ function scoreRow(r, asOfDate) {
     riskLevel,
     allPhones,
     distanceFromHome,
-    distanceIsMock: !hasLiveDistance,
+    distanceIsMock: false,
     vehicleName: [r.brand, r.model].filter(Boolean).join(' ') || null,
     vehicleType: humanize(r.body_type || r.loan_type),
   };
@@ -394,7 +430,7 @@ async function getRiskAlerts(financeId, filters = {}) {
   if (riskLevel !== 'all') customers = customers.filter((c) => c.riskLevel === riskLevel);
   if (riskType === 'payment') customers = customers.filter((c) => c.overdueDays > 0);
   if (riskType === 'credit') customers = customers.filter((c) => c.creditScore < CREDIT_RISK_THRESHOLD);
-  if (riskType === 'distance') customers = customers.filter((c) => c.distanceFromHome > DISTANCE_RISK_KM);
+  if (riskType === 'distance') customers = customers.filter((c) => c.distanceFromHome !== null && c.distanceFromHome > DISTANCE_RISK_KM);
   if (agentId === 'unassigned') customers = customers.filter((c) => !c.assignedAgentId);
   else if (agentId !== 'all') customers = customers.filter((c) => c.assignedAgentId === agentId);
   if (search) customers = customers.filter((c) => matchesSearch(c, search));
@@ -418,7 +454,15 @@ async function getRiskAlerts(financeId, filters = {}) {
 const MONTHLY_PAYMENTS_SQL = `
   SELECT
     TO_CHAR(COALESCE(p.payment_date, p.due_date), 'YYYY-MM') AS month_key,
-    SUM(COALESCE(p.amount, 0)) AS total_paid,
+    SUM(
+      COALESCE(p.amount, 0) + COALESCE((
+        SELECT SUM(COALESCE(sd.paid_amount, 0))
+        FROM sub_due sd
+        WHERE sd.payment_id = p.id
+          AND sd.finance_id = $1::uuid
+          AND COALESCE(sd.status::text, 'active') <> 'cancelled'
+      ), 0)
+    ) AS total_paid,
     SUM(COALESCE(p.penalty, 0)) AS total_penalty,
     COUNT(*)::int AS payment_count,
     MAX(GREATEST(0, COALESCE(p.payment_date - p.due_date, 0)))::int AS max_delay_days
@@ -426,7 +470,8 @@ const MONTHLY_PAYMENTS_SQL = `
   JOIN customers c ON c.id = p.customer_id AND c.finance_id = $1::uuid
   WHERE p.customer_id = $2::uuid
     AND (p.finance_id = $1::uuid OR p.finance_id IS NULL)
-    AND COALESCE(p.payment_status::text, 'active') = 'active'
+    AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+    AND COALESCE(p.status::text, 'paid') <> 'cancelled'
   GROUP BY 1
   ORDER BY 1 ASC
 `;
@@ -465,27 +510,6 @@ function formatAddress(a) {
 }
 
 /**
- * Mock current location — keeps the existing UI shape until live GPS lands.
- * Deterministic: offset from home by the mock distance along an id-derived bearing.
- */
-function buildMockCurrentLocation(customerId, homeLat, homeLng, distanceKm) {
-  const baseLat = Number.isFinite(homeLat) ? homeLat : DEFAULT_HOME_COORDS.lat;
-  const baseLng = Number.isFinite(homeLng) ? homeLng : DEFAULT_HOME_COORDS.lng;
-  // reuse the stable hash via mockDistanceKm on a salted id to get a bearing
-  const bearingDeg = Math.round((mockDistanceKm(`${customerId}:bearing`) - 1.5) / 16.5 * 359);
-  const bearing = (bearingDeg * Math.PI) / 180;
-  const dLat = (distanceKm / 111) * Math.cos(bearing);
-  const dLng = (distanceKm / (111 * Math.cos((baseLat * Math.PI) / 180))) * Math.sin(bearing);
-  return {
-    address: `Approx. ${distanceKm} km from home (live GPS pending)`,
-    latitude: Math.round((baseLat + dLat) * 1e6) / 1e6,
-    longitude: Math.round((baseLng + dLng) * 1e6) / 1e6,
-    lastSeenHome: null,
-    isMock: true,
-  };
-}
-
-/**
  * GET /api/risk/customers/:customerId/deep-view
  */
 async function getCustomerDeepView(financeId, customerId) {
@@ -508,14 +532,59 @@ async function getCustomerDeepView(financeId, customerId) {
 
   const homeLat = addr && addr.latitude !== null ? Number(addr.latitude) : (r.home_latitude !== null ? Number(r.home_latitude) : NaN);
   const homeLng = addr && addr.longitude !== null ? Number(addr.longitude) : (r.home_longitude !== null ? Number(r.home_longitude) : NaN);
+  const homeFormatted = formatAddress(addr) || r.legacy_home_address || null;
 
   const rate = r.interest_rate !== null && r.interest_rate !== undefined ? num(r.interest_rate) : null;
   const yearly = rate !== null ? round2(rate * 12) : null;
 
+  const liveLat = r.live_latitude !== null && r.live_latitude !== undefined ? Number(r.live_latitude) : NaN;
+  const liveLng = r.live_longitude !== null && r.live_longitude !== undefined ? Number(r.live_longitude) : NaN;
+  const hasLiveGps = Number.isFinite(liveLat) && Number.isFinite(liveLng);
+
+  const currentLocation = hasLiveGps
+    ? {
+      address: s.distanceFromHome !== null ? `${s.distanceFromHome} km from home` : 'Live GPS location',
+      latitude: liveLat,
+      longitude: liveLng,
+      lastSeenHome: null,
+      isMock: false,
+    }
+    : {
+      address: 'Live GPS not available',
+      latitude: Number.isFinite(homeLat) ? homeLat : null,
+      longitude: Number.isFinite(homeLng) ? homeLng : null,
+      lastSeenHome: null,
+      isMock: false,
+    };
+
+  const locationHistory = [];
+  if (hasLiveGps) {
+    locationHistory.push({
+      id: `live-${r.customer_id}`,
+      address: currentLocation.address,
+      latitude: liveLat,
+      longitude: liveLng,
+      distanceFromHome: s.distanceFromHome,
+      timestamp: r.last_ping_at ? new Date(r.last_ping_at).toISOString() : asOfDate,
+      isHomeLocation: s.distanceFromHome !== null ? s.distanceFromHome <= 0.5 : false,
+    });
+  }
+  if (Number.isFinite(homeLat) && Number.isFinite(homeLng)) {
+    locationHistory.push({
+      id: `home-${r.customer_id}`,
+      address: homeFormatted || 'Registered Home Address',
+      latitude: homeLat,
+      longitude: homeLng,
+      distanceFromHome: 0,
+      timestamp: 'Registered Home',
+      isHomeLocation: true,
+    });
+  }
+
   const customer = {
     ...toCustomerSummary(s),
-    homeAddress: formatAddress(addr) || r.legacy_home_address || null,
-    currentLocation: buildMockCurrentLocation(r.customer_id, homeLat, homeLng, s.distanceFromHome),
+    homeAddress: homeFormatted,
+    currentLocation,
   };
 
   const loan = r.loan_id
@@ -571,7 +640,237 @@ async function getCustomerDeepView(financeId, customerId) {
     },
   };
 
-  return { customer, loan, monthlyPayments, risk };
+  return { customer, loan, monthlyPayments, risk, locationHistory };
+}
+
+// ─── 2b. Locator Overview (Track, LiveMap, Insights — zero mock data) ─────────
+
+const LOCATOR_AGENTS_SQL = `
+  SELECT
+    u.id::text AS id,
+    COALESCE(ud.staff_name, u.username) AS name,
+    COALESCE(al.is_online, false) AS is_online,
+    al.latitude,
+    al.longitude,
+    al.battery_level,
+    al.last_updated_at,
+    COALESCE(asgn.assigned_count, 0)::int AS assigned_count
+  FROM users u
+  JOIN user_allowed_companies uac
+    ON uac.user_id = u.id
+   AND uac.finance_id = $1::uuid
+  LEFT JOIN users_details ud
+    ON ud.user_id = u.id
+   AND ud.finance_id = $1::uuid
+  LEFT JOIN agent_locations al
+    ON al.user_id = u.id
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS assigned_count
+    FROM customer_agent_assignments caa
+    WHERE caa.agent_id = u.id
+      AND caa.finance_id = $1::uuid
+      AND caa.status IN ('pending', 'visited')
+  ) asgn ON true
+  WHERE uac.role = 'agent'
+    AND uac.is_active = 1
+    AND u.is_active = 1
+  ORDER BY name ASC
+`;
+
+const LOCATOR_ASSIGNMENT_EVENTS_SQL = `
+  SELECT
+    caa.id::text AS event_id,
+    caa.status::text AS assignment_status,
+    COALESCE(caa.completed_at, caa.assigned_at) AS event_at,
+    c.cname AS customer_name,
+    c.hplno,
+    COALESCE(ud.staff_name, u.username, 'Agent') AS agent_name
+  FROM customer_agent_assignments caa
+  JOIN customers c
+    ON c.id = caa.customer_id
+   AND c.finance_id = caa.finance_id
+  LEFT JOIN users u ON u.id = caa.agent_id
+  LEFT JOIN users_details ud
+    ON ud.user_id = u.id
+   AND ud.finance_id = caa.finance_id
+  WHERE caa.finance_id = $1::uuid
+  ORDER BY COALESCE(caa.completed_at, caa.assigned_at) DESC NULLS LAST
+  LIMIT 8
+`;
+
+/**
+ * GET /api/risk/locator
+ * Powers Track.tsx, LiveMap.tsx, and Insights.tsx strictly from tenant-scoped PostgreSQL data.
+ */
+async function getLocatorOverview(financeId, filters = {}) {
+  const { riskType, riskLevel, agentId, search } = validateAlertFilters(filters);
+  const asOfDate = todayIso();
+
+  const [customerResult, agentResult, assignmentEventsResult] = await Promise.all([
+    db.query(buildCustomerRiskSql(`c.loan_status::text IN ('active', 'seized')`), [financeId]),
+    db.query(LOCATOR_AGENTS_SQL, [financeId]),
+    db.query(LOCATOR_ASSIGNMENT_EVENTS_SQL, [financeId]),
+  ]);
+
+  const all = customerResult.rows.map((r) => {
+    const s = scoreRow(r, asOfDate);
+    const addrObj = {
+      house_no: r.curr_house_no,
+      street: r.curr_street,
+      street_name: r.curr_street_name,
+      village: r.curr_village,
+      address: r.curr_address,
+      city: r.curr_city,
+      district: r.curr_district,
+      state: r.curr_state,
+      pincode: r.curr_pincode,
+    };
+    const formattedHome = formatAddress(addrObj) || r.legacy_home_address || null;
+    const liveLat = r.live_latitude !== null && r.live_latitude !== undefined ? Number(r.live_latitude) : NaN;
+    const liveLng = r.live_longitude !== null && r.live_longitude !== undefined ? Number(r.live_longitude) : NaN;
+    const homeLat = r.curr_addr_latitude !== null && r.curr_addr_latitude !== undefined
+      ? Number(r.curr_addr_latitude)
+      : (r.home_latitude !== null && r.home_latitude !== undefined ? Number(r.home_latitude) : NaN);
+    const homeLng = r.curr_addr_longitude !== null && r.curr_addr_longitude !== undefined
+      ? Number(r.curr_addr_longitude)
+      : (r.home_longitude !== null && r.home_longitude !== undefined ? Number(r.home_longitude) : NaN);
+
+    const hasLiveGps = Number.isFinite(liveLat) && Number.isFinite(liveLng);
+    const hasHomeCoords = Number.isFinite(homeLat) && Number.isFinite(homeLng);
+    const currentLatitude = hasLiveGps ? liveLat : (hasHomeCoords ? homeLat : null);
+    const currentLongitude = hasLiveGps ? liveLng : (hasHomeCoords ? homeLng : null);
+    const areaLabel = [r.curr_city, r.curr_district, r.curr_village]
+      .map((x) => (x ? String(x).trim() : ''))
+      .find(Boolean) || null;
+
+    return {
+      ...toCustomerSummary(s),
+      riskLevel: s.riskLevel,
+      creditScore: s.credit.creditScore,
+      creditBand: s.credit.creditBand,
+      dueRiskScore: s.due.dueRiskScore,
+      overdueDays: s.metrics.overdueDays,
+      overdueAmount: s.metrics.overdueAmount,
+      pendingAmount: s.metrics.pendingAmount,
+      hasLiveGps,
+      currentLatitude,
+      currentLongitude,
+      currentAddress: hasLiveGps
+        ? (s.distanceFromHome !== null ? `${s.distanceFromHome} km from home` : 'Live GPS location')
+        : (formattedHome || 'Location not recorded'),
+      homeAddress: formattedHome,
+      lastPingAt: r.last_ping_at ? new Date(r.last_ping_at).toISOString() : null,
+      area: areaLabel,
+    };
+  });
+
+  const totalCount = all.length;
+  const distCounts = {
+    safe: all.filter((c) => c.riskLevel === 'safe').length,
+    warning: all.filter((c) => c.riskLevel === 'warning').length,
+    high: all.filter((c) => c.riskLevel === 'high').length,
+    critical: all.filter((c) => c.riskLevel === 'critical').length,
+  };
+
+  const riskDistribution = [
+    { name: 'Safe', key: 'safe', value: distCounts.safe, pct: totalCount ? round1((distCounts.safe * 100) / totalCount) : 0, color: '#22c55e' },
+    { name: 'Warning', key: 'warning', value: distCounts.warning, pct: totalCount ? round1((distCounts.warning * 100) / totalCount) : 0, color: '#eab308' },
+    { name: 'High', key: 'high', value: distCounts.high, pct: totalCount ? round1((distCounts.high * 100) / totalCount) : 0, color: '#ef4444' },
+    { name: 'Critical', key: 'critical', value: distCounts.critical, pct: totalCount ? round1((distCounts.critical * 100) / totalCount) : 0, color: '#991b1b' },
+  ];
+
+  // Real location distribution grouped by city/district/village
+  const areaMap = new Map();
+  for (const c of all) {
+    const key = c.area || 'Unspecified';
+    areaMap.set(key, (areaMap.get(key) || 0) + 1);
+  }
+  const topLocations = Array.from(areaMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([area, count]) => ({
+      area,
+      customers: count,
+      pct: totalCount ? Math.round((count * 100) / totalCount) : 0,
+    }));
+
+  const agents = agentResult.rows.map((a) => ({
+    id: a.id,
+    name: a.name,
+    status: a.is_online ? 'online' : 'offline',
+    isOnline: Boolean(a.is_online),
+    currentLatitude: a.latitude !== null && a.latitude !== undefined ? Number(a.latitude) : null,
+    currentLongitude: a.longitude !== null && a.longitude !== undefined ? Number(a.longitude) : null,
+    batteryLevel: a.battery_level !== null && a.battery_level !== undefined ? Number(a.battery_level) : null,
+    assignedCount: Number(a.assigned_count || 0),
+    lastUpdatedAt: a.last_updated_at ? new Date(a.last_updated_at).toISOString() : null,
+  }));
+
+  // Real activity feed constructed from assignment events + live GPS pings + active critical alerts
+  const activityFeed = [];
+  for (const ev of assignmentEventsResult.rows) {
+    const hplText = ev.hplno != null ? ` (HPL #${ev.hplno})` : '';
+    const isVisit = ev.assignment_status === 'visited' || ev.assignment_status === 'completed';
+    activityFeed.push({
+      id: `asgn-${ev.event_id}`,
+      type: isVisit ? 'visit' : 'move',
+      message: isVisit
+        ? `${ev.agent_name} visited ${ev.customer_name}${hplText}`
+        : `${ev.agent_name} assigned to ${ev.customer_name}${hplText}`,
+      timestamp: ev.event_at ? new Date(ev.event_at).toISOString() : null,
+    });
+  }
+  for (const c of all.filter((x) => x.riskLevel === 'critical' || x.riskLevel === 'high').slice(0, 5)) {
+    activityFeed.push({
+      id: `risk-${c.id}`,
+      type: 'alert',
+      message: `${c.name}${c.hplno != null ? ` (HPL #${c.hplno})` : ''} — ${c.overdueDays}d overdue, ₹${Math.round(c.overdueAmount).toLocaleString('en-IN')} due (${c.riskLevel.toUpperCase()})`,
+      timestamp: c.lastPingAt || asOfDate,
+    });
+  }
+
+  let customers = all;
+  if (riskLevel !== 'all') customers = customers.filter((c) => c.riskLevel === riskLevel);
+  if (riskType === 'payment') customers = customers.filter((c) => c.overdueDays > 0);
+  if (riskType === 'credit') customers = customers.filter((c) => c.creditScore < CREDIT_RISK_THRESHOLD);
+  if (riskType === 'distance') customers = customers.filter((c) => c.distanceFromHome !== null && c.distanceFromHome > DISTANCE_RISK_KM);
+  if (agentId === 'unassigned') customers = customers.filter((c) => !c.assignedAgentId);
+  else if (agentId !== 'all') customers = customers.filter((c) => c.assignedAgentId === agentId);
+  if (search) customers = customers.filter((c) => matchesSearch(c, search));
+
+  customers.sort((a, b) =>
+    (RISK_SEVERITY[b.riskLevel] - RISK_SEVERITY[a.riskLevel]) ||
+    (b.dueRiskScore - a.dueRiskScore) ||
+    (b.overdueDays - a.overdueDays) ||
+    (a.creditScore - b.creditScore)
+  );
+
+  const trackedWithDistance = customers.filter((c) => c.distanceFromHome !== null);
+  const avgDistanceKm = trackedWithDistance.length
+    ? round1(trackedWithDistance.reduce((sum, c) => sum + Number(c.distanceFromHome || 0), 0) / trackedWithDistance.length)
+    : null;
+
+  return {
+    asOfDate,
+    summary: {
+      totalPortfolio: totalCount,
+      filteredCount: customers.length,
+      gpsReportingCount: all.filter((c) => c.hasLiveGps).length,
+      mappableCount: customers.filter((c) => c.currentLatitude !== null && c.currentLongitude !== null).length,
+      criticalAlerts: distCounts.critical,
+      highAlerts: distCounts.high,
+      warnings: distCounts.warning,
+      safeCount: distCounts.safe,
+      totalAlerts: distCounts.critical + distCounts.high + distCounts.warning,
+      avgDistanceKm,
+      onlineAgentsCount: agents.filter((a) => a.isOnline).length,
+    },
+    riskDistribution,
+    topLocations,
+    agents,
+    activityFeed: activityFeed.slice(0, 10),
+    customers,
+  };
 }
 
 // ─── 3. Due analysis ──────────────────────────────────────────────────────────
@@ -592,7 +891,13 @@ const AGING_BUCKETS = [
  */
 function buildDueAnalysisSql() {
   const asOfColumns = Array.from({ length: TREND_MONTHS }, (_, i) =>
-    `COALESCE(SUM(COALESCE(p.amount, 0)) FILTER (WHERE p.payment_date <= ($2::date[])[${i + 1}]), 0) AS paid_asof_${i}`
+    `COALESCE(SUM(COALESCE(p.amount, 0) + COALESCE((
+          SELECT SUM(COALESCE(sd.paid_amount, 0))
+          FROM sub_due sd
+          WHERE sd.payment_id = p.id
+            AND sd.finance_id = $1::uuid
+            AND COALESCE(sd.status::text, 'active') <> 'cancelled'
+        ), 0)) FILTER (WHERE p.payment_date <= ($2::date[])[${i + 1}]), 0) AS paid_asof_${i}`
   ).join(',\n        ');
   const asOfSelect = Array.from({ length: TREND_MONTHS }, (_, i) => `COALESCE(pay.paid_asof_${i}, 0) AS paid_asof_${i}`)
     .join(',\n      ');
@@ -616,19 +921,28 @@ function buildDueAnalysisSql() {
       SELECT l_sub.*
       FROM loans l_sub
       WHERE l_sub.customer_id = c.id
-        AND l_sub.finance_id = $1::uuid
-      ORDER BY l_sub.hp_date DESC NULLS LAST, l_sub.id DESC
+        AND (l_sub.finance_id = $1::uuid OR l_sub.finance_id IS NULL)
+      ORDER BY l_sub.due_date DESC NULLS LAST, l_sub.hp_date DESC NULLS LAST, l_sub.id DESC
       LIMIT 1
     ) l ON true
     LEFT JOIN LATERAL (
       SELECT
-        SUM(COALESCE(p.amount, 0)) AS total_paid,
+        SUM(
+          COALESCE(p.amount, 0) + COALESCE((
+            SELECT SUM(COALESCE(sd.paid_amount, 0))
+            FROM sub_due sd
+            WHERE sd.payment_id = p.id
+              AND sd.finance_id = $1::uuid
+              AND COALESCE(sd.status::text, 'active') <> 'cancelled'
+          ), 0)
+        ) AS total_paid,
         MAX(p.payment_date) AS last_payment_date,
         ${asOfColumns}
       FROM payments p
       WHERE p.customer_id = c.id
         AND (p.finance_id = $1::uuid OR p.finance_id IS NULL)
-        AND COALESCE(p.payment_status::text, 'active') = 'active'
+        AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+        AND COALESCE(p.status::text, 'paid') <> 'cancelled'
     ) pay ON true
     WHERE c.finance_id = $1::uuid
   `;
@@ -863,6 +1177,7 @@ async function getCreditCheck(financeId, query = {}) {
 
 module.exports = {
   getRiskAlerts,
+  getLocatorOverview,
   getCustomerDeepView,
   getDueAnalysis,
   getCreditCheck,

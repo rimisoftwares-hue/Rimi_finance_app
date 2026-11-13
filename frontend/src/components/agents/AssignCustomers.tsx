@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { CapitalizedInput } from "../common/CapitalizedInput";
+import { TableSkeletonRows } from "../common";
 import { DatePicker } from "../ui/date-picker";
 import { Badge } from "../ui/badge";
 import { Checkbox } from "../ui/checkbox";
@@ -1015,14 +1016,7 @@ export default function AssignCustomers() {
                   </TableHeader>
                   <TableBody>
                     {loading ? (
-                      <TableRow>
-                        <TableCell colSpan={10} className="h-32 text-center">
-                          <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                            Loading customer accounts...
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                      <TableSkeletonRows columns={10} rows={6} />
                     ) : customers.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={10} className="h-32 text-center text-muted-foreground text-sm">

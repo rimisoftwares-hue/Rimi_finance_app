@@ -188,7 +188,11 @@ export default function Alerts() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{c.hplno ?? "—"}</td>
                   <td className="px-4 py-3 font-bold">
-                    <span className={c.distanceFromHome > 10 ? "text-red-600" : "text-yellow-600"}>{c.distanceFromHome} KM</span>
+                    {c.distanceFromHome !== null && c.distanceFromHome !== undefined ? (
+                      <span className={c.distanceFromHome > 10 ? "text-red-600" : "text-yellow-600"}>{c.distanceFromHome} KM</span>
+                    ) : (
+                      <span className="text-muted-foreground font-normal">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border capitalize ${getRiskBadgeVariant(c.riskLevel)}`}>

@@ -10,6 +10,14 @@ import { FileInput } from '../form/FileInput';
 import { DatePicker } from '../ui/date-picker';
 import { TimePicker } from '../ui/time-picker';
 import { CapitalizedInput } from '../common/CapitalizedInput';
+import { AppSelect } from '../common/AppSelect';
+
+const ADD_USER_ROLE_OPTIONS = [
+  { value: 'agent', label: 'Agent (Field Operations)' },
+  { value: 'staff', label: 'Staff (Office Operations)' },
+  { value: 'admin', label: 'Admin (Company Manager)' },
+  { value: 'owner', label: 'Owner (Full System Access)' },
+];
 
 import type { FinanceCompany, UserData } from './UserDetailModal';
 
@@ -439,9 +447,9 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
   const inputClass = 'input-field text-sm';
 
   return (
-    <div className="fixed inset-0 bg-foreground/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 backdrop-blur-[1px] bg-black/25 flex items-center justify-center z-50 p-4 animate-fade-in">
       <div className="bg-card rounded-2xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col border border-border overflow-hidden">
-        
+
         {/* Header */}
         <div className="sticky top-0 bg-card border-b border-border px-6 py-5 flex justify-between items-center z-10">
           <div className="flex items-center gap-3">
@@ -468,7 +476,7 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
 
         {/* Scrollable Form Body */}
         <form id="add-user-form" onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-8">
-          
+
           {/* Error Banner */}
           {formError && (
             <div className="bg-destructive/10 border-l-4 border-destructive p-4 rounded-lg flex items-start gap-3 animate-fade-in">
@@ -641,17 +649,12 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
                 <label className="block text-xs font-medium text-card-foreground mb-1.5 flex items-center gap-1">
                   <Briefcase className="h-3.5 w-3.5 text-muted-foreground" /> Role *
                 </label>
-                <select
+                <AppSelect
                   value={newUser.role}
-                  onChange={e => handleRoleChange(e.target.value as any)}
-                  className={inputClass}
-                  required
-                >
-                  <option value="agent">Agent (Field Operations)</option>
-                  <option value="staff">Staff (Office Operations)</option>
-                  <option value="admin">Admin (Company Manager)</option>
-                  <option value="owner">Owner (Full System Access)</option>
-                </select>
+                  onValueChange={(val) => handleRoleChange(val as any)}
+                  options={ADD_USER_ROLE_OPTIONS}
+                  triggerClassName="w-full h-[42px] px-4 py-2.5 rounded-lg text-sm"
+                />
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   {newUser.role === 'owner'
                     ? 'Full access across all companies'
@@ -694,11 +697,10 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
                     return (
                       <label
                         key={company.id}
-                        className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-all ${
-                          isSelected
+                        className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-all ${isSelected
                             ? 'bg-primary/10 border-primary/40'
                             : 'bg-secondary/30 border-border hover:border-primary/20'
-                        }`}
+                          }`}
                       >
                         <input
                           type="checkbox"
@@ -741,7 +743,7 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
             </h4>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              
+
               {/* Email Address */}
               <div>
                 <label className="block text-xs font-medium text-card-foreground mb-1.5 flex items-center gap-1.5">
@@ -753,17 +755,16 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
                   casing="lower"
                   value={newUser.email}
                   onChange={e => handleEmailChange(e.target.value)}
-                  className={`${inputClass} ${
-                    emailAvailable === true
+                  className={`${inputClass} ${emailAvailable === true
                       ? 'border-emerald-500/60 focus:ring-emerald-500/30'
                       : emailAvailable === false
                         ? 'border-destructive/60 focus:ring-destructive/30'
                         : ''
-                  }`}
+                    }`}
                   placeholder="user@example.com"
                   required
                 />
-                
+
                 {/* Email Availability & Existing User Action */}
                 {emailAvailable === true && (
                   <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
@@ -799,13 +800,12 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
                   casing="none"
                   value={newUser.phone_no}
                   onChange={e => handlePhoneChange(e.target.value)}
-                  className={`${inputClass} ${
-                    phoneAvailable === true
+                  className={`${inputClass} ${phoneAvailable === true
                       ? 'border-emerald-500/60 focus:ring-emerald-500/30'
                       : phoneAvailable === false
                         ? 'border-destructive/60 focus:ring-destructive/30'
                         : ''
-                  }`}
+                    }`}
                   placeholder="9876543210"
                   required
                 />
@@ -845,13 +845,12 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
                   casing="words"
                   value={newUser.username}
                   onChange={e => handleUsernameChange(e.target.value)}
-                  className={`${inputClass} ${
-                    usernameAvailable === true
+                  className={`${inputClass} ${usernameAvailable === true
                       ? 'border-emerald-500/60 focus:ring-emerald-500/30'
                       : usernameAvailable === false
                         ? 'border-destructive/60 focus:ring-destructive/30'
                         : ''
-                  }`}
+                    }`}
                   placeholder="johndoe"
                   required
                 />

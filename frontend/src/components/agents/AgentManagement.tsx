@@ -17,7 +17,6 @@ import {
   ChevronUp,
   Activity,
   Search,
-  Loader2,
   UserPlus,
 } from 'lucide-react';
 import apiClient from '../../api/apiClient';
@@ -26,6 +25,7 @@ import AddUserForm from './AddUserForm';
 import type { UserData, FinanceCompany } from './UserDetailModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { CapitalizedInput } from '../common/CapitalizedInput';
+import { TableSkeletonRows } from '../common';
 import { Button } from '../ui/button';
 
 const getRoleBadgeClass = (role: string) => {
@@ -279,7 +279,10 @@ const AgentManagement = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filteredUsers.map(user => (
+                  {isLoading && users.length === 0 ? (
+                    <TableSkeletonRows columns={4} rows={6} />
+                  ) : (
+                  filteredUsers.map(user => (
                     <React.Fragment key={user.id}>
                       <tr
                         className={`transition-colors hover:bg-secondary/30 ${
@@ -472,16 +475,10 @@ const AgentManagement = () => {
                         </tr>
                       )}
                     </React.Fragment>
-                  ))}
+                  ))
+                  )}
                 </tbody>
               </table>
-
-              {isLoading && users.length === 0 && (
-                <div className="px-6 py-16 text-center">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-3" />
-                  <p className="text-sm text-muted-foreground">Loading users...</p>
-                </div>
-              )}
 
               {!isLoading && filteredUsers.length === 0 && (
                 <div className="px-6 py-16 text-center">

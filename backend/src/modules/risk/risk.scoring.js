@@ -16,6 +16,11 @@
 
 'use strict';
 
+const {
+  resolveIstDateString,
+  computeAuthoritativeLoanLedger,
+} = require('../finance/financialCalculation.service');
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 // customers.loan_status is loan_status_enum ('active' | 'close' | 'seized').
@@ -47,9 +52,9 @@ function round2(value) {
   return Math.round(toNum(value) * 100) / 100;
 }
 
-/** Today's date as 'YYYY-MM-DD' (UTC) — same convention as the existing modules. */
+/** Today's calendar date as 'YYYY-MM-DD' in Asia/Kolkata (IST). */
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return resolveIstDateString();
 }
 
 /**
@@ -120,64 +125,42 @@ function isClosedStatus(loanStatus) {
  * @param {string} [input.asOfDate]          evaluation date, defaults to today
  */
 function computeLoanMetrics(input = {}) {
-  const dueAmount = toNum(input.dueAmount);
-  const netPayable = toNum(input.netPayable);
-  const hpAmount = toNum(input.hpAmount);
-  const hasDueMonth = input.dueMonth !== null && input.dueMonth !== undefined && input.dueMonth !== '';
-  const dueMonth = Math.max(0, toInt(input.dueMonth));
-  const totalPaid = Math.max(0, toNum(input.totalPaid));
+  const ledger = computeAuthoritativeLoanLedger({
+    loanId: input.loanId,
+    customerId: input.customerId,
+    loanStatus: input.loanStatus,
+    loanAmount: input.loanAmount ?? input.hpAmount,
+    hpAmount: input.hpAmount,
+    dueAmount: input.dueAmount,
+    netPayable: input.netPayable,
+    dueMonth: input.dueMonth,
+    validEmiPaid: input.validEmiPaid !== undefined ? input.validEmiPaid : input.totalPaid,
+    totalPenaltyPaid: input.totalPenaltyPaid,
+    loanPenaltyAmount: input.loanPenaltyAmount ?? input.penaltyAmount,
+    pendingPenaltiesTableSum: input.pendingPenaltiesTableSum,
+    dueDate: input.dueDate,
+    hpDate: input.hpDate,
+    customerCreatedAt: input.customerCreatedAt,
+    asOfDate: input.asOfDate,
+  });
 
-  // emi_amount = due_amount if > 0, else ROUND(COALESCE(net_payable, hp_amount) / GREATEST(1, due_month))
-  // (a zero net_payable is treated as missing, like NULL)
-  const principalBasis = netPayable > 0 ? netPayable : hpAmount;
-  const emiAmount = dueAmount > 0 ? dueAmount : Math.round(principalBasis / Math.max(1, dueMonth));
-
-  // total_loan = net_payable if > 0, else emi * due_month, else hp_amount, else 0
-  let totalLoan = 0;
-  if (netPayable > 0) totalLoan = netPayable;
-  else if (emiAmount * dueMonth > 0) totalLoan = emiAmount * dueMonth;
-  else if (hpAmount > 0) totalLoan = hpAmount;
-
-  const pendingAmount = Math.max(0, totalLoan - totalPaid);
-  const installmentsPaid = emiAmount > 0 ? Math.floor(totalPaid / emiAmount) : 0;
-
-  const base = parseDate(input.hpDate) || parseDate(input.dueDate) || parseDate(input.customerCreatedAt);
-  const asOf = parseDate(input.asOfDate) || parseDate(todayIso());
-
-  const result = {
-    totalPaid: round2(totalPaid),
-    emiAmount: round2(emiAmount),
-    totalLoan: round2(totalLoan),
-    pendingAmount: round2(pendingAmount),
-    installmentsPaid,
-    baseDate: formatDate(base),
-    nextDueDate: null,
-    overdueDays: 0,
-    expectedInstallments: 0,
-    missedEmis: 0,
-    overdueAmount: 0,
+  return {
+    totalPaid: ledger.validEmiPaid,
+    emiAmount: ledger.installmentAmount,
+    totalLoan: ledger.totalContractualDue,
+    pendingAmount: ledger.remainingScheduledEmiAmount,
+    totalOutstandingLoanBalance: ledger.totalOutstandingLoanBalance,
+    outstandingPenaltyAmount: ledger.outstandingPenaltyAmount,
+    installmentsPaid: ledger.installmentsCovered,
+    baseDate: ledger.anchorDate,
+    earliestUnpaidDueDate: ledger.earliestUnpaidDueDate,
+    upcomingEmiDueDate: ledger.nextEmiDueDate,
+    nextDueDate: ledger.earliestUnpaidDueDate || ledger.nextEmiDueDate,
+    overdueDays: ledger.overdueDays,
+    expectedInstallments: ledger.maturedInstallments,
+    missedEmis: ledger.pendingEmiCount,
+    overdueAmount: ledger.currentOverdueEmiAmount,
   };
-
-  if (!base) return result;
-
-  const nextDue = addMonths(base, installmentsPaid + 1);
-  result.nextDueDate = formatDate(nextDue);
-
-  const closed = isClosedStatus(input.loanStatus);
-  result.overdueDays = pendingAmount <= 0 || closed ? 0 : Math.max(0, diffDays(asOf, nextDue));
-
-  // expected = LEAST(due_month, GREATEST(0, FLOOR((today − base_date) / 30.0)))
-  // (PostgreSQL LEAST ignores NULL, so a missing tenure leaves the elapsed count uncapped)
-  const elapsed = Math.max(0, Math.floor(diffDays(asOf, base) / 30));
-  result.expectedInstallments = hasDueMonth ? Math.min(dueMonth, elapsed) : elapsed;
-  result.missedEmis = Math.max(0, result.expectedInstallments - installmentsPaid);
-
-  // Overdue amount can never exceed what is actually still owed.
-  result.overdueAmount = result.overdueDays > 0
-    ? round2(Math.min(pendingAmount, Math.max(emiAmount, result.missedEmis * emiAmount)))
-    : 0;
-
-  return result;
 }
 
 // ─── Credit score ─────────────────────────────────────────────────────────────

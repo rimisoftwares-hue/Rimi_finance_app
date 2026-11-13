@@ -1,8 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Plus, Search } from 'lucide-react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Search } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TablePagination, PageTableSkeleton } from '../components/common/table';
 
 interface CustomerContact {
   type: string;
@@ -90,27 +92,27 @@ const Customers = () => {
 
   const filteredCustomers = useMemo(() => {
     const searchValue = searchTerm.toLowerCase().trim();
-    
+
     return customers.filter(customer => {
       // First, check if the customer matches the current loan status filter
-      const matchesLoanStatus = 
-        currentFilter === 'all' || 
+      const matchesLoanStatus =
+        currentFilter === 'all' ||
         customer.loanStatus === currentFilter;
-      
+
       if (!matchesLoanStatus) return false;
-      
+
       // If no search term, return all matching loan status
       if (!searchValue) return true;
-      
+
       // Safely convert all values to strings
       const safeToString = (value: any): string => {
         if (value === null || value === undefined) return '';
         if (typeof value === 'string') return value;
         return String(value);
       };
-      
+
       // Check if it matches the search term
-      const matchesSearch = 
+      const matchesSearch =
         safeToString(customer.hplno).toLowerCase().includes(searchValue) ||
         safeToString(customer.vehicle_number).toLowerCase().includes(searchValue) ||
         safeToString(customer.cname).toLowerCase().includes(searchValue) ||
@@ -118,13 +120,25 @@ const Customers = () => {
         safeToString(customer.vehicleName).toLowerCase().includes(searchValue) ||
         safeToString(customer.vehicle_modal || customer.modelName).toLowerCase().includes(searchValue) ||
         safeToString(customer.brokerName).toLowerCase().includes(searchValue) ||
-        (customer.contacts || []).some(contact => 
+        (customer.contacts || []).some(contact =>
           safeToString(contact?.number).toLowerCase().includes(searchValue)
         );
-      
+
       return matchesSearch;
     });
   }, [customers, searchTerm, currentFilter]);
+
+  const {
+    paginatedItems: pagedCustomers,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filteredCustomers, { initialPageSize: 15 });
 
 
   const getImageUrl = (
@@ -176,15 +190,13 @@ const Customers = () => {
         ? `/owner/customers/${customerHplno}`
         : `/agent/customers/${customerHplno}`;
     navigate(path);
-    console.log('customerid :',customerHplno)
+    console.log('customerid :', customerHplno)
   };
 
   if (loading) return (
-    <div className="flex justify-center items-center min-h-[400px]">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-    </div>
+    <PageTableSkeleton statCardsCount={4} columns={6} rows={6} showSearch />
   );
-  
+
   if (error) return (
     <div className="bg-destructive/10 border border-destructive rounded-lg p-4">
       <p className="text-destructive">{error}</p>
@@ -201,22 +213,15 @@ const Customers = () => {
     <div className="min-h-screen bg-background text-foreground">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <h2 className="text-2xl font-bold text-foreground">
-          {currentFilter === 'all' ? 'All Customers' : 
-           currentFilter === 'close' ? 'Closed Loans' : 
-           currentFilter === 'seized' ? 'Seized Vehicles' : 'Active Loans'}
+          {currentFilter === 'all' ? 'All Customers' :
+            currentFilter === 'close' ? 'Closed Loans' :
+              currentFilter === 'seized' ? 'Seized Vehicles' : 'Active Loans'}
         </h2>
-        <Link 
-          to={"/AddCustomersForm"}  
-          className="flex items-center px-4 py-2.5 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-all duration-200"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Customer
-        </Link>
       </div>
-      
+
       {/* Stats Navigation - Updated for dark mode with 4 cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div 
+        <div
           onClick={() => handleStatClick('all')}
           className={`stat-card cursor-pointer ${currentFilter === 'all' ? 'ring-2 ring-primary/20' : 'hover:shadow-card-hover'}`}
         >
@@ -225,7 +230,7 @@ const Customers = () => {
             {totalCustomers}
           </p>
         </div>
-        <div 
+        <div
           onClick={() => handleStatClick('active')}
           className={`stat-card cursor-pointer ${currentFilter === 'active' ? 'ring-2 ring-primary/20' : 'hover:shadow-card-hover'}`}
         >
@@ -234,7 +239,7 @@ const Customers = () => {
             {activeLoans}
           </p>
         </div>
-        <div 
+        <div
           onClick={() => handleStatClick('close')}
           className={`stat-card cursor-pointer ${currentFilter === 'close' ? 'ring-2 ring-primary/20' : 'hover:shadow-card-hover'}`}
         >
@@ -243,7 +248,7 @@ const Customers = () => {
             {closedLoans}
           </p>
         </div>
-        <div 
+        <div
           onClick={() => handleStatClick('seized')}
           className={`stat-card cursor-pointer ${currentFilter === 'seized' ? 'ring-2 ring-primary/20' : 'hover:shadow-card-hover'}`}
         >
@@ -253,7 +258,7 @@ const Customers = () => {
           </p>
         </div>
       </div>
-      
+
       {/* Search and Filter - Updated for dark mode */}
       <div className="flex gap-4 mb-6">
         <div className="flex-1 relative">
@@ -263,7 +268,7 @@ const Customers = () => {
             placeholder="Search customers by HPL No, Vehicle, Name, Phone, Address..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 border border-input bg-card text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-primary transition-all duration-200 placeholder:text-muted-foreground"
+            className="w-full pl-10 pr-4 py-2.5 border border-input bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-primary transition-all duration-200"
           />
           {searchTerm && (
             <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
@@ -274,119 +279,131 @@ const Customers = () => {
           )}
         </div>
       </div>
-      
+
       {/* Customer List - Updated for dark mode */}
       <div className="card-elevated overflow-hidden">
         {filteredCustomers.length === 0 ? (
           <div className="p-8 text-center">
             <p className="text-muted-foreground">
-              {searchTerm 
+              {searchTerm
                 ? 'No customers found matching your search criteria.'
                 : 'No customers found.'}
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-border">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Customer
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Contact
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Vehicle Number
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Vehicle Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Vehicle Model
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Loan Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-card divide-y divide-border">
-                {filteredCustomers.map((customer) => (
-                  <tr 
-                    key={customer.id} 
-                    onClick={() => handleRowClick(customer.id)} 
-                    className="cursor-pointer hover:bg-muted/30 transition-colors duration-150"
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="h-10 w-10 rounded-full bg-muted overflow-hidden flex-shrink-0">
-                          {customer.cphoto ? (
-                            <img
-                              src={getImageUrl(customer.cphoto, 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop')}
-                              alt="Customer"
-                              className="h-10 w-10 rounded-full object-cover"
-                            />
-                          ) : (
-                            <div className="h-full w-full rounded-full bg-muted-foreground/20 flex items-center justify-center">
-                              <span className="text-xs text-muted-foreground">
-                                {customer.cname?.charAt(0).toUpperCase() || '?'}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-foreground">
-                            {customer.cname || 'N/A'}
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            <span>HPL No: </span>{customer.hplno}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap max-w-[200px]">
-                      <div className="text-sm text-foreground">
-                        {customer.contacts && customer.contacts.length > 0 
-                          ? customer.contacts[0].number 
-                          : 'N/A'}
-                      </div>
-                      <div className="text-sm text-muted-foreground truncate">
-                        {customer.caddress || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-foreground">
-                        {customer.vehicle_number || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm text-foreground">
-                        {customer.vehicleName || 'N/A'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm text-foreground">
-                        {customer.vehicle_modal || customer.modelName || 'N/A'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        customer.loanStatus === 'active' 
-                          ? 'bg-success/10 text-success dark:bg-success/20' 
-                          : customer.loanStatus === 'close'
-                          ? 'bg-muted text-muted-foreground dark:bg-muted-foreground/20'
-                          : customer.loanStatus === 'seized'
-                          ? 'bg-warning/10 text-warning dark:bg-warning/20'
-                          : 'bg-destructive/10 text-destructive dark:bg-destructive/20'
-                      }`}>
-                        {customer.loanStatus}
-                      </span>
-                    </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-border">
+                <thead className="bg-secondary/50 border-b border-border text-muted-foreground uppercase text-xs tracking-wider font-semibold">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Customer
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Contact
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Vehicle Number
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Vehicle Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Vehicle Model
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Loan Status
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="bg-card divide-y divide-border">
+                  {pagedCustomers.map((customer) => (
+                    <tr
+                      key={customer.id}
+                      onClick={() => handleRowClick(customer.id)}
+                      className="cursor-pointer hover:bg-muted/30 transition-colors duration-150"
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="h-10 w-10 rounded-full bg-muted overflow-hidden flex-shrink-0">
+                            {customer.cphoto ? (
+                              <img
+                                src={getImageUrl(customer.cphoto, 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop')}
+                                alt="Customer"
+                                className="h-10 w-10 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="h-full w-full rounded-full bg-muted-foreground/20 flex items-center justify-center">
+                                <span className="text-xs text-muted-foreground">
+                                  {customer.cname?.charAt(0).toUpperCase() || '?'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="ml-4">
+                            <div className="text-sm font-medium text-foreground">
+                              {customer.cname || 'N/A'}
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                              <span>HPL No: </span>{customer.hplno}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap max-w-[200px]">
+                        <div className="text-sm text-foreground">
+                          {customer.contacts && customer.contacts.length > 0
+                            ? customer.contacts[0].number
+                            : 'N/A'}
+                        </div>
+                        <div className="text-sm text-muted-foreground truncate">
+                          {customer.caddress || 'N/A'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-foreground">
+                          {customer.vehicle_number || 'N/A'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm text-foreground">
+                          {customer.vehicleName || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm text-foreground">
+                          {customer.vehicle_modal || customer.modelName || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 text-xs rounded-full ${customer.loanStatus === 'active'
+                            ? 'bg-success/10 text-success dark:bg-success/20'
+                            : customer.loanStatus === 'close'
+                              ? 'bg-muted text-muted-foreground dark:bg-muted-foreground/20'
+                              : customer.loanStatus === 'seized'
+                                ? 'bg-warning/10 text-warning dark:bg-warning/20'
+                                : 'bg-destructive/10 text-destructive dark:bg-destructive/20'
+                          }`}>
+                          {customer.loanStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              totalItems={totalItems}
+              startIndex={startIndex}
+              endIndex={endIndex}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              pageSizeOptions={[15, 25, 50]}
+            />
+          </>
         )}
       </div>
     </div>

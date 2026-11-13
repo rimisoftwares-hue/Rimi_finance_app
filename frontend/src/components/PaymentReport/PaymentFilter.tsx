@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { DatePicker } from '../ui/date-picker';
+import { AppSelect } from '../common';
 
 export type FilterType = 'today' | 'custom' | 'week' | 'month' | 'year';
 
@@ -71,23 +72,21 @@ const PaymentFilter: React.FC<PaymentFilterProps> = ({ onFilterChange, collector
 
       {/* Collector Filter Dropdown */}
       {collectors.length > 0 && (
-        <div className="mb-4">
+        <div className="mb-4 max-w-xs">
           <label htmlFor="collectorFilter" className="input-label">
             Filter by Collector
           </label>
-          <select
-            id="collectorFilter"
+          <AppSelect
             value={collectedBy}
-            onChange={(e) => handleCollectorChange(e.target.value)}
-            className="input-field w-full md:w-auto"
-          >
-            <option value="all">All Collectors</option>
-            {collectors.map((collector) => (
-              <option key={collector} value={collector}>
-                {collector}
-              </option>
-            ))}
-          </select>
+            onValueChange={handleCollectorChange}
+            options={[
+              { value: 'all', label: 'All Collectors' },
+              ...collectors.map((collector) => ({
+                value: collector,
+                label: collector,
+              })),
+            ]}
+          />
         </div>
       )}
       

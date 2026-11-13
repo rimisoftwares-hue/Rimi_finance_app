@@ -177,6 +177,10 @@ function ProfileSkeleton() {
   );
 }
 
+// ── Header Action Button Style (matches CompanyProfile header action buttons) ──
+const headerActionBtn =
+  "bg-white/20 text-primary-foreground border-white/30 hover:bg-white/30 backdrop-blur-sm shadow-sm text-xs font-medium";
+
 // ── Component ─────────────────────────────────────────────
 export default function UserProfile() {
   const [showHistory, setShowHistory] = useState(false);
@@ -333,34 +337,34 @@ export default function UserProfile() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
-            <Button size="sm" variant="secondary" className="text-xs">
-              <Edit className="h-3 w-3 mr-1" /> Edit Profile
+            <Button size="sm" variant="secondary" className={headerActionBtn}>
+              <Edit className="h-4 w-4 mr-1.5" /> Edit Profile
             </Button>
             <Button
               size="sm"
               variant="secondary"
-              className="text-xs"
+              className={headerActionBtn}
               onClick={() => setJoinCodeOpen(true)}
             >
-              <KeyRound className="h-3 w-3 mr-1" /> Join with Code
+              <KeyRound className="h-4 w-4 mr-1.5" /> Join with Code
             </Button>
             {canInvite && (
               <Button
                 size="sm"
                 variant="secondary"
-                className="text-xs"
+                className={headerActionBtn}
                 onClick={() => navigate("/invite")}
               >
-                <UserPlus className="h-3 w-3 mr-1" /> Invite Agent
+                <UserPlus className="h-4 w-4 mr-1.5" /> Invite Agent
               </Button>
             )}
             <Button
               size="sm"
               variant="secondary"
-              className="text-xs"
+              className={headerActionBtn}
               onClick={() => setChangePasswordOpen(true)}
             >
-              <Lock className="h-3 w-3 mr-1" /> Change Password
+              <Lock className="h-4 w-4 mr-1.5" /> Change Password
             </Button>
           </div>
         </div>
@@ -507,7 +511,7 @@ export default function UserProfile() {
                           stroke="hsl(var(--muted-foreground))"
                           tickFormatter={(v) => (v >= 1000 ? `₹${Math.round(v / 1000)}K` : `₹${v}`)}
                         />
-                        <Tooltip formatter={(v: number) => [`₹${Number(v).toLocaleString("en-IN")}`, "Collection"]} />
+                        <Tooltip formatter={(v) => [`₹${Number(v ?? 0).toLocaleString("en-IN")}`, "Collection"]} />
                         <Area type="monotone" dataKey="collected" stroke="hsl(var(--primary))" fill="url(#profColGrad)" strokeWidth={2} />
                       </AreaChart>
                     </ResponsiveContainer>
@@ -520,7 +524,7 @@ export default function UserProfile() {
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                         <XAxis dataKey="month" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
                         <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" domain={[0, 100]} />
-                        <Tooltip formatter={(v: number) => [`${v}%`, "Rate"]} />
+                        <Tooltip formatter={(v) => [`${v ?? 0}%`, "Rate"]} />
                         <Bar dataKey="score" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>

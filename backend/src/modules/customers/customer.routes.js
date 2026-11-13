@@ -10,6 +10,10 @@ const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = re
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const Jimp = require('jimp');
 const { mapPendingCollectionRow } = require('./pendingCollectionsHelper');
+const {
+  queryTenantLoanLedgers,
+  resolveIstDateString,
+} = require('../finance/financialCalculation.service');
 const { isDeferredVehicle, resolveDeferredVehicle, mapVehicleUniqueViolation } = require('./deferredVehicle');
 const {
   evaluateCustomerKyc,
@@ -3076,8 +3080,10 @@ router.get('/search', async (req, res) => {
 router.get('/unpaidcustomers', enhancedCheckFinance, async (req, res) => {
   try {
     const financeId = req.financeId;
+    const asOfDate = resolveIstDateString();
 
-    const { rows: unpaidcustomers } = await db.query(`
+    const [{ rows: unpaidcustomers }, ledgerSnapshot] = await Promise.all([
+      db.query(`
       SELECT 
         c.id,
         c.hplno,
@@ -3127,11 +3133,13 @@ router.get('/unpaidcustomers', enhancedCheckFinance, async (req, res) => {
           WHERE ct.customer_id = c.id
             AND ct.contact_type = 'guardian'
         ) as guardian_numbers,
-        -- Payment due dates
+        -- Valid non-cancelled payment due dates
         (
           SELECT STRING_AGG(DISTINCT p.due_date::text, ',' ORDER BY p.due_date::text DESC)
           FROM payments p
           WHERE p.customer_id = c.id
+            AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+            AND COALESCE(p.status::text, 'paid') <> 'cancelled'
         ) as due_dates
       FROM customers c
       LEFT JOIN address_history ah ON 
@@ -3139,22 +3147,36 @@ router.get('/unpaidcustomers', enhancedCheckFinance, async (req, res) => {
         AND ah.entity_id = c.id::text
         AND ah.is_current = 1
       LEFT JOIN addresses a ON ah.address_id = a.id
-      LEFT JOIN loans l ON c.id = l.customer_id
+      LEFT JOIN loans l ON c.id = l.customer_id AND (l.finance_id IS NULL OR l.finance_id = c.finance_id)
       LEFT JOIN vehicle_detail vd ON COALESCE(l.vehicle_id, c.vehicle_id) = vd.id
       LEFT JOIN vehicle_info vi ON vd.vehicle_info_id = vi.id
       LEFT JOIN guardians g ON c.id = g.customer_id
       WHERE c.finance_id = $1
-        AND c.loan_status = 'active'
+        AND c.loan_status IN ('active', 'seized')
         AND l.due_amount > 0
         AND (l.due_month IS NULL OR l.due_month > 0)
       GROUP BY c.id, c.hplno, c.loan_status, c.broker_name, c.cname, c.cfname_value, c.cfname_unit, c.vehicle_id
-      ORDER BY c.id ASC`,
-      [financeId]
-    );
+      ORDER BY c.hplno ASC NULLS LAST, c.id ASC`,
+        [financeId]
+      ),
+      queryTenantLoanLedgers(financeId, { asOfDate }),
+    ]);
 
-    // Fetch KYC documents in batch for customers and guardians
-    const customerIds = unpaidcustomers.map(c => c.id.toString());
-    const guardianIds = unpaidcustomers.map(c => c.guardian_id).filter(Boolean);
+    // Filter strictly to customers who are genuinely overdue, due today, or seized
+    const eligibleRows = unpaidcustomers.filter((customer) => {
+      const rollup = ledgerSnapshot.customerRollups.get(String(customer.id));
+      if (customer.loanStatus === 'seized') return true;
+      if (!rollup) return false;
+      const isDueToday =
+        rollup.currentOverdueEmiAmount <= 0 &&
+        rollup.remainingScheduledEmiAmount > 0 &&
+        rollup.nextEmiDueDate === asOfDate;
+      return rollup.currentOverdueEmiAmount > 0 || isDueToday;
+    });
+
+    // Fetch KYC documents in batch for eligible customers and guardians
+    const customerIds = eligibleRows.map(c => c.id.toString());
+    const guardianIds = eligibleRows.map(c => c.guardian_id).filter(Boolean);
     const kycMap = new Map();
 
     if (customerIds.length > 0 || guardianIds.length > 0) {
@@ -3176,8 +3198,27 @@ router.get('/unpaidcustomers', enhancedCheckFinance, async (req, res) => {
       }
     }
 
-    // Process each customer's images with signed URLs
-    const formattedCustomers = await Promise.all(unpaidcustomers.map(async (customer) => {
+    // Process each customer's images with signed URLs and authoritative ledger metrics
+    const formattedCustomers = await Promise.all(eligibleRows.map(async (customer) => {
+      const rollup = ledgerSnapshot.customerRollups.get(String(customer.id));
+      const isDueToday = Boolean(
+        rollup &&
+        rollup.currentOverdueEmiAmount <= 0 &&
+        rollup.remainingScheduledEmiAmount > 0 &&
+        rollup.nextEmiDueDate === asOfDate
+      );
+      const authoritativeDaysUntilDue = rollup
+        ? (rollup.overdueDays > 0 ? rollup.overdueDays : (isDueToday ? 0 : -1))
+        : -1;
+      const authoritativePendingAmount = rollup
+        ? (rollup.currentOverdueEmiAmount > 0
+            ? rollup.currentOverdueEmiAmount
+            : (isDueToday ? rollup.installmentAmount : 0))
+        : 0;
+      const authoritativePendingMonths = rollup
+        ? (rollup.pendingEmiCount > 0 ? rollup.pendingEmiCount : (isDueToday ? 1 : 0))
+        : 0;
+
       const custDocs = kycMap.get(`customer:${customer.id}`) || {};
       const guardDocs = customer.guardian_id ? (kycMap.get(`guardian:${customer.guardian_id}`) || {}) : {};
 
@@ -3211,12 +3252,25 @@ router.get('/unpaidcustomers', enhancedCheckFinance, async (req, res) => {
         vehicleNumber: customer.vehicle_number,
         vehicleName: customer.vehicleName,
         modelName: customer.modelName,
-        dueMonth: customer.dueMonth,
-        dueAmount: customer.dueAmount,
-        dueDate: customer.dueDate || customer.due_date || null,
-        due_date: customer.due_date || customer.dueDate || null,
+        dueMonth: rollup?.totalInstallments ?? customer.dueMonth,
+        dueAmount: rollup?.installmentAmount ?? customer.dueAmount,
+        dueDate: rollup?.earliestUnpaidDueDate || rollup?.nextEmiDueDate || customer.dueDate || customer.due_date || null,
+        due_date: rollup?.earliestUnpaidDueDate || rollup?.nextEmiDueDate || customer.due_date || customer.dueDate || null,
         hpDate: customer.hpDate || null,
-        hasPaidDues: Boolean(customer.due_dates && customer.due_dates.trim()),
+        // Authoritative Shared Financial Ledger fields
+        overdueDays: rollup?.overdueDays ?? 0,
+        daysUntilDue: authoritativeDaysUntilDue,
+        pendingAmount: authoritativePendingAmount,
+        currentOverdueEmiAmount: rollup?.currentOverdueEmiAmount ?? 0,
+        pendingEmiCount: authoritativePendingMonths,
+        installmentsCovered: rollup?.installmentsCovered ?? 0,
+        earliestUnpaidDueDate: rollup?.earliestUnpaidDueDate ?? null,
+        nextEmiDueDate: rollup?.nextEmiDueDate ?? null,
+        remainingScheduledEmiAmount: rollup?.remainingScheduledEmiAmount ?? 0,
+        outstandingPenaltyAmount: rollup?.outstandingPenaltyAmount ?? 0,
+        totalOutstandingLoanBalance: rollup?.totalOutstandingLoanBalance ?? 0,
+        totalAmountPaid: rollup?.totalAmountPaid ?? 0,
+        hasPaidDues: Boolean((rollup && rollup.installmentsCovered > 0) || (customer.due_dates && customer.due_dates.trim())),
         paidDueDates: customer.due_dates
           ? customer.due_dates.split(',').filter(Boolean)
           : [],
@@ -3286,7 +3340,7 @@ router.get('/pending-collections', enhancedCheckFinance, async (req, res) => {
       limit = 20,
       sortBy = 'hplno',
       sortOrder = 'ASC',
-      asOfDate = new Date().toISOString().split('T')[0],
+      asOfDate = resolveIstDateString(),
     } = req.query;
 
     const queryParams = [financeId];
@@ -3387,6 +3441,7 @@ router.get('/pending-collections', enhancedCheckFinance, async (req, res) => {
         l.due_amount as installment_amount,
         l.net_payable,
         l.hp_amount,
+        COALESCE(l.penalty_amount, 0) as penalty_amount,
         TO_CHAR(l.hp_date, 'YYYY-MM-DD') as hp_date,
         TO_CHAR(l.due_date, 'YYYY-MM-DD') as first_due_date,
         v.id as vehicle_id,
@@ -3405,20 +3460,45 @@ router.get('/pending-collections', enhancedCheckFinance, async (req, res) => {
           ORDER BY CASE WHEN ct.type::text = 'mobile' THEN 1 ELSE 2 END 
           LIMIT 1
         ), '') as primary_phone,
+        (
+          COALESCE((
+            SELECT SUM(p.amount) 
+            FROM payments p 
+            WHERE p.customer_id = c.id
+              AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+              AND COALESCE(p.status::text, 'paid') <> 'cancelled'
+          ), 0) +
+          COALESCE((
+            SELECT SUM(sd.paid_amount)
+            FROM sub_due sd
+            JOIN payments p_sd ON p_sd.id = sd.payment_id
+            WHERE sd.customer_id = c.id
+              AND sd.finance_id = c.finance_id
+              AND COALESCE(sd.status::text, 'active') <> 'cancelled'
+              AND COALESCE(p_sd.payment_status::text, 'active') <> 'cancelled'
+              AND COALESCE(p_sd.status::text, 'paid') <> 'cancelled'
+          ), 0)
+        ) as total_paid,
         COALESCE((
-          SELECT SUM(p.amount) 
-          FROM payments p 
-          WHERE p.customer_id = c.id AND p.payment_status != 'cancelled'
-        ), 0) as total_paid,
+          SELECT SUM(p.penalty)
+          FROM payments p
+          WHERE p.customer_id = c.id
+            AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+            AND COALESCE(p.status::text, 'paid') <> 'cancelled'
+        ), 0) as total_penalty_paid,
         COALESCE((
           SELECT COUNT(*) 
           FROM payments p 
-          WHERE p.customer_id = c.id AND p.payment_status != 'cancelled' AND p.status = 'paid'
+          WHERE p.customer_id = c.id
+            AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+            AND COALESCE(p.status::text, 'paid') = 'paid'
         ), 0) as installments_paid,
         (
           SELECT TO_CHAR(MAX(p.payment_date), 'YYYY-MM-DD') 
           FROM payments p 
-          WHERE p.customer_id = c.id AND p.payment_status != 'cancelled'
+          WHERE p.customer_id = c.id
+            AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+            AND COALESCE(p.status::text, 'paid') <> 'cancelled'
         ) as last_payment_date
       FROM customers c
       JOIN loans l ON l.customer_id = c.id

@@ -1,6 +1,13 @@
 //import React from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { CustomerContact } from '../types/customer';
+import { AppSelect } from '../components/common/AppSelect';
+
+const CONTACT_TYPE_OPTIONS = [
+  { value: 'mobile', label: 'Mobile' },
+  { value: 'landline', label: 'Landline' },
+  { value: 'work', label: 'Work' },
+];
 
 interface ContactFieldsProps {
   contacts: CustomerContact[];
@@ -35,15 +42,12 @@ export function ContactFields({ contacts =[], onChange }: ContactFieldsProps) {
       </label>
       {contacts.map((contact, index) => (
         <div key={index} className="flex items-center space-x-4">
-          <select
+          <AppSelect
             value={contact.type}
-            onChange={(e) => updateContact(index, 'type', e.target.value as CustomerContact['type'])}
-            className="rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
-          >
-            <option value="mobile">Mobile</option>
-            <option value="landline">Landline</option>
-            <option value="work">Work</option>
-          </select>
+            onValueChange={(val) => updateContact(index, 'type', val as CustomerContact['type'])}
+            options={CONTACT_TYPE_OPTIONS}
+            className="w-36 shrink-0"
+          />
           <input
             type="tel"
             value={contact.number}

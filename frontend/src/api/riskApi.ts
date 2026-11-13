@@ -36,8 +36,8 @@ export interface RiskCustomerBase {
   vehicleNumber: string | null;
   vehicleName: string | null;
   vehicleType: string | null;
-  /** MOCK (km) until live GPS lands */
-  distanceFromHome: number;
+  /** Live GPS distance (km) when reported; null when GPS not available */
+  distanceFromHome: number | null;
   /** null when unassigned */
   assignedAgent: string | null;
   assignedAgentId: string | null;
@@ -88,11 +88,20 @@ export interface RiskAlertsResponse {
 
 export interface RiskCurrentLocation {
   address: string;
+  latitude: number | null;
+  longitude: number | null;
+  lastSeenHome: string | null;
+  isMock: boolean;
+}
+
+export interface CustomerLocationHistoryEntry {
+  id: string;
+  address: string;
   latitude: number;
   longitude: number;
-  lastSeenHome: string | null;
-  /** Always true until live GPS is wired */
-  isMock: boolean;
+  distanceFromHome: number | null;
+  timestamp: string;
+  isHomeLocation: boolean;
 }
 
 export interface DeepViewCustomer extends RiskCustomerBase {
@@ -161,6 +170,72 @@ export interface CustomerDeepViewResponse {
   loan: DeepViewLoan | null;
   monthlyPayments: MonthlyPayment[];
   risk: DeepViewRisk;
+  locationHistory?: CustomerLocationHistoryEntry[];
+}
+
+// ─── GET /risk/locator ────────────────────────────────────────────────────────
+
+export interface LocatorCustomer extends RiskAlertCustomer {
+  pendingAmount: number;
+  hasLiveGps: boolean;
+  currentLatitude: number | null;
+  currentLongitude: number | null;
+  currentAddress: string;
+  homeAddress: string | null;
+  lastPingAt: string | null;
+  area: string | null;
+}
+
+export interface LocatorAgent {
+  id: string;
+  name: string;
+  status: 'online' | 'offline';
+  isOnline: boolean;
+  currentLatitude: number | null;
+  currentLongitude: number | null;
+  batteryLevel: number | null;
+  assignedCount: number;
+  lastUpdatedAt: string | null;
+}
+
+export interface LocatorActivityItem {
+  id: string;
+  type: 'move' | 'alert' | 'visit' | 'update';
+  message: string;
+  timestamp: string | null;
+}
+
+export interface LocatorOverviewResponse {
+  success: boolean;
+  asOfDate: string;
+  summary: {
+    totalPortfolio: number;
+    filteredCount: number;
+    gpsReportingCount: number;
+    mappableCount: number;
+    criticalAlerts: number;
+    highAlerts: number;
+    warnings: number;
+    safeCount: number;
+    totalAlerts: number;
+    avgDistanceKm: number | null;
+    onlineAgentsCount: number;
+  };
+  riskDistribution: {
+    name: string;
+    key: RiskLevel;
+    value: number;
+    pct: number;
+    color: string;
+  }[];
+  topLocations: {
+    area: string;
+    customers: number;
+    pct: number;
+  }[];
+  agents: LocatorAgent[];
+  activityFeed: LocatorActivityItem[];
+  customers: LocatorCustomer[];
 }
 
 // ─── GET /risk/due-analysis ───────────────────────────────────────────────────
@@ -283,6 +358,15 @@ export const fetchRiskAlerts = async (
   signal?: AbortSignal
 ): Promise<RiskAlertsResponse> => {
   const response = await apiClient.get<RiskAlertsResponse>('/risk/alerts', { params, signal });
+  return response.data;
+};
+
+/** Unified live customer/agent locator, map coords, activity & location analytics */
+export const fetchLocatorOverview = async (
+  params?: RiskAlertsParams & { riskLevel?: RiskLevelFilter },
+  signal?: AbortSignal
+): Promise<LocatorOverviewResponse> => {
+  const response = await apiClient.get<LocatorOverviewResponse>('/risk/locator', { params, signal });
   return response.data;
 };
 

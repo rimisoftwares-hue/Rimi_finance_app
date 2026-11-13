@@ -15,7 +15,7 @@ import {
   buildCompletePrintHtml,
   inlineImageAsDataUri,
   triggerPrintDocument,
-} from '../../utils/printTemplates';
+} from '@/components/common/print';
 
 interface PrintLettersDropdownProps {
   customerName: string;

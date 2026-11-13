@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Search, ArrowUpDown } from 'lucide-react';
+import { useClientPagination } from '../../hooks/useClientPagination';
+import { TablePagination, TableSkeletonRows } from '../common';
 
 export interface Payment {
   id: number;
@@ -57,13 +59,32 @@ const PaymentTable: React.FC<PaymentTableProps> = ({ payments, isLoading }) => {
     return sortDirection === 'asc' ? valueA - valueB : valueB - valueA;
   });
 
-  const filteredPayments = sortedPayments.filter(
-    (payment) =>
-      payment.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (payment.billNumber && payment.billNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (payment.customerHplno && payment.customerHplno.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (payment.vehicleNumber && payment.vehicleNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+  const filteredPayments = useMemo(
+    () =>
+      sortedPayments.filter(
+        (payment) =>
+          payment.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (payment.billNumber &&
+            payment.billNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
+          (payment.customerHplno &&
+            payment.customerHplno.toLowerCase().includes(searchTerm.toLowerCase())) ||
+          (payment.vehicleNumber &&
+            payment.vehicleNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+      ),
+    [sortedPayments, searchTerm]
   );
+
+  const {
+    paginatedItems: pagedPayments,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filteredPayments, { initialPageSize: 15 });
 
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
@@ -75,11 +96,6 @@ const PaymentTable: React.FC<PaymentTableProps> = ({ payments, isLoading }) => {
     });
   };
 
-  const getSortIcon = (field: SortField) => {
-    if (sortField !== field) return null;
-    return sortDirection === 'asc' ? '↑' : '↓';
-  };
-
   const columns = [
     { id: 'customerName', label: 'Customer', sortable: true },
     { id: 'date', label: 'Date', sortable: true },
@@ -89,19 +105,6 @@ const PaymentTable: React.FC<PaymentTableProps> = ({ payments, isLoading }) => {
     { id: 'total', label: 'Total', sortable: true },
     { id: 'details', label: 'Details', sortable: false },
   ] as const;
-
-  if (isLoading) {
-    return (
-      <div className="dashboard-card">
-        <div className="animate-pulse">
-          <div className="h-10 bg-muted rounded mb-4"></div>
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-12 bg-muted rounded mb-2"></div>
-          ))}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="dashboard-card p-0 overflow-hidden">
@@ -144,8 +147,10 @@ const PaymentTable: React.FC<PaymentTableProps> = ({ payments, isLoading }) => {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {filteredPayments.length > 0 ? (
-              filteredPayments.map((payment) => (
+            {isLoading ? (
+              <TableSkeletonRows columns={7} rows={6} />
+            ) : pagedPayments.length > 0 ? (
+              pagedPayments.map((payment) => (
                 <tr key={payment.id} className="hover:bg-secondary/30 transition-colors">
                   <td className="px-6 py-4">
                     <div className="text-sm font-medium text-foreground">{payment.customerName}</div>
@@ -201,6 +206,20 @@ const PaymentTable: React.FC<PaymentTableProps> = ({ payments, isLoading }) => {
           </tbody>
         </table>
       </div>
+      {!isLoading && totalItems > 0 && (
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+          pageSizeOptions={[15, 25, 50]}
+          disabled={isLoading}
+        />
+      )}
     </div>
   );
 };

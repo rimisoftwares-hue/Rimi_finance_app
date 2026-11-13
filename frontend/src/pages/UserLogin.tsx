@@ -6,6 +6,7 @@ import { useOwnerAuth } from '../contexts/OwnerAuthContext';
 import apiClient from '../api/apiClient';
 import { useLoginLocation } from '../hooks/useLoginLocation';
 import { PermissionModal } from '../components/common/PermissionModal';
+import { AppSelect } from '../components/common/AppSelect';
 
 
 interface Finance {
@@ -254,29 +255,31 @@ const UserLogin = () => {
                 Select Finance Company
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
                   <Building className="h-5 w-5 text-gray-400" />
                 </div>
-                <select
+                <AppSelect
                   id="finance"
                   value={selectedFinance}
-                  onChange={(e) => setSelectedFinance(e.target.value)}
-                  className="appearance-none block w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm bg-white"
-                  required
-                >
-                  {financeList.length === 0 ? (
-                    <option value="">Loading finance companies...</option>
-                  ) : (
-                    <>
-                      <option value="">Choose a finance company</option>
-                      {financeList.map(finance => (
-                        <option key={finance.id} value={finance.id}>
-                          {finance.name}
-                        </option>
-                      ))}
-                    </>
-                  )}
-                </select>
+                  onValueChange={(val) => setSelectedFinance(val)}
+                  options={
+                    financeList.length === 0
+                      ? [{ value: '', label: 'Loading finance companies...' }]
+                      : [
+                          { value: '', label: 'Choose a finance company' },
+                          ...financeList.map((finance) => ({
+                            value: String(finance.id),
+                            label: finance.name,
+                          })),
+                        ]
+                  }
+                  placeholder={
+                    financeList.length === 0
+                      ? 'Loading finance companies...'
+                      : 'Choose a finance company'
+                  }
+                  triggerClassName="w-full h-[46px] pl-10 pr-4 border-gray-300 rounded-lg shadow-sm text-sm bg-white text-gray-900"
+                />
               </div>
               {financeList.length === 0 && (
                 <p className="mt-2 text-sm text-yellow-600">

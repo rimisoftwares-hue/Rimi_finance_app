@@ -1,8 +1,10 @@
 import { motion } from "framer-motion";
-import { CreditCard, Search, Plus, Eye } from "lucide-react";
+import { Search, Plus, Eye } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useClientPagination } from "../hooks/useClientPagination";
+import { TablePagination } from "../components/common/table";
 
 const loans = [
   { id: 1, loanNo: "OWN-0001", type: "OWN", customer: "Rajesh Kumar", vehicle: "Yamaha FZ-S", principal: 180000, rate: 24, emi: 15000, tenure: 12, paid: 6, status: "Active" },
@@ -29,10 +31,27 @@ const statusColors: Record<string, string> = {
 
 export default function Loans() {
   const [searchTerm, setSearchTerm] = useState("");
-  const filtered = loans.filter(l =>
-    l.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    l.loanNo.toLowerCase().includes(searchTerm.toLowerCase())
+  const filtered = useMemo(
+    () =>
+      loans.filter(
+        l =>
+          l.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          l.loanNo.toLowerCase().includes(searchTerm.toLowerCase())
+      ),
+    [searchTerm]
   );
+
+  const {
+    paginatedItems: paginatedLoans,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, { initialPageSize: 15 });
 
   return (
     <div className="space-y-6">
@@ -81,7 +100,7 @@ export default function Loans() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((loan, i) => (
+              {paginatedLoans.map((loan, i) => (
                 <motion.tr key={loan.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.03 * i }} className="border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer">
                   <td className="px-4 py-3 text-sm font-medium text-primary">{loan.loanNo}</td>
                   <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${typeColors[loan.type]}`}>{loan.type}</span></td>
@@ -105,6 +124,19 @@ export default function Loans() {
             </tbody>
           </table>
         </div>
+        {totalItems > 0 && (
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalItems}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[15, 25, 50]}
+          />
+        )}
       </motion.div>
     </div>
   );

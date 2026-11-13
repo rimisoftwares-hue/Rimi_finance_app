@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { CapitalizedInput } from "../common/CapitalizedInput";
+import { TableSkeletonRows } from "../common";
 import { DatePicker } from "../ui/date-picker";
 import { Badge } from "../ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -21,7 +22,6 @@ import {
   ArrowLeft,
   Printer,
   MapPin,
-  Loader2,
   User,
   Phone,
 } from "lucide-react";
@@ -432,9 +432,27 @@ export default function AssignmentHistory() {
 
           {isLoadingDetails || !batchDetails ? (
             <Card>
-              <CardContent className="p-12 text-center text-muted-foreground">
-                <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-primary" />
-                Loading batch customer details...
+              <CardContent className="p-0">
+                <div className="overflow-auto max-h-[60vh]">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur z-10">
+                      <TableRow>
+                        <TableHead>Customer</TableHead>
+                        <TableHead>Phone</TableHead>
+                        <TableHead>Area</TableHead>
+                        <TableHead>Vehicle</TableHead>
+                        <TableHead className="text-right">Target Due</TableHead>
+                        <TableHead className="text-right">Collected Due</TableHead>
+                        <TableHead className="text-right">Penalty</TableHead>
+                        <TableHead className="text-center">Status</TableHead>
+                        <TableHead>Notes</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableSkeletonRows columns={9} rows={6} />
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           ) : (
@@ -726,12 +744,7 @@ export default function AssignmentHistory() {
                   </TableHeader>
                   <TableBody>
                     {isLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
-                          <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-primary" />
-                          Loading assignment history...
-                        </TableCell>
-                      </TableRow>
+                      <TableSkeletonRows columns={9} rows={6} />
                     ) : filteredBatches.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">

@@ -1,10 +1,10 @@
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, UserX, Car, IndianRupee, Wallet, AlertTriangle, Calendar, TrendingUp,
-  FileText, CreditCard, BarChart3, LucideIcon, TrendingDown, UserPlus, Building2, UserCog,
+  CreditCard, LucideIcon, TrendingDown, UserPlus, Building2, UserCog,
   ArrowDownCircle, ArrowUpCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -13,11 +13,24 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { useOwnerAuth } from "../../contexts/OwnerAuthContext";
+import {
+  fetchHomeDashboardOverview,
+  formatCompactINR,
+  type HomeDashboardOverviewResponse,
+  type KpiTrendBadge,
+  type LoanDistributionSlice,
+  type MonthlyCollectionPoint,
+  type MonthlyOutcomePoint,
+} from "../../api/dashboardApi";
 
 /* ── Animated counter ── */
 function AnimatedNum({ value }: { value: number }) {
   const [count, setCount] = useState(0);
   useEffect(() => {
+    if (value <= 0) {
+      setCount(0);
+      return;
+    }
     const steps = 30, inc = value / steps;
     let cur = 0;
     const t = setInterval(() => {
@@ -27,13 +40,13 @@ function AnimatedNum({ value }: { value: number }) {
     }, 33);
     return () => clearInterval(t);
   }, [value]);
-  return <span>{count.toLocaleString()}</span>;
+  return <span>{count.toLocaleString("en-IN")}</span>;
 }
 
 /* ── KPI Card ── */
 interface KpiProps {
   title: string; value: number | string; icon: LucideIcon;
-  trend?: { value: number; up: boolean }; color: string;
+  trend?: KpiTrendBadge | null; color: string;
   onClick?: () => void;
 }
 function KpiCard({ title, value, icon: Icon, trend, color, onClick }: KpiProps) {
@@ -63,49 +76,18 @@ function KpiCard({ title, value, icon: Icon, trend, color, onClick }: KpiProps) 
           <span className={`text-xs font-medium ${trend.up ? "text-income" : "text-expense"}`}>
             {trend.value}%
           </span>
-          <span className="text-xs text-muted-foreground">vs last month</span>
+          <span className="text-xs text-muted-foreground">vs previous period</span>
         </div>
       )}
     </motion.div>
   );
 }
 
-/* ── Mock data ── */
-const loanDistribution = [
-  { name: "Active", value: 652, color: "hsl(var(--primary))" },
-  { name: "Closed", value: 312, color: "hsl(var(--income))" },
-  { name: "Default", value: 86, color: "hsl(var(--expense))" },
-  { name: "Seized", value: 34, color: "hsl(var(--pending))" },
-];
-
-const collectionTrend = [
-  { month: "Jan", principal: 180000, interest: 52000, penalty: 8000 },
-  { month: "Feb", principal: 165000, interest: 48000, penalty: 6500 },
-  { month: "Mar", principal: 210000, interest: 61000, penalty: 9200 },
-  { month: "Apr", principal: 195000, interest: 56000, penalty: 7800 },
-  { month: "May", principal: 225000, interest: 64000, penalty: 10500 },
-  { month: "Jun", principal: 240000, interest: 68000, penalty: 11200 },
-  { month: "Jul", principal: 218000, interest: 62000, penalty: 9500 },
-  { month: "Aug", principal: 235000, interest: 66000, penalty: 10800 },
-  { month: "Sep", principal: 248000, interest: 70000, penalty: 11800 },
-  { month: "Oct", principal: 262000, interest: 74000, penalty: 12500 },
-  { month: "Nov", principal: 275000, interest: 78000, penalty: 13200 },
-  { month: "Dec", principal: 290000, interest: 82000, penalty: 14000 },
-];
-
-const outcomeTrend = [
-  { month: "Jan", loanDist: 320000, otherExp: 42000 },
-  { month: "Feb", loanDist: 285000, otherExp: 38000 },
-  { month: "Mar", loanDist: 410000, otherExp: 51000 },
-  { month: "Apr", loanDist: 365000, otherExp: 46000 },
-  { month: "May", loanDist: 425000, otherExp: 54000 },
-  { month: "Jun", loanDist: 480000, otherExp: 58000 },
-  { month: "Jul", loanDist: 398000, otherExp: 49000 },
-  { month: "Aug", loanDist: 442000, otherExp: 56000 },
-  { month: "Sep", loanDist: 468000, otherExp: 60000 },
-  { month: "Oct", loanDist: 512000, otherExp: 64000 },
-  { month: "Nov", loanDist: 545000, otherExp: 68000 },
-  { month: "Dec", loanDist: 580000, otherExp: 72000 },
+const DEFAULT_LOAN_DISTRIBUTION: LoanDistributionSlice[] = [
+  { name: "Active", value: 0, color: "hsl(var(--primary))" },
+  { name: "Closed", value: 0, color: "hsl(var(--income))" },
+  { name: "Default", value: 0, color: "hsl(var(--expense))" },
+  { name: "Seized", value: 0, color: "hsl(var(--pending))" },
 ];
 
 type Mode = "income" | "outcome";
@@ -114,12 +96,12 @@ type OutcomeKey = "loanDist" | "otherExp";
 
 const incomeMeta: { key: IncomeKey; label: string; color: string }[] = [
   { key: "principal", label: "Principal", color: "hsl(var(--primary))" },
-  { key: "interest",  label: "Interest",  color: "hsl(var(--income))" },
-  { key: "penalty",   label: "Penalty",   color: "hsl(var(--expense))" },
+  { key: "interest", label: "Interest", color: "hsl(var(--income))" },
+  { key: "penalty", label: "Penalty", color: "hsl(var(--expense))" },
 ];
 const outcomeMeta: { key: OutcomeKey; label: string; color: string }[] = [
   { key: "loanDist", label: "Loan Distribution", color: "hsl(var(--primary))" },
-  { key: "otherExp", label: "Other Expenses",    color: "hsl(var(--pending))" },
+  { key: "otherExp", label: "Other Expenses", color: "hsl(var(--pending))" },
 ];
 
 /* ── Shimmer Skeleton (YouTube-style) ── */
@@ -146,7 +128,7 @@ function MonthlyDashboardSkeleton() {
           <ShimmerBlock
             key={i}
             className="flex-1 rounded-t-md"
-            // varied bar heights
+          // varied bar heights
           />
         ))}
       </div>
@@ -159,10 +141,18 @@ function MonthlyDashboardSkeleton() {
 }
 
 /* ── Monthly Dashboard (Income / Outcome toggle) ── */
-function MonthlyDashboard() {
+function MonthlyDashboard({
+  collectionTrend,
+  outcomeTrend,
+  isInitialLoading = false,
+}: {
+  collectionTrend: MonthlyCollectionPoint[];
+  outcomeTrend: MonthlyOutcomePoint[];
+  isInitialLoading?: boolean;
+}) {
   const [mode, setMode] = useState<Mode>("income");
   const [loading, setLoading] = useState(false);
-  const [incomeActive, setIncomeActive]   = useState<Record<IncomeKey, boolean>>({ principal: true, interest: true, penalty: true });
+  const [incomeActive, setIncomeActive] = useState<Record<IncomeKey, boolean>>({ principal: true, interest: true, penalty: true });
   const [outcomeActive, setOutcomeActive] = useState<Record<OutcomeKey, boolean>>({ loanDist: true, otherExp: true });
 
   const handleModeChange = (m: Mode) => {
@@ -178,8 +168,8 @@ function MonthlyDashboard() {
         (s, m) =>
           s +
           (incomeActive.principal ? m.principal : 0) +
-          (incomeActive.interest  ? m.interest  : 0) +
-          (incomeActive.penalty   ? m.penalty   : 0),
+          (incomeActive.interest ? m.interest : 0) +
+          (incomeActive.penalty ? m.penalty : 0),
         0,
       );
       return { total, months: collectionTrend.length };
@@ -192,9 +182,10 @@ function MonthlyDashboard() {
       0,
     );
     return { total, months: outcomeTrend.length };
-  }, [mode, incomeActive, outcomeActive]);
+  }, [mode, incomeActive, outcomeActive, collectionTrend, outcomeTrend]);
 
-  const data = mode === "income" ? collectionTrend : outcomeTrend;
+  const data: (MonthlyCollectionPoint | MonthlyOutcomePoint)[] =
+    mode === "income" ? collectionTrend : outcomeTrend;
   const meta = mode === "income" ? incomeMeta : outcomeMeta;
   const active: Record<string, boolean> = mode === "income" ? incomeActive : outcomeActive;
   const toggleKey = (k: string) => {
@@ -217,9 +208,8 @@ function MonthlyDashboard() {
             <button
               key={m}
               onClick={() => handleModeChange(m)}
-              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                mode === m ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-all ${mode === m ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
             >
               {m === "income" ? <ArrowDownCircle className="h-3.5 w-3.5" /> : <ArrowUpCircle className="h-3.5 w-3.5" />}
               {m === "income" ? "Income" : "Outcome"}
@@ -236,9 +226,8 @@ function MonthlyDashboard() {
             <button
               key={m.key}
               onClick={() => toggleKey(m.key)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-all ${
-                on ? "border-border bg-card text-foreground" : "border-border/50 bg-secondary/40 text-muted-foreground line-through"
-              }`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-all ${on ? "border-border bg-card text-foreground" : "border-border/50 bg-secondary/40 text-muted-foreground line-through"
+                }`}
             >
               <span className="w-2.5 h-2.5 rounded-full" style={{ background: on ? m.color : "hsl(240,5%,75%)" }} />
               {m.label}
@@ -248,7 +237,7 @@ function MonthlyDashboard() {
       </div>
 
       <AnimatePresence mode="wait">
-        {loading ? (
+        {loading || isInitialLoading ? (
           <motion.div
             key="loading"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -269,7 +258,7 @@ function MonthlyDashboard() {
                   <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(240,3%,46%)" }} />
                   <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "hsl(240,3%,46%)" }} tickFormatter={v => `₹${v / 1000}K`} />
                   <Tooltip
-                    formatter={(v: number, n: string) => [`₹${v.toLocaleString()}`, n]}
+                    formatter={(v, n) => [`₹${Number(v ?? 0).toLocaleString("en-IN")}`, String(n ?? "")]}
                     contentStyle={{ background: "hsl(0,0%,100%)", border: "1px solid hsl(240,6%,90%)", borderRadius: "0.75rem", fontSize: 12 }}
                     cursor={{ fill: "hsl(240,6%,95%)", opacity: 0.5 }}
                   />
@@ -292,7 +281,7 @@ function MonthlyDashboard() {
               <div className={`p-3 rounded-xl border ${mode === "income" ? "bg-income/5 border-income/10" : "bg-expense/5 border-expense/10"}`}>
                 <p className="text-xs text-muted-foreground mb-0.5">{mode === "income" ? "Total Income" : "Total Outcome"}</p>
                 <p className={`text-lg font-bold ${mode === "income" ? "text-income" : "text-expense"}`}>
-                  ₹{(summary.total / 100000).toFixed(2)}L
+                  {formatCompactINR(summary.total)}
                 </p>
               </div>
               <div className="p-3 rounded-xl bg-secondary/50 border border-border">
@@ -306,6 +295,7 @@ function MonthlyDashboard() {
     </motion.div>
   );
 }
+
 function InsightCard({ icon: Icon, label, value, color, onClick }: { icon: LucideIcon; label: string; value: number; color: string; onClick?: () => void }) {
   return (
     <motion.div
@@ -339,9 +329,56 @@ function QuickAction({ icon: Icon, label, onClick }: { icon: LucideIcon; label: 
 /* ── MAIN DASHBOARD ── */
 export function MainDashboard() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, currentFinance } = useAuth();
   const { owner } = useOwnerAuth();
-  const isOwner = Boolean(owner && (!user || user.role === 'owner'));
+  const isOwner = Boolean(owner && (!user || user.role === "owner"));
+
+  const [overview, setOverview] = useState<HomeDashboardOverviewResponse | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadDashboard = useCallback(async (signal?: AbortSignal) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await fetchHomeDashboardOverview(signal);
+      if (!signal?.aborted) {
+        setOverview(data);
+      }
+    } catch (err: unknown) {
+      if (signal?.aborted) return;
+      const errObj = err as { name?: string; code?: string; message?: string };
+      if (errObj?.name === "CanceledError" || errObj?.name === "AbortError" || errObj?.code === "ERR_CANCELED") {
+        return;
+      }
+      setError(errObj?.message || "Failed to load dashboard overview");
+    } finally {
+      if (!signal?.aborted) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadDashboard(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [currentFinance?.id, loadDashboard]);
+
+  const kpis = overview?.kpis;
+  const trends = kpis?.trends;
+  const loanDistribution = overview?.loanDistribution?.length
+    ? overview.loanDistribution
+    : DEFAULT_LOAN_DISTRIBUTION;
+  const totalPieCount = useMemo(
+    () => loanDistribution.reduce((sum, item) => sum + (Number(item.value) || 0), 0),
+    [loanDistribution]
+  );
+  const collectionTrend = overview?.monthly?.collectionTrend ?? [];
+  const outcomeTrend = overview?.monthly?.outcomeTrend ?? [];
+  const quickInsights = overview?.quickInsights;
 
   return (
     <motion.div
@@ -350,66 +387,84 @@ export function MainDashboard() {
       exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.3 }}
       className="space-y-6"
     >
+      {error && (
+        <div className="flex items-center justify-between gap-4 p-4 rounded-xl border border-expense/20 bg-expense/5 text-sm text-expense">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <button
+            onClick={() => loadDashboard()}
+            className="px-3 py-1 rounded-lg bg-card border border-border text-xs font-medium text-foreground hover:bg-secondary/50 transition-all cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* KPI Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           title="Active Loans"
-          value={652}
+          value={kpis?.activeLoans ?? 0}
           icon={CreditCard}
-          trend={{ value: 8, up: true }}
+          trend={trends?.activeLoans}
           color="bg-primary/10 text-primary"
-          onClick={() => navigate("/loans")}
+          onClick={() => navigate("/customers")}
         />
         <KpiCard
           title="Total Customers"
-          value={1284}
+          value={kpis?.totalCustomers ?? 0}
           icon={Users}
-          trend={{ value: 12, up: true }}
+          trend={trends?.totalCustomers}
           color="bg-income/10 text-income"
           onClick={() => navigate("/customers")}
         />
         <KpiCard
           title="Unpaid Customers"
-          value={186}
+          value={kpis?.unpaidCustomers ?? 0}
           icon={UserX}
-          trend={{ value: 5, up: false }}
+          trend={trends?.unpaidCustomers}
           color="bg-expense/10 text-expense"
           onClick={() => navigate("/unpaidloans")}
         />
         <KpiCard
           title="Godown Vehicles"
-          value={47}
+          value={kpis?.godownVehicles ?? 0}
           icon={Car}
-          trend={{ value: 3, up: true }}
+          trend={trends?.godownVehicles}
           color="bg-pending/10 text-pending"
           onClick={() => navigate("/collections/godown")}
         />
         <KpiCard
           title="Seized Vehicles"
-          value={34}
+          value={kpis?.seizedVehicles ?? 0}
           icon={AlertTriangle}
+          trend={trends?.seizedVehicles}
           color="bg-expense/10 text-expense"
           onClick={() => navigate("/collections/godown")}
         />
         <KpiCard
           title="Cash in Hand"
-          value="₹8.2L"
+          value={formatCompactINR(kpis?.cashInHand ?? 0)}
           icon={Wallet}
+          trend={trends?.cashInHand}
           color="bg-income/10 text-income"
           onClick={() => navigate("/accounts/daybook")}
         />
         <KpiCard
           title="Today Collection"
-          value="₹2.4L"
+          value={formatCompactINR(kpis?.todayCollection ?? 0)}
           icon={IndianRupee}
-          trend={{ value: 15, up: true }}
+          trend={trends?.todayCollection}
           color="bg-primary/10 text-primary"
           onClick={() => navigate("/paymentReport")}
         />
         <KpiCard
           title="Pending Dues"
-          value="₹18.6L"
+          value={formatCompactINR(kpis?.pendingDues ?? 0)}
           icon={Calendar}
+          trend={trends?.pendingDues}
           color="bg-pending/10 text-pending"
           onClick={() => navigate("/collections/pending")}
         />
@@ -421,15 +476,21 @@ export function MainDashboard() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card">
           <h3 className="text-lg font-semibold text-foreground mb-1">Loan Distribution</h3>
           <p className="text-sm text-muted-foreground mb-4">Active vs Closed vs Default vs Seized</p>
-          <div className="h-64 flex items-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={loanDistribution} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value">
-                  {loanDistribution.map((e, i) => <Cell key={i} fill={e.color} />)}
-                </Pie>
-                <Tooltip formatter={(v: number) => [v, ""]} />
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="h-64 flex items-center justify-center">
+            {isLoading ? (
+              <ShimmerBlock className="h-44 w-44 rounded-full" />
+            ) : totalPieCount === 0 ? (
+              <p className="text-sm text-muted-foreground">No loan distribution data available</p>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={loanDistribution} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value">
+                    {loanDistribution.map((e, i) => <Cell key={i} fill={e.color} />)}
+                  </Pie>
+                  <Tooltip formatter={(v) => [Number(v ?? 0), ""]} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2 mt-2">
             {loanDistribution.map(d => (
@@ -442,7 +503,11 @@ export function MainDashboard() {
         </motion.div>
 
         {/* Monthly Dashboard - Income / Outcome */}
-        <MonthlyDashboard />
+        <MonthlyDashboard
+          collectionTrend={collectionTrend}
+          outcomeTrend={outcomeTrend}
+          isInitialLoading={isLoading}
+        />
       </div>
 
       {/* Quick Insights + Actions */}
@@ -453,21 +518,21 @@ export function MainDashboard() {
             <InsightCard
               icon={AlertTriangle}
               label="High Risk Customers"
-              value={23}
+              value={quickInsights?.highRiskCustomers ?? 0}
               color="bg-expense/10 text-expense"
-              onClick={() => navigate("/unpaidloans")}
+              onClick={() => navigate("/locator/alerts")}
             />
             <InsightCard
               icon={Calendar}
               label="Today's Due Count"
-              value={42}
+              value={quickInsights?.todaysDueCount ?? 0}
               color="bg-pending/10 text-pending"
               onClick={() => navigate("/collections/pending")}
             />
             <InsightCard
               icon={TrendingUp}
               label="Overdue > 30 Days"
-              value={67}
+              value={quickInsights?.overdueOver30Days ?? 0}
               color="bg-expense/10 text-expense"
               onClick={() => navigate("/reports/due-analysis")}
             />

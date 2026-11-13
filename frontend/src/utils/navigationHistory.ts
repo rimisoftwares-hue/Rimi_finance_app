@@ -7,7 +7,6 @@ const FORWARD_KEY = 'navForward';
 
 /** Paths that should be skipped when navigating back/forward */
 const isSkippedPath = (path: string) =>
-  path.includes('/AddCustomersForm') ||
   path.includes('/customers/edit/') ||
   path.includes('/ConsultingForm') ||
   path.includes('/VehicleLoanForm') ||

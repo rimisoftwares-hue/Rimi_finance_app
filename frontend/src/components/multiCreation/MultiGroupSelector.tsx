@@ -119,7 +119,7 @@ export function MultiGroupSelector({ open, customGroups, onClose, onSelect }: Pr
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[70] flex items-start justify-center bg-black/40 backdrop-blur-sm pt-24 px-4"
+          className="fixed inset-0 z-[70] flex items-start justify-center backdrop-blur-[1px] bg-black/25 pt-24 px-4"
           onClick={onClose}
         >
           <motion.div
