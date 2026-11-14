@@ -1,9 +1,30 @@
 // src/api/apiClient.ts
-import axios from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import {
+  CONFIRMED_REVOCATION_CODES,
+  clearDirectUserLocalStorage,
+  clearEphemeralUserSessionStorage,
+  clearLicenseLocalStorage,
+  getActiveFinanceRaw,
+  isDirectUserMode,
+} from '../utils/authStorage';
 
 export const API_ORIGIN = (import.meta.env.VITE_API_URL || 'http://localhost:3004').replace(/\/+$/, '');
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL || `${API_ORIGIN}/api`).replace(/\/+$/, '');
 export const BASE = API_BASE;
+
+interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean;
+}
+
+export interface RefreshSessionResult {
+  token: string;
+  refreshToken: string;
+  user?: Record<string, unknown>;
+  finance?: Record<string, unknown>;
+  finances?: Record<string, unknown>[];
+  statistics?: Record<string, unknown>;
+}
 
 const apiClient = axios.create({
   baseURL: BASE,
@@ -13,48 +34,126 @@ const apiClient = axios.create({
   },
 });
 
-// ─── Request Interceptor ──────────────────────────────────────────────────────
-// Key mapping (must match AuthContext.tsx exactly):
-//   authToken   → Bearer Authorization header
-//   financeData → JSON { id: string | number, ... } → finance-id header
-//   ownerToken  → owner-authorization header
+// Single-flight mutex so concurrent expired requests rotate refreshToken exactly once
+let activeRefreshPromise: Promise<RefreshSessionResult> | null = null;
 
+export async function refreshDirectUserSession(): Promise<RefreshSessionResult> {
+  if (activeRefreshPromise) {
+    return activeRefreshPromise;
+  }
+
+  const storedRefreshToken = localStorage.getItem('refreshToken');
+  if (!storedRefreshToken) {
+    const missingErr = new Error('Refresh token missing') as AxiosError;
+    throw missingErr;
+  }
+
+  activeRefreshPromise = (async () => {
+    try {
+      const response = await axios.post(
+        `${BASE}/auth/refresh-session`,
+        { refreshToken: storedRefreshToken },
+        {
+          timeout: 20000,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+
+      if (!response.data?.success || !response.data?.token) {
+        throw new Error(response.data?.message || 'Failed to refresh session');
+      }
+
+      const nextToken = String(response.data.token);
+      const nextRefreshToken = String(response.data.refreshToken || storedRefreshToken);
+
+      localStorage.setItem('authMode', 'direct_user');
+      localStorage.setItem('authToken', nextToken);
+      localStorage.setItem('refreshToken', nextRefreshToken);
+
+      if (response.data.user) {
+        localStorage.setItem('userData', JSON.stringify(response.data.user));
+      }
+      if (response.data.finance) {
+        localStorage.setItem('financeData', JSON.stringify(response.data.finance));
+        localStorage.setItem('currentFinance', JSON.stringify(response.data.finance));
+        const fid = (response.data.finance as { id?: string | number }).id;
+        if (fid) {
+          axios.defaults.headers.common['finance-id'] = String(fid);
+        }
+      }
+      if (response.data.statistics) {
+        localStorage.setItem('statistics', JSON.stringify(response.data.statistics));
+      }
+      if (Array.isArray(response.data.finances)) {
+        localStorage.setItem('ownerFinances', JSON.stringify(response.data.finances));
+      }
+
+      axios.defaults.headers.common['Authorization'] = `Bearer ${nextToken}`;
+
+      return {
+        token: nextToken,
+        refreshToken: nextRefreshToken,
+        user: response.data.user,
+        finance: response.data.finance,
+        finances: response.data.finances,
+        statistics: response.data.statistics,
+      };
+    } finally {
+      activeRefreshPromise = null;
+    }
+  })();
+
+  return activeRefreshPromise;
+}
+
+function redirectToHashSafely(targetHash: '#/owner-login' | '#/user-login'): void {
+  if (typeof window === 'undefined') return;
+  const currentHash = window.location.hash || '';
+  if (!currentHash.startsWith(targetHash)) {
+    window.location.hash = targetHash;
+  }
+}
+
+// ─── Request Interceptor ──────────────────────────────────────────────────────
 apiClient.interceptors.request.use(
   (config) => {
-    // Support FormData uploads (do not force application/json)
     if (config.data instanceof FormData) {
       delete config.headers['Content-Type'];
     }
 
-    // Auth token (session-ephemeral for users, persistent for owner)
-    const token = sessionStorage.getItem('authToken') || localStorage.getItem('authToken');
-    if (token) {
-      config.headers['Authorization'] = `Bearer ${token}`;
+    const directMode = isDirectUserMode();
+
+    if (directMode) {
+      const directToken = localStorage.getItem('authToken');
+      if (directToken) {
+        config.headers['Authorization'] = `Bearer ${directToken}`;
+      }
+      delete config.headers['owner-authorization'];
+      delete config.headers['Owner-Authorization'];
+    } else {
+      const sessionUserToken = sessionStorage.getItem('authToken');
+      if (sessionUserToken) {
+        config.headers['Authorization'] = `Bearer ${sessionUserToken}`;
+      }
+
+      const ownerToken = localStorage.getItem('ownerToken');
+      if (ownerToken) {
+        config.headers['owner-authorization'] = `Bearer ${ownerToken}`;
+        if (!sessionUserToken) {
+          config.headers['Authorization'] = `Bearer ${ownerToken}`;
+        }
+      }
     }
 
-    // Finance ID — AuthContext stores it inside the 'financeData' JSON object
-    const financeRaw =
-      sessionStorage.getItem('financeData') ||
-      sessionStorage.getItem('currentFinance') ||
-      localStorage.getItem('financeData') ||
-      localStorage.getItem('currentFinance');
+    const financeRaw = getActiveFinanceRaw();
     if (financeRaw) {
       try {
-        const financeData = JSON.parse(financeRaw);
-        const rawId = financeData?.id;
-        if (rawId) {
-          config.headers['finance-id'] = String(rawId);
+        const financeData = JSON.parse(financeRaw) as { id?: string | number };
+        if (financeData?.id) {
+          config.headers['finance-id'] = String(financeData.id);
         }
-      } catch { /* ignore parse errors */ }
-    }
-
-    // Owner token (stored as 'ownerToken' by AuthContext)
-    const ownerToken = localStorage.getItem('ownerToken');
-    if (ownerToken) {
-      config.headers['owner-authorization'] = `Bearer ${ownerToken}`;
-      // Fallback: If no user authToken, use ownerToken for Authorization
-      if (!token) {
-        config.headers['Authorization'] = `Bearer ${ownerToken}`;
+      } catch {
+        // ignore parse errors
       }
     }
 
@@ -72,59 +171,154 @@ apiClient.interceptors.request.use(
 // ─── Response Interceptor ─────────────────────────────────────────────────────
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    // Handle login time restriction (HTTP 403 with LOGIN_TIME_RESTRICTED)
-    if (error.response?.status === 403 && error.response?.data?.error_code === 'LOGIN_TIME_RESTRICTED') {
-      window.dispatchEvent(
-        new CustomEvent('autofinex:login-time-restricted', {
-          detail: error.response.data,
-        })
-      );
+  async (error: AxiosError<{ error_code?: string; code?: string; message?: string; error?: string }>) => {
+    const status = error.response?.status;
+    const errorCode = error.response?.data?.error_code || error.response?.data?.code || '';
+    const originalConfig = error.config as RetryableRequestConfig | undefined;
+    const url = originalConfig?.url || '';
+
+    // Handle login time restriction during active session usage
+    if (status === 403 && errorCode === 'LOGIN_TIME_RESTRICTED') {
+      const isInteractiveLoginOrSwitch =
+        url.includes('/auth/user-login') ||
+        url.includes('/auth/direct-user-login') ||
+        url.includes('/finance/switch');
+      if (!isInteractiveLoginOrSwitch && typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('autofinex:login-time-restricted', {
+            detail: error.response?.data,
+          })
+        );
+      }
       return Promise.reject(error);
     }
 
-    if (error.response?.status === 401) {
-      const url = error.config?.url || '';
-      const isAuthEndpoint =
+    // Direct User Mode: if all active company access was removed (403 NO_ACTIVE_FINANCE_ACCESS)
+    if (status === 403 && errorCode === 'NO_ACTIVE_FINANCE_ACCESS' && isDirectUserMode()) {
+      const isLoginAttempt = url.includes('/auth/direct-user-login');
+      if (!isLoginAttempt) {
+        clearEphemeralUserSessionStorage();
+        clearDirectUserLocalStorage();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('autofinex:session-revoked', { detail: { errorCode } })
+          );
+        }
+        redirectToHashSafely('#/owner-login');
+      }
+      return Promise.reject(error);
+    }
+
+    if (status === 401) {
+      const isExemptAuthEndpoint =
+        url.includes('/auth/direct-user-login') ||
+        url.includes('/auth/refresh-session') ||
         url.includes('/auth/user-login') ||
         url.includes('/auth/owner-login') ||
         url.includes('/auth/login') ||
-        url.includes('/auth/owner-finances') ||
-        (url.includes('/auth/change-password') &&
-          error.response?.data?.error_code === 'INVALID_CURRENT_PASSWORD');
+        url.includes('/auth/user-logout') ||
+        (url.includes('/auth/change-password') && errorCode === 'INVALID_CURRENT_PASSWORD');
 
-      // Do NOT clear tokens or redirect if this 401 is from a login attempt
-      if (isAuthEndpoint) {
+      if (isExemptAuthEndpoint) {
         return Promise.reject(error);
       }
 
-      // Session expired during regular app usage:
-      // Clear user session keys (preserve ownerToken if owner is still active)
-      sessionStorage.removeItem('authToken');
-      sessionStorage.removeItem('financeData');
-      sessionStorage.removeItem('currentFinance');
-      sessionStorage.removeItem('userData');
-      sessionStorage.removeItem('statistics');
-      sessionStorage.removeItem('lastLogin');
-      sessionStorage.removeItem('currentFinanceId');
-      sessionStorage.removeItem('lastKnownLocation');
+      const directMode = isDirectUserMode();
 
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('financeData');
-      localStorage.removeItem('currentFinance');
-      localStorage.removeItem('userData');
-      localStorage.removeItem('statistics');
-      localStorage.removeItem('lastLogin');
-      localStorage.removeItem('currentFinanceId');
+      if (directMode) {
+        // Attempt transparent single-flight token rotation when access JWT expires
+        const hasRefreshToken = Boolean(localStorage.getItem('refreshToken'));
+        const canAttemptRefresh =
+          hasRefreshToken &&
+          originalConfig &&
+          !originalConfig._retry &&
+          (errorCode === 'TOKEN_EXPIRED' || !errorCode);
 
-      const hasOwner = !!localStorage.getItem('ownerToken');
-      if (hasOwner) {
-        window.location.hash = '#/user-login';
+        if (canAttemptRefresh && originalConfig) {
+          originalConfig._retry = true;
+          try {
+            const refreshed = await refreshDirectUserSession();
+            originalConfig.headers['Authorization'] = `Bearer ${refreshed.token}`;
+            return apiClient(originalConfig);
+          } catch (refreshErr) {
+            const refreshAxiosErr = refreshErr as AxiosError<{ error_code?: string }>;
+            const refreshStatus = refreshAxiosErr.response?.status;
+            const refreshCode = refreshAxiosErr.response?.data?.error_code || '';
+
+            // Preserve persistent session on temporary network/server outages
+            if (!refreshStatus || refreshStatus >= 500) {
+              return Promise.reject(error);
+            }
+
+            if (
+              refreshStatus === 401 ||
+              refreshStatus === 403 ||
+              CONFIRMED_REVOCATION_CODES.has(refreshCode)
+            ) {
+              clearEphemeralUserSessionStorage();
+              clearDirectUserLocalStorage();
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(
+                  new CustomEvent('autofinex:session-revoked', {
+                    detail: { errorCode: refreshCode || errorCode },
+                  })
+                );
+              }
+              redirectToHashSafely('#/owner-login');
+            }
+            return Promise.reject(refreshErr);
+          }
+        }
+
+        // Confirmed revocation in Direct User Mode (inactive user/license, password changed, revoked session)
+        clearEphemeralUserSessionStorage();
+        clearDirectUserLocalStorage();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('autofinex:session-revoked', { detail: { errorCode } })
+          );
+        }
+        redirectToHashSafely('#/owner-login');
+        return Promise.reject(error);
+      }
+
+      // License Mode:
+      // /auth/owner-finances authenticates strictly via ownerToken — any 401 means the License token is invalid
+      if (url.includes('/auth/owner-finances')) {
+        clearEphemeralUserSessionStorage();
+        clearLicenseLocalStorage();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('autofinex:session-revoked', { detail: { errorCode: errorCode || 'INVALID_OWNER_TOKEN' } })
+          );
+        }
+        redirectToHashSafely('#/owner-login');
+        return Promise.reject(error);
+      }
+
+      clearEphemeralUserSessionStorage();
+
+      const ownerInvalid =
+        errorCode === 'INVALID_OWNER_TOKEN' || errorCode === 'LICENSE_INACTIVE';
+      if (ownerInvalid) {
+        clearLicenseLocalStorage();
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('autofinex:session-revoked', { detail: { errorCode } })
+        );
+      }
+
+      const hasOwner = Boolean(localStorage.getItem('ownerToken'));
+      if (hasOwner && !ownerInvalid) {
+        redirectToHashSafely('#/user-login');
       } else {
-        localStorage.removeItem('ownerToken');
-        window.location.hash = '#/owner-login';
+        clearLicenseLocalStorage();
+        redirectToHashSafely('#/owner-login');
       }
     }
+
     return Promise.reject(error);
   }
 );

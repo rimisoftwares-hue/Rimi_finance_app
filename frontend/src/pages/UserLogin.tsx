@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Lock, User, Building, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Lock, User, Building, AlertCircle, KeyRound } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useOwnerAuth } from '../contexts/OwnerAuthContext';
 import apiClient from '../api/apiClient';
@@ -8,12 +8,12 @@ import { useLoginLocation } from '../hooks/useLoginLocation';
 import { PermissionModal } from '../components/common/PermissionModal';
 import { AppSelect } from '../components/common/AppSelect';
 
-
-interface Finance {
-  id: string,
-  name: string
+interface FinanceOption {
+  id: string;
+  name: string;
 }
-const UserLogin = () => {
+
+const UserLogin: React.FC = () => {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [selectedFinance, setSelectedFinance] = useState<string>('');
@@ -22,18 +22,23 @@ const UserLogin = () => {
   const [notice, setNotice] = useState<string | null>(null);
   const [policy, setPolicy] = useState<'strict' | 'prefer' | 'off'>('prefer');
   const [isLoading, setIsLoading] = useState(false);
-  const [financeList, setFinanceList] = useState<Finance[]>([]);
-  const { userLogin } = useAuth();
-  const { owner, isLoading: ownerLoading, ownerLogout } = useOwnerAuth();
+  const [financeList, setFinanceList] = useState<FinanceOption[]>([]);
+
+  const { user, userLogin } = useAuth();
+  const { owner, isLoading: ownerLoading } = useOwnerAuth();
   const navigate = useNavigate();
   const loginLoc = useLoginLocation();
 
   // Load login policy on mount
   useEffect(() => {
-    apiClient.get('/auth/login-policy')
+    apiClient
+      .get<{ policy?: 'strict' | 'prefer' | 'off'; locationPolicy?: 'strict' | 'prefer' | 'off' }>(
+        '/auth/login-policy'
+      )
       .then((r) => {
-        if (r.data?.policy) {
-          setPolicy(r.data.policy);
+        const resolved = r.data?.policy || r.data?.locationPolicy;
+        if (resolved === 'strict' || resolved === 'prefer' || resolved === 'off') {
+          setPolicy(resolved);
         }
       })
       .catch(() => {
@@ -41,51 +46,57 @@ const UserLogin = () => {
       });
   }, []);
 
-  // Redirect to owner login if no owner session
+  // Redirect to dashboard if user session is already active, or to License login if no License session
   useEffect(() => {
-    if (!ownerLoading && !owner) {
-      navigate('/owner-login');
+    if (user) {
+      navigate('/', { replace: true });
+      return;
     }
-  }, [owner, ownerLoading, navigate]);
+    if (!ownerLoading && !owner) {
+      navigate('/owner-login', { replace: true });
+    }
+  }, [user, owner, ownerLoading, navigate]);
 
   useEffect(() => {
-    // Instead of fetching directly, check if finances are in localStorage
     const storedFinances = localStorage.getItem('ownerFinances');
     if (storedFinances) {
       try {
-        const finances = JSON.parse(storedFinances);
-        setFinanceList(finances);
-
-        // Auto-select first finance
-        if (finances.length > 0 && !selectedFinance) {
-          setSelectedFinance(String(finances[0].id));
+        const finances = JSON.parse(storedFinances) as FinanceOption[];
+        if (Array.isArray(finances) && finances.length > 0) {
+          setFinanceList(finances);
+          if (!selectedFinance) {
+            setSelectedFinance(String(finances[0].id));
+          }
+          return;
         }
       } catch (err) {
         console.error('Error parsing stored finances:', err);
       }
-    } else {
-      // If not in localStorage, fetch from API via apiClient
-      const fetchOwnerFinances = async () => {
-        try {
-          const response = await apiClient.get('/auth/owner-finances');
-
-          if (response.data.success) {
-            setFinanceList(response.data.finances);
-            localStorage.setItem('ownerFinances', JSON.stringify(response.data.finances));
-
-            // Auto-select first finance
-            if (response.data.finances.length > 0 && !selectedFinance) {
-              setSelectedFinance(String(response.data.finances[0].id));
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching owner finances:', error);
-        }
-      };
-
-      fetchOwnerFinances();
     }
-  }, [selectedFinance]);
+
+    const fetchOwnerFinances = async () => {
+      try {
+        const response = await apiClient.get<{ success?: boolean; finances?: FinanceOption[] }>(
+          '/auth/owner-finances'
+        );
+
+        if (response.data?.success && Array.isArray(response.data.finances)) {
+          setFinanceList(response.data.finances);
+          localStorage.setItem('ownerFinances', JSON.stringify(response.data.finances));
+
+          if (response.data.finances.length > 0 && !selectedFinance) {
+            setSelectedFinance(String(response.data.finances[0].id));
+          }
+        }
+      } catch (fetchErr) {
+        console.error('Error fetching owner finances:', fetchErr);
+      }
+    };
+
+    if (owner) {
+      void fetchOwnerFinances();
+    }
+  }, [owner, selectedFinance]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,13 +113,14 @@ const UserLogin = () => {
         throw new Error('Username/phone number and password are required');
       }
 
-      // Location capture gate
-      let locationPayload: {
-        latitude?: number;
-        longitude?: number;
-        accuracyM?: number;
-        locationPermission?: 'granted' | 'declined' | 'blocked' | 'unavailable' | 'not_asked';
-      } | undefined = undefined;
+      let locationPayload:
+        | {
+            latitude?: number;
+            longitude?: number;
+            accuracyM?: number;
+            locationPermission?: 'granted' | 'declined' | 'blocked' | 'unavailable' | 'not_asked';
+          }
+        | undefined = undefined;
 
       if (policy !== 'off') {
         const locResult = await loginLoc.captureForLogin();
@@ -135,15 +147,12 @@ const UserLogin = () => {
       const res = await userLogin(identifier, password, selectedFinance, locationPayload);
 
       if (res && res.success) {
-        navigate('/');
+        navigate('/', { replace: true });
+      } else if (res?.error_code === 'LOCATION_REQUIRED') {
+        setError(res?.message || 'Location is required by policy.');
+        void loginLoc.captureForLogin();
       } else {
-        if (res?.error_code === 'LOCATION_REQUIRED') {
-          setError(res?.message || 'Location is required by policy.');
-          // Re-open permission flow
-          loginLoc.captureForLogin();
-        } else {
-          setError(res?.message || 'Invalid credentials or finance access denied');
-        }
+        setError(res?.message || 'Invalid credentials or finance access denied');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred during login');
@@ -152,59 +161,57 @@ const UserLogin = () => {
     }
   };
 
-  const handleOwnerLogout = () => {
-    ownerLogout();
-    navigate('/owner-login');
-  };
-
   if (ownerLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mx-auto" />
         </div>
       </div>
     );
   }
 
-  // Make sure owner is logged in
   if (!owner) {
-    return null; // Will redirect via useEffect
+    return null;
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4" data-tauri-drag-region>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+    <div
+      className="min-h-screen flex items-center justify-center bg-background px-4 select-none"
+      data-tauri-drag-region
+    >
+      <div
+        className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
         <div className="p-8 space-y-6">
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-gray-900">User Login</h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Welcome back, {owner?.username}
-            </p>
-            <button
-              onClick={handleOwnerLogout}
-              className="mt-2 text-sm text-blue-600 hover:text-blue-700"
-            >
-              Switch Owner Account
-            </button>
+          <div className="text-center space-y-2">
+            <h2 className="text-2xl font-bold text-foreground">User Login</h2>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs font-medium text-primary">
+              <KeyRound className="h-3.5 w-3.5 shrink-0" />
+              <span>License ID: {owner.username}</span>
+            </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
-              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md flex items-start space-x-3">
-                <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
-                <div className="text-sm text-red-700">{error}</div>
+              <div className="bg-destructive/10 border border-destructive/30 p-3.5 rounded-xl flex items-start space-x-2.5">
+                <AlertCircle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-destructive">{error}</div>
               </div>
             )}
 
             <div className="space-y-4">
               <div>
-                <label htmlFor="identifier" className="block text-sm font-medium text-gray-700 mb-2">
+                <label
+                  htmlFor="identifier"
+                  className="block text-sm font-medium text-foreground mb-1.5"
+                >
                   Username or Phone Number
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <User className="h-5 w-5 text-gray-400" />
+                    <User className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <input
                     id="identifier"
@@ -213,7 +220,7 @@ const UserLogin = () => {
                     autoComplete="username"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    className="appearance-none block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    className="appearance-none block w-full pl-9 pr-3 py-2.5 border border-input bg-background text-foreground rounded-xl shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                     placeholder="Enter username or phone number"
                     required
                   />
@@ -221,19 +228,23 @@ const UserLogin = () => {
               </div>
 
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+                <label
+                  htmlFor="password"
+                  className="block text-sm font-medium text-foreground mb-1.5"
+                >
                   Password
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Lock className="h-5 w-5 text-gray-400" />
+                    <Lock className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <input
                     id="password"
-                    type={showPassword ? "text" : "password"}
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="appearance-none block w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    className="appearance-none block w-full pl-9 pr-10 py-2.5 border border-input bg-background text-foreground rounded-xl shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
                     placeholder="••••••••"
                     required
                   />
@@ -241,9 +252,10 @@ const UserLogin = () => {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="text-gray-400 hover:text-gray-500 focus:outline-none"
+                      className="text-muted-foreground hover:text-foreground focus:outline-none cursor-pointer"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
-                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
@@ -251,12 +263,15 @@ const UserLogin = () => {
             </div>
 
             <div>
-              <label htmlFor="finance" className="block text-sm font-medium text-gray-700 mb-2">
+              <label
+                htmlFor="finance"
+                className="block text-sm font-medium text-foreground mb-1.5"
+              >
                 Select Finance Company
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
-                  <Building className="h-5 w-5 text-gray-400" />
+                  <Building className="h-4 w-4 text-muted-foreground" />
                 </div>
                 <AppSelect
                   id="finance"
@@ -278,11 +293,11 @@ const UserLogin = () => {
                       ? 'Loading finance companies...'
                       : 'Choose a finance company'
                   }
-                  triggerClassName="w-full h-[46px] pl-10 pr-4 border-gray-300 rounded-lg shadow-sm text-sm bg-white text-gray-900"
+                  triggerClassName="w-full h-[44px] pl-9 pr-4 border-input rounded-xl shadow-sm text-sm bg-background text-foreground"
                 />
               </div>
               {financeList.length === 0 && (
-                <p className="mt-2 text-sm text-yellow-600">
+                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
                   Loading finance companies...
                 </p>
               )}
@@ -290,7 +305,7 @@ const UserLogin = () => {
 
             {/* Location Status Row (Hidden if policy is off) */}
             {policy !== 'off' && (
-              <div className="flex items-center justify-between text-xs px-1 text-gray-600">
+              <div className="flex items-center justify-between text-xs px-1 text-muted-foreground">
                 <div className="flex items-center gap-1.5">
                   <span
                     className={`w-2 h-2 rounded-full ${
@@ -299,7 +314,7 @@ const UserLogin = () => {
                   />
                   <span>
                     Location:{' '}
-                    <strong className="font-semibold text-gray-700">
+                    <strong className="font-semibold text-foreground">
                       {loginLoc.status === 'granted' ? 'Enabled' : 'Off'}
                     </strong>
                   </span>
@@ -307,8 +322,8 @@ const UserLogin = () => {
                 {loginLoc.status !== 'granted' && (
                   <button
                     type="button"
-                    onClick={() => loginLoc.captureForLogin()}
-                    className="text-blue-600 hover:text-blue-700 font-medium underline"
+                    onClick={() => void loginLoc.captureForLogin()}
+                    className="text-primary hover:underline font-medium cursor-pointer"
                   >
                     Enable
                   </button>
@@ -316,9 +331,8 @@ const UserLogin = () => {
               </div>
             )}
 
-            {/* Non-blocking Notice */}
             {notice && (
-              <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded-md text-xs text-amber-800">
+              <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl text-xs text-amber-700 dark:text-amber-300">
                 {notice}
               </div>
             )}
@@ -327,14 +341,30 @@ const UserLogin = () => {
               <button
                 type="submit"
                 disabled={isLoading || financeList.length === 0}
-                className={`w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200 ${isLoading || financeList.length === 0 ? "opacity-70 cursor-not-allowed" : ""
-                  }`}
+                className={`w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring transition-colors duration-200 cursor-pointer ${
+                  isLoading || financeList.length === 0 ? 'opacity-70 cursor-not-allowed' : ''
+                }`}
               >
                 {isLoading ? (
                   <>
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    <svg
+                      className="animate-spin -ml-1 mr-2 h-4 w-4 text-current"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
                     </svg>
                     Signing in...
                   </>

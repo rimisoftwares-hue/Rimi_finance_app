@@ -256,7 +256,7 @@ export function AddFinanceDialog({
                 <div className="flex items-center gap-2 text-primary font-medium">
                   <Shield className="h-4 w-4 shrink-0" />
                   <span>
-                    Account Owner: <strong className="text-foreground">{authenticatedOwnerName}</strong>
+                    License ID: <strong className="text-foreground">{authenticatedOwnerName}</strong>
                   </span>
                 </div>
                 <Badge variant="outline" className="text-[10px] bg-background/50 border-primary/30 text-primary">

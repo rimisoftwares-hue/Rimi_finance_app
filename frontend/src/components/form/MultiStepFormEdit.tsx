@@ -9,6 +9,7 @@ import { toast } from '../../hooks/use-toast';
 import { ChevronLeft, ChevronRight, Save, Loader2, CheckCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useOwnerAuth } from '../../contexts/OwnerAuthContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 import { normalizeCustomerData } from '../../utils/normalizeCustomer';
 import {
@@ -45,6 +46,7 @@ export const MultiStepFormEdit: React.FC<MultiStepFormEditProps> = ({
   } = useFormStore();
 
   const { owner } = useOwnerAuth();
+  const { currentFinance } = useAuth();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hasChanges, setHasChanges] = useState(false);
   const [initialFormData, setInitialFormData] = useState<any>(null);
@@ -303,7 +305,7 @@ export const MultiStepFormEdit: React.FC<MultiStepFormEditProps> = ({
       guardian: guardianWithHplno,
       loan,
       vehicle: hasVehicle ? vehicle : null,
-      financeId: Number(owner?.id)
+      financeId: currentFinance?.id ?? owner?.id
     };
 
     // Call the parent's submit handler

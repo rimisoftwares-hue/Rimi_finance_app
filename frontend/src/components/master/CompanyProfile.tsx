@@ -1,13 +1,14 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { motion } from "framer-motion";
 import apiClient from "../../api/apiClient";
 import { toast } from "sonner";
+import { toast as notifyToast } from "../../hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 import {
   Building2, Phone, Mail, MapPin, Upload, Plus, Trash2, Star, Edit, Check, X,
   Users, CreditCard, TrendingUp, IndianRupee, Warehouse, Car, UserCheck,
-  Shield, Calendar, Clock, Download, Printer, CheckCircle, XCircle,
-  Loader2, AlertCircle, RefreshCw, Lock, ShieldAlert, ExternalLink
+  Shield, Calendar, Download, Printer, CheckCircle, XCircle,
+  Loader2, LogOut, Lock, ShieldAlert
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Skeleton } from "../ui/skeleton";
@@ -30,7 +31,6 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar,
 } from "recharts";
-import { Textarea } from "../ui/textarea";
 
 
 /* ── types ── */
@@ -389,16 +389,22 @@ export function CompanyProfileSkeleton() {
 export default function CompanyProfile() {
   const navigate = useNavigate();
   const { owner, ownerLogout } = useOwnerAuth();
-  const { user, currentFinance, refreshFinanceDetails, refreshFinanceList } = useAuth();
+  const { user, userLogout, currentFinance, refreshFinanceDetails, refreshFinanceList } = useAuth();
 
-  // Strict Owner Access Verification
-  const isOwner = Boolean(owner && (!user || user.role === 'owner'));
-  const authenticatedOwnerId = owner?.id || (user?.role === 'owner' ? user.id : '') || '';
-  const authenticatedOwnerName = owner?.username || (user?.role === 'owner' ? user.username : 'Owner');
+  // Strict Owner Access Verification (supports both License Mode and Direct User Mode owner role)
+  const isOwner = Boolean((owner && (!user || user.role === 'owner')) || user?.role === 'owner');
+  const authenticatedOwnerId =
+    owner?.id || currentFinance?.owner_id || (user?.role === 'owner' ? user.id : '') || '';
+  const authenticatedOwnerName =
+    owner?.username ||
+    currentFinance?.owner_username ||
+    (user?.role === 'owner' ? user.username : 'Owner');
 
   // Main Page State
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoggingOutOwner, setIsLoggingOutOwner] = useState(false);
+  const isLoggingOutOwnerRef = useRef(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [isUploadingPrintLogo, setIsUploadingPrintLogo] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -462,11 +468,10 @@ export default function CompanyProfile() {
   const [customerGrowth, setCustomerGrowth] = useState<{ month: string; customers: number }[]>([]);
   const [collectionTrend, setCollectionTrend] = useState<{ month: string; amount: number }[]>([]);
 
-  // Auth Headers helper (handled automatically by apiClient)
-  const getAuthHeaders = useCallback(() => ({}), []);
-
   // Fetch Company Data from Backend
   const fetchProfileData = useCallback(async () => {
+    if (isLoggingOutOwnerRef.current) return;
+
     if (!isOwner) {
       setAccessDenied(true);
       setIsLoading(false);
@@ -562,7 +567,7 @@ export default function CompanyProfile() {
     } finally {
       setIsLoading(false);
     }
-  }, [isOwner, getAuthHeaders, authenticatedOwnerName]);
+  }, [isOwner, authenticatedOwnerName]);
 
   useEffect(() => {
     refreshFinanceList();
@@ -571,6 +576,49 @@ export default function CompanyProfile() {
   useEffect(() => {
     fetchProfileData();
   }, [fetchProfileData, currentFinance?.id]);
+
+  // Owner Logout Handler — closes active User session first, clears License & User contexts, navigates to /owner-login
+  const handleOwnerLogout = async () => {
+    if (isLoggingOutOwnerRef.current || isLoggingOutOwner) return;
+
+    isLoggingOutOwnerRef.current = true;
+    setIsLoggingOutOwner(true);
+
+    let remoteSessionClosed = true;
+
+    try {
+      if (user) {
+        const result = await userLogout('manual');
+        if (result && result.remoteClosed === false) {
+          remoteSessionClosed = false;
+        }
+      }
+    } catch (error) {
+      remoteSessionClosed = false;
+      console.error('Error closing user session during owner logout:', error);
+    } finally {
+      ownerLogout();
+      setIsLoggingOutOwner(false);
+      isLoggingOutOwnerRef.current = false;
+
+      if (remoteSessionClosed) {
+        notifyToast({
+          title: 'Owner Logged Out',
+          description: 'License and user sessions have been signed out.',
+        });
+        toast.success('Owner logged out successfully');
+      } else {
+        notifyToast({
+          title: 'Logged Out Locally',
+          description: 'Local license and user sessions were cleared, but the server could not be reached to close the remote session.',
+          variant: 'destructive',
+        });
+        toast.warning('Logged out locally. Server session could not be reached.');
+      }
+
+      navigate('/owner-login', { replace: true });
+    }
+  };
 
   // Profile completion calculation
   const profileCompletion = useMemo(() => computeCompletion(companyData, banks), [companyData, banks]);
@@ -623,7 +671,6 @@ export default function CompanyProfile() {
 
     setIsSaving(true);
     try {
-      const headers = getAuthHeaders();
       const payload = {
         finance_name: companyData.name.trim(),
         phone_numbers: validPhones,
@@ -725,7 +772,6 @@ export default function CompanyProfile() {
     }
 
     try {
-      const headers = getAuthHeaders();
       const payload = {
         bank_name: newBank.bankName.trim(),
         branch: newBank.branch?.trim() || "",
@@ -1063,17 +1109,26 @@ export default function CompanyProfile() {
             >
               <Printer className="h-4 w-4 mr-1.5" /> Print
             </Button>
-            {/* Refresh Button */}
+            {/* Owner Logout Button */}
             <Button
               size="sm"
               variant="secondary"
-              className="bg-white/20 text-primary-foreground border-white/30 hover:bg-white/30 backdrop-blur-sm shadow-sm flex items-center gap-1.5"
-              onClick={fetchProfileData}
-              disabled={isLoading}
-              title="Refresh Current Profile"
+              className="bg-red-500/25 text-white border border-red-300/40 hover:bg-red-500/40 backdrop-blur-sm shadow-sm flex items-center gap-1.5"
+              onClick={handleOwnerLogout}
+              disabled={isLoggingOutOwner}
+              title="Logout License & Owner Session"
             >
-              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-              <span className="hidden md:inline font-medium text-xs">Refresh</span>
+              {isLoggingOutOwner ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="font-medium text-xs">Logging out...</span>
+                </>
+              ) : (
+                <>
+                  <LogOut className="h-4 w-4" />
+                  <span className="font-medium text-xs">Owner Logout</span>
+                </>
+              )}
             </Button>
           </div>
         </div>
@@ -1160,7 +1215,7 @@ export default function CompanyProfile() {
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Account Owner Name</Label>
+                <Label className="text-xs text-muted-foreground">License ID</Label>
                 <p className="text-sm font-semibold text-foreground flex items-center gap-1.5 pt-1">
                   <Shield className="h-3.5 w-3.5 text-primary" /> {companyData.ownerName}
                 </p>

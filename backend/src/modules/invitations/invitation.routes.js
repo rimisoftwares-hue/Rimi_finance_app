@@ -1,6 +1,8 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { db } = require('../../config/database.config');
 const { enhancedCheckFinance } = require('../../middleware/auth.middleware');
+const { validateOwnerPrincipal, validateUserPrincipal } = require('../auth/sessionSecurity.service');
 const {
   InvitationError,
   searchUserForInvite,
@@ -28,12 +30,13 @@ function normalizeFinanceHeader(req, _res, next) {
 const companyScopedAuth = [normalizeFinanceHeader, enhancedCheckFinance];
 
 // User-scoped auth middleware (does NOT require finance-id header)
-function userScopedAuth(req, res, next) {
+async function userScopedAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization || req.headers['owner-authorization'];
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         success: false,
+        error_code: 'NO_TOKEN',
         message: 'Authentication required',
       });
     }
@@ -41,31 +44,67 @@ function userScopedAuth(req, res, next) {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, JWT_SECRET);
 
+    if (decoded?.tokenType === 'user_refresh') {
+      return res.status(401).json({
+        success: false,
+        error_code: 'INVALID_TOKEN_TYPE',
+        message: 'Refresh token cannot be used as an access token',
+      });
+    }
+
     if (decoded.user) {
-      req.user = decoded.user;
+      const check = await validateUserPrincipal(db, decoded, {
+        requireFinanceContext: false,
+        enforceLoginWindow: false,
+        allowZeroMemberships: true,
+      });
+      if (!check.valid) {
+        return res.status(check.status || 401).json({
+          success: false,
+          error_code: check.error_code,
+          message: check.message,
+        });
+      }
+      req.user = {
+        ...decoded.user,
+        id: check.userRow.id,
+        username: check.userRow.username,
+        email: check.userRow.email,
+      };
       req.isOwner = false;
       return next();
     }
 
     if (decoded.owner) {
-      req.owner = decoded.owner;
+      const check = await validateOwnerPrincipal(db, decoded);
+      if (!check.valid) {
+        return res.status(check.status || 401).json({
+          success: false,
+          error_code: check.error_code,
+          message: check.message,
+        });
+      }
+      req.owner = check.owner;
       req.isOwner = true;
       return next();
     }
 
     return res.status(401).json({
       success: false,
+      error_code: 'INVALID_TOKEN',
       message: 'Invalid token structure',
     });
   } catch (err) {
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({
         success: false,
+        error_code: 'TOKEN_EXPIRED',
         message: 'Token has expired',
       });
     }
     return res.status(401).json({
       success: false,
+      error_code: 'INVALID_TOKEN',
       message: 'Invalid authentication token',
     });
   }

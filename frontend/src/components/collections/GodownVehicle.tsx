@@ -11,7 +11,8 @@ import { useClientPagination } from "../../hooks/useClientPagination";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
 import { Textarea } from "../ui/textarea";
 import { useOwnerAuth } from "../../contexts/OwnerAuthContext";
-import axios from "axios";
+import { useAuth } from "../../contexts/AuthContext";
+import apiClient from "../../api/apiClient";
 import { toast } from "sonner";
 import { validateIndianPhoneNumber, validateRequired } from "../../utils/validation";
 
@@ -54,9 +55,8 @@ export default function GodownVehicle() {
     contact_person: "",
     city: ""
   });
-  //process.env.REACT_APP_API_URL ||
   const { owner } = useOwnerAuth();
-  const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3004').replace(/\/+$/, '');
+  const { currentFinance } = useAuth();
 
   const [godownErrors, setGodownErrors] = useState<{
     name?: string;
@@ -89,7 +89,7 @@ export default function GodownVehicle() {
   // Fetch godowns from API
   const fetchGodowns = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/godowns/get-godowns`);
+      const response = await apiClient.get("/godowns/get-godowns");
       if (response.data.success) {
         setGodowns(response.data.godowns);
       }
@@ -99,16 +99,15 @@ export default function GodownVehicle() {
     }
   };
 
-  // Fetch vehicles from API (you'll need to implement this endpoint)
+  // Fetch vehicles from API
   const fetchVehicles = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/godowns/seized-vehicles`);
+      const response = await apiClient.get("/godowns/seized-vehicles");
       if (response.data.success) {
         setVehicles(response.data.vehicles);
       }
     } catch (error) {
       console.error("Error fetching vehicles:", error);
-      // Use mock data if API not ready
       setVehicles(initialVehicles);
     } finally {
       setLoading(false);
@@ -118,7 +117,7 @@ export default function GodownVehicle() {
   useEffect(() => {
     fetchGodowns();
     fetchVehicles();
-  }, []);
+  }, [currentFinance?.id]);
 
   // Create new godown
   const handleCreateGodown = async () => {
@@ -129,7 +128,7 @@ export default function GodownVehicle() {
 
     try {
       const payload = {
-        owner_id: owner?.id,
+        owner_id: owner?.id || currentFinance?.owner_id,
         name: newGodown.name.trim(),
         address: newGodown.address.trim(),
         contact_number: newGodown.contact_number.trim(),
@@ -137,13 +136,13 @@ export default function GodownVehicle() {
         city: newGodown.city.trim()
       };
 
-      const response = await axios.post(`${API_URL}/api/godowns/add-godown`, payload);
+      const response = await apiClient.post("/godowns/add-godown", payload);
 
       if (response.data.success) {
         toast.success("Godown created successfully");
         setNewGodown({ name: "", address: "", contact_number: "", contact_person: "", city: "" });
         setGodownModalOpen(false);
-        fetchGodowns(); // Refresh the list
+        fetchGodowns();
       }
     } catch (error) {
       console.error("Error creating godown:", error);
@@ -158,13 +157,11 @@ export default function GodownVehicle() {
     }
 
     try {
-      const response = await axios.put(`${API_URL}/api/godowns/deactive-godown`,
-        { id: godownId }
-      );
+      const response = await apiClient.put("/godowns/deactive-godown", { id: godownId });
 
       if (response.data.success) {
         toast.success("Godown deactivated successfully");
-        fetchGodowns(); // Refresh the list
+        fetchGodowns();
       }
     } catch (error) {
       console.error("Error deactivating godown:", error);
@@ -175,13 +172,11 @@ export default function GodownVehicle() {
   // Activate godown
   const handleActivateGodown = async (godownId: number) => {
     try {
-      const response = await axios.put(`${API_URL}/api/godowns/active-godown`,
-        { id: godownId }
-      );
+      const response = await apiClient.put("/godowns/active-godown", { id: godownId });
 
       if (response.data.success) {
         toast.success("Godown activated successfully");
-        fetchGodowns(); // Refresh the list
+        fetchGodowns();
       }
     } catch (error) {
       console.error("Error activating godown:", error);
@@ -198,16 +193,14 @@ export default function GodownVehicle() {
     }
 
     try {
-      const response = await axios.put(`${API_URL}/api/godowns/update-godown`,
-        {
-          id: editingGodown.id,
-          name: editingGodown.name.trim(),
-          address: editingGodown.address.trim(),
-          contact_number: (editingGodown.contact_number || '').trim(),
-          contact_person: (editingGodown.contact_person || '').trim(),
-          city: (editingGodown.city || '').trim()
-        }
-      );
+      const response = await apiClient.put("/godowns/update-godown", {
+        id: editingGodown.id,
+        name: editingGodown.name.trim(),
+        address: editingGodown.address.trim(),
+        contact_number: (editingGodown.contact_number || '').trim(),
+        contact_person: (editingGodown.contact_person || '').trim(),
+        city: (editingGodown.city || '').trim()
+      });
 
       if (response.data.success) {
         toast.success("Godown updated successfully");

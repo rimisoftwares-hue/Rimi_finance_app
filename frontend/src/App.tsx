@@ -1,43 +1,33 @@
 import { Component, ReactNode, useEffect, useState } from 'react';
-import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { Layout } from "./components/Layout";
-import { Navigate } from 'react-router-dom';
-import Navbar from './components/Navbar';
-// import { FinanceAuthProvider, useFinanceAuth } from './contexts/FinanceAuthContext';
-import { OwnerAuthProvider, useOwnerAuth } from './contexts/OwnerAuthContext'
-import { useAuth } from './contexts/AuthContext';
+import { OwnerAuthProvider, useOwnerAuth } from './contexts/OwnerAuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import apiClient from './api/apiClient';
 import OwnerLogin from './pages/OwnerLogin';
 import UserLogin from './pages/UserLogin';
 import Dashboard from './pages/Dashboard';
 import Customers from './pages/Customers';
-import AddCustomerConsultingFrom from './pages/AddCustomerConsultingFrom';
-import AddCustomerVehicleLoanForm from './pages/AddCustomerVehicleLoanForm';
 import EntryPage from './pages/EntryPage';
-import UpdateCustomerForm from './pages/UpdateCustomerForm';
 import UnpaidLoans from './pages/UnpaidLoans';
 import LoanApplications from './pages/LoanApplications';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Unauthorized from './pages/Unauthorized';
-import Vehicles from "./pages/Vehicles";
 import ProtectedRoute from './components/ProtectedRoute';
 import { AddVehiclePage } from './components/vehicles old/AddVehicleForm';
 import { EditVehiclePage } from './components/vehicles old/EditVehiclePage';
-import { VehicleDetails } from './components/vehicles old/VehicleDetails';
 import ConsultingEdit from './components/form/ConsultingEdit';
 import VehicleLoanEdit from './components/form/VehicleLoanEdit';
-import { AuthProvider } from './contexts/AuthContext';
 import { initializeNavigation, recordNavigation } from './utils/navigationHistory';
 import PaymentReport from './components/PaymentReport/PaymentReport';
 import CrudModal from './components/CrudModal';
-import CustomerDetails from './pages/CustomerDetails'
-import EditCustomer from './pages/EditCustomer'
+import CustomerDetails from './pages/CustomerDetails';
+import EditCustomer from './pages/EditCustomer';
 import { Toaster } from './components/ui/toaster';
 import NotFoundPage from './pages/NotFoundPage';
 import { DrillDownProvider } from './components/lib/accounting/DrillDown';
-
-import { useNavigate } from 'react-router-dom'; import OfficeExpencePage from './pages/OfficeExpence';
+import OfficeExpencePage from './pages/OfficeExpence';
 import NotificationPage from './pages/NotificationPage';
 import RouteDebug from './components/RouteDebug';
 
@@ -142,8 +132,9 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 // Create a wrapper component that uses the finance auth hook
 function AppContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const { owner, isLoading } = useOwnerAuth();
-  const navigate = useNavigate()
+  const { owner, isLoading: ownerLoading } = useOwnerAuth();
+  const { user, isLoading: userLoading, authMode } = useAuth();
+  const navigate = useNavigate();
   const shortcutMap = {
     F1: '/loanForm',
     F2: '/loanForm?type=vehicle',
@@ -152,7 +143,6 @@ function AppContent() {
     F5: '/dashboard',
     F6: '/loanApplications',
     F7: '/vehicle',
-    // Add more shortcuts as needed
   };
 
   useEffect(() => {
@@ -160,7 +150,7 @@ function AppContent() {
     return cleanup;
   }, []);
 
-  // Tauri window close session cleanup
+  // Tauri window close attendance session cleanup (supports both License & Direct User modes)
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     (async () => {
@@ -168,14 +158,18 @@ function AppContent() {
         if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
           const { getCurrentWindow } = await import('@tauri-apps/api/window');
           unlisten = await getCurrentWindow().onCloseRequested(async (event) => {
-            if (!sessionStorage.getItem('authToken')) return; // nothing to close; let it exit
+            const activeToken =
+              sessionStorage.getItem('authToken') || localStorage.getItem('authToken');
+            if (!activeToken) return;
             event.preventDefault();
             try {
               await Promise.race([
                 apiClient.post('/auth/user-logout', { reason: 'window_close' }),
-                new Promise((r) => setTimeout(r, 2000)), // never trap the user in the app
+                new Promise((r) => setTimeout(r, 2000)),
               ]);
-            } catch { /* server-side timeout closer will handle it */ }
+            } catch {
+              // server-side timeout closer will handle it
+            }
             await getCurrentWindow().destroy();
           });
         }
@@ -194,15 +188,16 @@ function AppContent() {
     recordNavigation();
   }, [location]);
 
+  // Keyboard shortcuts — active strictly when a user is authenticated
   useEffect(() => {
+    if (!user) return undefined;
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+B for modal (existing)
       if (e.ctrlKey && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
         setIsModalOpen(true);
       }
 
-      // F-key shortcuts for navigation
       if (e.key?.startsWith('F') && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
         const route = shortcutMap[e.key as keyof typeof shortcutMap];
         if (route) {
@@ -216,33 +211,70 @@ function AppContent() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [navigate]); // Add navigate to dependency array
+  }, [navigate, user]);
 
-  if (isLoading) {
-    return <div>Loading...</div>;
+  if (ownerLoading || userLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
   }
 
-  if (!owner) {
-    return <OwnerLogin />;
+  const publicUtilityPaths = ['/forgot-password', '/reset-password', '/unauthorized'];
+  const isPublicUtilityPath = publicUtilityPaths.includes(location.pathname);
+
+  // Unauthenticated gate: neither Direct User nor License session exists
+  if (!user && !owner && !isPublicUtilityPath) {
+    return (
+      <div className="min-h-screen bg-background select-none">
+        <Toaster />
+        <OwnerLogin />
+      </div>
+    );
+  }
+
+  // License Mode gate: License is authenticated in localStorage, but no User session exists yet
+  if (!user && owner && authMode !== 'direct_user') {
+    if (
+      location.pathname !== '/user-login' &&
+      location.pathname !== '/owner-login' &&
+      !isPublicUtilityPath
+    ) {
+      return <Navigate to="/user-login" replace />;
+    }
   }
 
   return (
-    <AuthProvider>
-      <DrillDownProvider>
-        <div className="min-h-screen bg-gray-50 select-none ">
-          {/* Toast Notifications */}
-          <Toaster />
-          {/* Login Time Restriction Modal */}
-          <SessionExpiredModal />
-          <ErrorBoundary>
-            {/* Main Content */}
-            <Routes>
-              {/* Public routes that don't require owner */}
-              <Route path="/owner-login" element={<OwnerLogin />} />
-              <Route path="/user-login" element={<UserLogin />} />
-              <Route path="/forgot-password" element={<ForgotPassword />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
-              <Route path="/unauthorized" element={<Unauthorized />} />
+    <DrillDownProvider>
+      <div className="min-h-screen bg-gray-50 select-none ">
+        {/* Toast Notifications */}
+        <Toaster />
+        {/* Login Time Restriction Modal */}
+        <SessionExpiredModal />
+        <ErrorBoundary>
+          {/* Main Content */}
+          <Routes>
+            {/* Public / Auth routes */}
+            <Route
+              path="/owner-login"
+              element={user ? <Navigate to="/dashboard" replace /> : <OwnerLogin />}
+            />
+            <Route
+              path="/user-login"
+              element={
+                user ? (
+                  <Navigate to="/dashboard" replace />
+                ) : owner ? (
+                  <UserLogin />
+                ) : (
+                  <Navigate to="/owner-login" replace />
+                )
+              }
+            />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/unauthorized" element={<Unauthorized />} />
 
 
               {/* Protected routes under Layout */}
@@ -429,9 +461,9 @@ function AppContent() {
                 <Route path="/reports/bill" element={<ProtectedRoute><Bill /></ProtectedRoute>} />
 
                 {/* Accounts */}
-                <Route path="/accounts/ledger" element={<Ledger />} />
-                <Route path="/accounts/ledger-groups" element={<LedgerGroups />} />
-                <Route path="/accounts/vouchers" element={<Vouchers />} />
+                <Route path="/accounts/ledger" element={<ProtectedRoute><Ledger /></ProtectedRoute>} />
+                <Route path="/accounts/ledger-groups" element={<ProtectedRoute><LedgerGroups /></ProtectedRoute>} />
+                <Route path="/accounts/vouchers" element={<ProtectedRoute><Vouchers /></ProtectedRoute>} />
                 <Route path="/accounts/daybook" element={<ProtectedRoute><DayBook /></ProtectedRoute>} />
                 <Route path="/accounts/statements" element={<ProtectedRoute><Statements /></ProtectedRoute>} />
                 <Route path="/accounts/business" element={<ProtectedRoute><Business /></ProtectedRoute>} />
@@ -439,7 +471,6 @@ function AppContent() {
                 <Route path="/accounts/balance-sheet" element={<ProtectedRoute><BalanceSheet /></ProtectedRoute>} />
                 <Route path="/accounts/trial-balance" element={<ProtectedRoute><TrialBalance /></ProtectedRoute>} />
                 <Route path="/accounts/pnl" element={<ProtectedRoute><ProfitLoss /></ProtectedRoute>} />
-                <Route path="/accounts/ledger" element={<ProtectedRoute><Ledger /></ProtectedRoute>} />
                 <Route path="/accounts/cash-flow" element={<ProtectedRoute><CashFlow /></ProtectedRoute>} />
                 {/* AI Assistant */}
                 <Route path="/ai/dashboard" element={<ProtectedRoute><AIDashboard /></ProtectedRoute>} />
@@ -491,7 +522,6 @@ function AppContent() {
           <CrudModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
         </div>
       </DrillDownProvider>
-    </AuthProvider>
   );
 }
 
@@ -499,8 +529,10 @@ function App() {
   return (
     <HashRouter>
       <OwnerAuthProvider>
-        <AppContent />
-        <RouteDebug />
+        <AuthProvider>
+          <AppContent />
+          <RouteDebug />
+        </AuthProvider>
       </OwnerAuthProvider>
     </HashRouter>
   );

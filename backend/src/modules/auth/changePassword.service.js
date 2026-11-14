@@ -16,6 +16,13 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { db } = require('../../config/database.config');
+const {
+  computePasswordFingerprint,
+  issueOwnerLicenseToken,
+  issueUserAccessToken,
+  issueUserRefreshToken,
+  revokeFamiliesInMemory,
+} = require('./sessionSecurity.service');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const BCRYPT_COST = 10;
@@ -132,27 +139,43 @@ function resolveCallerPrincipal(req) {
     return {
       principalType: req.principalType,
       principalId: String(req.principalId).trim(),
+      authMode: req.authMode === 'direct_user' ? 'direct_user' : 'license',
       sessionId: req.sessionId || null,
+      anchorSessionId: req.anchorSessionId || req.sessionId || null,
       financeId: req.financeId || null,
+      role: req.role || 'agent',
+      allowedCompanies: Array.isArray(req.allowedCompanies) ? req.allowedCompanies : [],
+      financeName: req.financeName || undefined,
     };
   }
   if (req?.user?.id && isValidUuid(String(req.user.id))) {
+    const resolvedSessionId = isValidUuid(String(req.user.sessionId || ''))
+      ? String(req.user.sessionId).trim()
+      : null;
+    const resolvedAnchorId = isValidUuid(String(req.user.anchorSessionId || ''))
+      ? String(req.user.anchorSessionId).trim()
+      : resolvedSessionId;
     return {
       principalType: 'user',
       principalId: String(req.user.id).trim(),
-      sessionId: isValidUuid(String(req.user.sessionId || ''))
-        ? String(req.user.sessionId).trim()
-        : null,
+      authMode: req.authMode === 'direct_user' ? 'direct_user' : 'license',
+      sessionId: resolvedSessionId,
+      anchorSessionId: resolvedAnchorId,
       financeId: isValidUuid(String(req.financeId || req.user.current_finance_id || ''))
         ? String(req.financeId || req.user.current_finance_id).trim()
         : null,
+      role: req.user.role || 'agent',
+      allowedCompanies: Array.isArray(req.user.allowed_companies) ? req.user.allowed_companies : [],
+      financeName: req.user.finance_name || undefined,
     };
   }
   if (req?.owner?.id && isValidUuid(String(req.owner.id))) {
     return {
       principalType: 'owner',
       principalId: String(req.owner.id).trim(),
+      authMode: 'license',
       sessionId: null,
+      anchorSessionId: null,
       financeId: isValidUuid(String(req.financeId || ''))
         ? String(req.financeId).trim()
         : null,
@@ -186,16 +209,34 @@ function resolveCallerPrincipal(req) {
     throw err;
   }
 
+  if (decoded?.tokenType === 'user_refresh') {
+    const err = new Error('Invalid authentication token type');
+    err.statusCode = 401;
+    err.errorCode = 'UNAUTHORIZED';
+    throw err;
+  }
+
   if (decoded?.user?.id && isValidUuid(String(decoded.user.id))) {
+    const resolvedSessionId = isValidUuid(String(decoded.user.sessionId || ''))
+      ? String(decoded.user.sessionId).trim()
+      : null;
+    const resolvedAnchorId = isValidUuid(String(decoded.user.anchorSessionId || ''))
+      ? String(decoded.user.anchorSessionId).trim()
+      : resolvedSessionId;
     return {
       principalType: 'user',
       principalId: String(decoded.user.id).trim(),
-      sessionId: isValidUuid(String(decoded.user.sessionId || ''))
-        ? String(decoded.user.sessionId).trim()
-        : null,
+      authMode: decoded.authMode === 'direct_user' ? 'direct_user' : 'license',
+      sessionId: resolvedSessionId,
+      anchorSessionId: resolvedAnchorId,
       financeId: isValidUuid(String(decoded.user.current_finance_id || req.headers?.['finance-id'] || ''))
         ? String(decoded.user.current_finance_id || req.headers?.['finance-id']).trim()
         : null,
+      role: decoded.user.role || 'agent',
+      allowedCompanies: Array.isArray(decoded.user.allowed_companies)
+        ? decoded.user.allowed_companies
+        : [],
+      financeName: decoded.user.finance_name || undefined,
     };
   }
 
@@ -203,7 +244,9 @@ function resolveCallerPrincipal(req) {
     return {
       principalType: 'owner',
       principalId: String(decoded.owner.id).trim(),
+      authMode: 'license',
       sessionId: null,
+      anchorSessionId: null,
       financeId: isValidUuid(String(req.headers?.['finance-id'] || ''))
         ? String(req.headers?.['finance-id']).trim()
         : null,
@@ -313,7 +356,7 @@ async function changePasswordForPrincipal(reqOrPrincipal, payloadOrQueryable = d
   const selectSql =
     principal.principalType === 'owner'
       ? `SELECT id, username, password, is_active FROM owner WHERE id = $1::uuid LIMIT 1`
-      : `SELECT id, username, password, is_active FROM users WHERE id = $1::uuid LIMIT 1`;
+      : `SELECT id, username, email, password, is_active FROM users WHERE id = $1::uuid LIMIT 1`;
 
   const accountRes = await queryable.query(selectSql, [principal.principalId]);
   const rows = accountRes?.rows || [];
@@ -407,17 +450,20 @@ async function changePasswordForPrincipal(reqOrPrincipal, payloadOrQueryable = d
       }
     }
 
-    // Invalidate other open login sessions for `user` principals while preserving the current session
+    // Invalidate all other login sessions (including Direct User anchors on other devices) while preserving the current active session
     if (principal.principalType === 'user') {
       await client.query(
         `UPDATE agent_login_sessions
-         SET logout_time = CURRENT_TIMESTAMP,
-             duration_seconds = GREATEST(0, EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - login_time))::int),
+         SET logout_time = COALESCE(logout_time, CURRENT_TIMESTAMP),
+             duration_seconds = CASE
+               WHEN logout_time IS NULL THEN GREATEST(0, EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - login_time))::int)
+               ELSE duration_seconds
+             END,
              logout_reason = 'password_changed'
          WHERE user_id = $1::uuid
-           AND logout_time IS NULL
-           AND ($2::uuid IS NULL OR id <> $2::uuid)`,
-        [principal.principalId, principal.sessionId]
+           AND ($2::uuid IS NULL OR id <> $2::uuid)
+           AND ($3::uuid IS NULL OR id <> $3::uuid)`,
+        [principal.principalId, principal.sessionId, principal.anchorSessionId]
       );
     }
 
@@ -435,6 +481,54 @@ async function changePasswordForPrincipal(reqOrPrincipal, payloadOrQueryable = d
 
   clearFailedAttempts(rateLimitKey);
 
+  // Revoke all previously issued refresh-token families for this user and mint rotated credentials for the active caller session
+  const newPwdFp = computePasswordFingerprint(newPasswordHash);
+  let rotatedTokens = {};
+
+  if (principal.principalType === 'user') {
+    revokeFamiliesInMemory({ userId: principal.principalId });
+
+    const rotatedAccessToken = issueUserAccessToken({
+      user: {
+        id: account.id,
+        username: account.username,
+        email: account.email,
+      },
+      role: principal.role || 'agent',
+      allowedCompanies: principal.allowedCompanies || [],
+      currentFinanceId: principal.financeId || null,
+      financeName: principal.financeName,
+      sessionId: principal.sessionId || null,
+      anchorSessionId: principal.anchorSessionId || principal.sessionId || null,
+      authMode: principal.authMode || 'license',
+      pwdFp: newPwdFp,
+    });
+
+    rotatedTokens = {
+      authMode: principal.authMode || 'license',
+      token: rotatedAccessToken,
+    };
+
+    if (principal.authMode === 'direct_user') {
+      const { refreshToken } = issueUserRefreshToken({
+        userId: account.id,
+        anchorSessionId: principal.anchorSessionId || principal.sessionId || null,
+        currentSessionId: principal.sessionId || null,
+        currentFinanceId: principal.financeId || null,
+        pwdFp: newPwdFp,
+      });
+      rotatedTokens.refreshToken = refreshToken;
+    }
+  } else if (principal.principalType === 'owner') {
+    rotatedTokens = {
+      ownerToken: issueOwnerLicenseToken({
+        id: account.id,
+        username: account.username,
+        password: newPasswordHash,
+      }),
+    };
+  }
+
   // Event-only audit log (never log passwords, hashes, or request body)
   console.info('[AUDIT] password_changed', {
     principalType: principal.principalType,
@@ -446,6 +540,7 @@ async function changePasswordForPrincipal(reqOrPrincipal, payloadOrQueryable = d
     success: true,
     message: 'Password changed successfully',
     lastPasswordChange,
+    ...rotatedTokens,
   };
 }
 

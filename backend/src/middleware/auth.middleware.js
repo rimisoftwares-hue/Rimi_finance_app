@@ -1,233 +1,289 @@
 const jwt = require('jsonwebtoken');
 const { db } = require('../config/database.config');
+const {
+  getJwtSecret,
+  computePasswordFingerprint,
+  validateOwnerPrincipal,
+  validateUserPrincipal,
+} = require('../modules/auth/sessionSecurity.service');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function isValidUuid(value) {
+  return typeof value === 'string' && UUID_REGEX.test(value.trim());
+}
+
+function formatTime12h(timeStr) {
+  if (!timeStr) return '';
+  const parts = String(timeStr).split(':');
+  const h = parseInt(parts[0], 10);
+  const m = parts[1] || '00';
+  if (Number.isNaN(h)) return String(timeStr);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${String(h12).padStart(2, '0')}:${m} ${ampm}`;
+}
 
 const enhancedCheckFinance = async (req, res, next) => {
   try {
+    // Prefer standard User Authorization header; fall back to owner-authorization only when absent
     let authHeader = req.headers.authorization;
+    let usingOwnerHeader = false;
     if (!authHeader && (req.headers['owner-authorization'] || req.headers['Owner-Authorization'])) {
       authHeader = req.headers['owner-authorization'] || req.headers['Owner-Authorization'];
+      usingOwnerHeader = true;
     }
+
     if (!authHeader) {
       return res.status(401).json({
         success: false,
         error: 'Authorization token missing',
+        error_code: 'AUTH_REQUIRED',
       });
     }
 
-    const token = authHeader.replace(/^Bearer\s+/i, '');
-    let decoded;
+    const token = String(authHeader).replace(/^Bearer\s+/i, '').trim();
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authorization token missing',
+        error_code: 'AUTH_REQUIRED',
+      });
+    }
 
-    // 1️⃣ VERIFY JWT (PRIMARY SOURCE)
+    let decoded;
     try {
-      decoded = jwt.verify(token, JWT_SECRET);
+      decoded = jwt.verify(token, getJwtSecret());
     } catch (err) {
+      const isExpired = err && err.name === 'TokenExpiredError';
       return res.status(401).json({
         success: false,
         error: 'Invalid or expired token',
+        error_code: usingOwnerHeader
+          ? 'INVALID_OWNER_TOKEN'
+          : isExpired
+            ? 'TOKEN_EXPIRED'
+            : 'INVALID_TOKEN',
       });
     }
 
-    // Attach user or owner to request
-    if (decoded.owner) {
-      req.owner = decoded.owner;
-      req.user = {
-        id: decoded.owner.id,
-        username: decoded.owner.username,
-        role: 'owner',
-      };
-      req.isOwner = true;
-    } else {
-      req.user = decoded.user;
-    }
-
-    let financeId = req.user?.current_finance_id;
-
-    // 2️⃣ OPTIONAL HEADER OVERRIDE (AUTHORIZED ONLY)
-    const headerFinanceId = req.headers['finance-id'];
-
-    if (headerFinanceId) {
-      const parsedFinanceId = String(headerFinanceId).trim();
-      const isOwnerOrAdmin = req.user?.role === 'owner' || req.user?.role === 'admin' || req.isOwner;
-
-      if (!isOwnerOrAdmin) {
-        const allowedCompanies = (req.user?.allowed_companies || []).map(c => String(c).trim());
-        if (!allowedCompanies.includes(parsedFinanceId)) {
-          // Direct DB verification against user_allowed_companies junction table
-          const uacCheck = await db.query(
-            `SELECT 1 FROM user_allowed_companies WHERE user_id = $1 AND finance_id = $2 AND is_active = 1`,
-            [req.user?.id, parsedFinanceId]
-          );
-          if (uacCheck.rows.length === 0) {
-            return res.status(403).json({
-              success: false,
-              error: 'Not authorized for this finance company',
-            });
-          }
-        }
-      }
-
-      financeId = parsedFinanceId;
-    }
-
-    // Fallback: If financeId not yet determined, but owner session is active, default to first active finance of owner
-    if (!financeId && (req.isOwner || req.user?.role === 'owner') && (req.owner?.id || req.user?.id)) {
-      const ownerId = req.owner?.id || req.user?.id;
-      const defFin = await db.query(
-        'SELECT id FROM finance_detail WHERE owner_id = $1 AND is_active = 1 ORDER BY id ASC LIMIT 1',
-        [ownerId]
-      );
-      if (defFin.rows.length > 0) {
-        financeId = String(defFin.rows[0].id);
-      }
-    }
-
-    // 3️⃣ FINANCE ID MUST EXIST
-    if (!financeId) {
-      return res.status(400).json({
+    if (decoded?.tokenType === 'user_refresh') {
+      return res.status(401).json({
         success: false,
-        error: 'Finance context missing',
+        error: 'Invalid token type',
+        error_code: 'INVALID_TOKEN_TYPE',
       });
     }
 
-    // Normalize once
-    req.financeId = String(financeId).trim();
+    const rawHeaderFinanceId = req.headers['finance-id'] || req.headers['Finance-ID'];
+    const headerFinanceId =
+      rawHeaderFinanceId !== undefined && rawHeaderFinanceId !== null
+        ? String(rawHeaderFinanceId).trim()
+        : '';
 
-    // Guard: reject empty or literal 'undefined'/'null' finance IDs
-    if (!req.financeId || req.financeId === 'undefined' || req.financeId === 'null') {
+    if (headerFinanceId && (headerFinanceId === 'undefined' || headerFinanceId === 'null' || !isValidUuid(headerFinanceId))) {
       return res.status(400).json({
         success: false,
         error: 'Invalid finance ID',
+        error_code: 'INVALID_FINANCE_ID',
       });
     }
 
-    // 4️⃣ VERIFY FINANCE EXISTS & ACTIVE - PostgreSQL syntax
-    try {
-      const result = await db.query(
-        'SELECT id FROM finance_detail WHERE id = $1 AND is_active = 1',
-        [req.financeId]
+    // Branch A: License/Owner JWT
+    if (decoded.owner) {
+      const ownerCheck = await validateOwnerPrincipal(db, decoded);
+      if (!ownerCheck.valid) {
+        return res.status(ownerCheck.status || 401).json({
+          success: false,
+          error: ownerCheck.message,
+          message: ownerCheck.message,
+          error_code: ownerCheck.error_code,
+        });
+      }
+
+      req.owner = ownerCheck.owner;
+      req.user = {
+        id: ownerCheck.owner.id,
+        username: ownerCheck.owner.username,
+        role: 'owner',
+      };
+      req.isOwner = true;
+      req.authMode = 'license';
+
+      let financeId = headerFinanceId || (decoded.current_finance_id ? String(decoded.current_finance_id).trim() : '');
+
+      if (!financeId) {
+        const defFin = await db.query(
+          'SELECT id FROM finance_detail WHERE owner_id = $1 AND is_active = 1 ORDER BY created_at ASC, id ASC LIMIT 1',
+          [ownerCheck.owner.id]
+        );
+        if (defFin.rows.length > 0) {
+          financeId = String(defFin.rows[0].id);
+        }
+      }
+
+      if (!financeId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Finance context missing',
+          error_code: 'FINANCE_CONTEXT_MISSING',
+        });
+      }
+
+      if (!isValidUuid(financeId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid finance ID',
+          error_code: 'INVALID_FINANCE_ID',
+        });
+      }
+
+      // Enforce strict tenant isolation: finance must belong to this Owner License and be active
+      const finCheck = await db.query(
+        'SELECT id, owner_id, is_active FROM finance_detail WHERE id = $1 LIMIT 1',
+        [financeId]
       );
 
-      if (result.rows.length === 0) {
+      if (finCheck.rows.length === 0 || Number(finCheck.rows[0].is_active) !== 1) {
         return res.status(404).json({
           success: false,
           error: 'Finance company not found or inactive',
+          error_code: 'FINANCE_NOT_FOUND',
         });
       }
-    } catch (dbError) {
-      // Handle database connection errors specifically
-      if (dbError.code === 'ECONNRESET' || dbError.code === 'PROTOCOL_CONNECTION_LOST') {
-        console.error('Database connection lost during finance check');
-        return res.status(503).json({
+
+      if (String(finCheck.rows[0].owner_id) !== String(ownerCheck.owner.id)) {
+        return res.status(403).json({
           success: false,
-          error: 'Database connection issue. Please try again.',
-          retry: true
+          error: 'Not authorized for this finance company',
+          error_code: 'FINANCE_ACCESS_DENIED',
         });
       }
-      throw dbError;
+
+      req.financeId = financeId;
+      return next();
     }
 
-    // 5️⃣ ENFORCE LOGIN TIME RESTRICTIONS (mid-session)
-    // Only applies to non-owner, non-admin users with a valid user ID
-    const isOwnerOrAdmin = req.isOwner || req.user?.role === 'owner' || req.user?.role === 'admin';
-    if (!isOwnerOrAdmin && req.user?.id) {
-      try {
-        const uacTimeCheck = await db.query(
-          `SELECT login_time_from, login_time_to, role
-           FROM user_allowed_companies
-           WHERE user_id = $1 AND finance_id = $2 AND is_active = 1
-           LIMIT 1`,
-          [req.user.id, req.financeId]
-        );
+    // Branch B: User JWT (License Mode or Direct User Mode)
+    const candidateFinanceId =
+      headerFinanceId ||
+      (decoded.user?.current_finance_id ? String(decoded.user.current_finance_id).trim() : '');
 
-        if (uacTimeCheck.rows.length > 0) {
-          const { login_time_from, login_time_to, role: companyRole } = uacTimeCheck.rows[0];
-          const isCompanyOwnerOrAdmin = companyRole === 'owner' || companyRole === 'admin';
-
-          if (!isCompanyOwnerOrAdmin && login_time_from && login_time_to) {
-            // isWithinLoginWindow helper — inline to keep middleware self-contained
-            const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
-            const currentDate = new Date(now);
-            const currentMinutes = currentDate.getHours() * 60 + currentDate.getMinutes();
-
-            const parseTime = (timeStr) => {
-              const parts = String(timeStr).split(':');
-              return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
-            };
-
-            const fromMinutes = parseTime(login_time_from);
-            const toMinutes = parseTime(login_time_to);
-
-            let withinWindow;
-            if (fromMinutes <= toMinutes) {
-              withinWindow = currentMinutes >= fromMinutes && currentMinutes <= toMinutes;
-            } else {
-              // Overnight shift (e.g., 22:00 to 06:00)
-              withinWindow = currentMinutes >= fromMinutes || currentMinutes <= toMinutes;
-            }
-
-            if (!withinWindow) {
-              const formatTime = (t) => {
-                const parts = String(t).split(':');
-                const h = parseInt(parts[0], 10);
-                const m = parts[1] || '00';
-                const ampm = h >= 12 ? 'PM' : 'AM';
-                const h12 = h % 12 || 12;
-                return `${String(h12).padStart(2, '0')}:${m} ${ampm}`;
-              };
-              return res.status(403).json({
-                success: false,
-                message: `Your authorized working hours are ${formatTime(login_time_from)} – ${formatTime(login_time_to)}. Access is restricted outside this window.`,
-                error_code: 'LOGIN_TIME_RESTRICTED',
-                allowed_from: String(login_time_from),
-                allowed_to: String(login_time_to),
-              });
-            }
-          }
-        }
-      } catch (timeCheckErr) {
-        console.error('Login time check error (non-blocking):', timeCheckErr);
-        // Non-blocking: allow request to proceed if time check fails due to DB issue
-      }
-    }
-
-    // ✅ Finance context is valid
-    next();
-  } catch (error) {
-    console.error('Finance middleware error:', error);
-
-    if (error.code === 'ECONNRESET') {
-      return res.status(503).json({
+    if (
+      candidateFinanceId &&
+      (candidateFinanceId === 'undefined' || candidateFinanceId === 'null' || !isValidUuid(candidateFinanceId))
+    ) {
+      return res.status(400).json({
         success: false,
-        error: 'Database connection lost. Please try again.',
-        retry: true
+        error: 'Invalid finance ID',
+        error_code: 'INVALID_FINANCE_ID',
       });
     }
 
-    res.status(500).json({
+    const userValidation = await validateUserPrincipal(db, decoded, {
+      targetFinanceId: candidateFinanceId || null,
+      requireFinanceContext: true,
+      enforceLoginWindow: true,
+    });
+
+    if (!userValidation.valid) {
+      if (userValidation.error_code === 'LOGIN_TIME_RESTRICTED') {
+        return res.status(403).json({
+          success: false,
+          message: `Your authorized working hours are ${formatTime12h(userValidation.allowed_from)} – ${formatTime12h(userValidation.allowed_to)}. Access is restricted outside this window.`,
+          error: userValidation.message,
+          error_code: 'LOGIN_TIME_RESTRICTED',
+          allowed_from: userValidation.allowed_from,
+          allowed_to: userValidation.allowed_to,
+        });
+      }
+
+      return res.status(userValidation.status || 401).json({
+        success: false,
+        error: userValidation.message,
+        message: userValidation.message,
+        error_code: userValidation.error_code,
+      });
+    }
+
+    const membership = userValidation.selectedMembership;
+    const resolvedFinanceId = String(membership.finance_id);
+
+    req.authMode = userValidation.authMode;
+    req.financeId = resolvedFinanceId;
+    req.user = {
+      ...decoded.user,
+      id: userValidation.userRow.id,
+      username: userValidation.userRow.username,
+      email: userValidation.userRow.email,
+      role: membership.role,
+      allowed_companies: userValidation.allowedCompanies,
+      current_finance_id: resolvedFinanceId,
+      finance_name: membership.finance_name,
+    };
+
+    if (membership.role === 'owner') {
+      req.owner = {
+        id: membership.owner_id,
+        username: membership.owner_username,
+      };
+      req.isOwner = true;
+    }
+
+    return next();
+  } catch (error) {
+    console.error('Finance middleware error:', error?.message || error);
+
+    if (error && (error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST')) {
+      return res.status(503).json({
+        success: false,
+        error: 'Database connection lost. Please try again.',
+        retry: true,
+      });
+    }
+
+    return res.status(500).json({
       success: false,
       error: 'Finance verification failed',
     });
   }
 };
 
-// Middleware to authenticate JWT token
-const authMiddleware = (req, res, next) => {
+// Middleware to authenticate User JWT token (used by /session-heartbeat, etc.)
+const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
-  console.log('authHeader :', authHeader);
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'No token, authorization denied' });
+    return res.status(401).json({
+      success: false,
+      message: 'No token, authorization denied',
+      error_code: 'AUTH_REQUIRED',
+    });
   }
 
   try {
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const token = authHeader.slice(7).trim();
+    const decoded = jwt.verify(token, getJwtSecret());
+
+    if (decoded?.tokenType === 'user_refresh') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token type',
+        error_code: 'INVALID_TOKEN_TYPE',
+      });
+    }
+
+    req.authDecoded = decoded;
+    req.authMode = decoded.authMode === 'direct_user' ? 'direct_user' : 'license';
     req.user = decoded.user;
-    next();
+    return next();
   } catch (err) {
-    res.status(401).json({ success: false, message: 'Token is not valid' });
+    const isExpired = err && err.name === 'TokenExpiredError';
+    return res.status(401).json({
+      success: false,
+      message: isExpired ? 'Token has expired' : 'Token is not valid',
+      error_code: isExpired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
+    });
   }
 };
 
@@ -235,97 +291,229 @@ const checkFinance = async (req, res, next) => {
   try {
     const authHeader = req.headers['finance-authorization'];
     if (authHeader) {
-      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const token = String(authHeader).replace(/^Bearer\s+/i, '').trim();
+      const decoded = jwt.verify(token, getJwtSecret());
       req.financeId = decoded.finance?.id ? String(decoded.finance.id) : null;
       return next();
     }
 
-    // Fallback: Support standard modern Authorization + finance-id via enhancedCheckFinance
     return enhancedCheckFinance(req, res, next);
-  } catch (error) {
-    res.status(401).json({ error: 'Invalid finance token' });
+  } catch (_error) {
+    return res.status(401).json({ error: 'Invalid finance token', error_code: 'INVALID_TOKEN' });
   }
 };
 
-// ─── Helper: Authenticate Owner Session from Headers ───────────────────────────
+/**
+ * Resolves the authoritative Owner record (`owner.id`, `owner.username`) from
+ * either a License/Owner JWT (`owner-authorization` / `Authorization`) OR an
+ * authenticated Owner-role User JWT (`Authorization` -> `user_allowed_companies`
+ * -> `finance_detail` -> `owner`).
+ *
+ * Never equates `users.id` with `owner.id`.
+ */
 const resolveOwnerFromRequest = async (req) => {
-  let token = null;
+  const rawOwnerHeader = req.headers['owner-authorization'] || req.headers['Owner-Authorization'];
+  const rawUserHeader = req.headers.authorization;
 
-  // 1. Check Owner-Authorization header (Primary for Owner session)
-  const ownerHeader = req.headers['owner-authorization'] || req.headers['Owner-Authorization'];
-  if (ownerHeader) {
-    token = ownerHeader.replace(/^Bearer\s+/i, '').trim();
+  const candidateTokens = [];
+  if (rawUserHeader) {
+    candidateTokens.push({
+      token: String(rawUserHeader).replace(/^Bearer\s+/i, '').trim(),
+      source: 'user',
+    });
   }
-
-  // 2. Check standard Authorization header
-  if (!token && req.headers.authorization) {
-    token = req.headers.authorization.replace(/^Bearer\s+/i, '').trim();
-  }
-
-  if (!token) {
-    return { status: 401, error: 'Authentication token missing. Owner access required.' };
-  }
-
-  let decoded;
-  try {
-    decoded = jwt.verify(token, JWT_SECRET);
-  } catch (err) {
-    return { status: 401, error: 'Invalid or expired authorization token' };
-  }
-
-  // Case A: Token was issued for an Owner directly (e.g. from owner-login)
-  if (decoded?.owner?.id) {
-    const { rows } = await db.query(
-      'SELECT id, username FROM owner WHERE id = $1 AND is_active = 1',
-      [decoded.owner.id]
-    );
-    if (rows.length > 0) {
-      return {
-        owner: rows[0],
-        user: { id: rows[0].id, username: rows[0].username, role: 'owner' },
-        isOwner: true,
-      };
+  if (rawOwnerHeader) {
+    const ownerTok = String(rawOwnerHeader).replace(/^Bearer\s+/i, '').trim();
+    if (ownerTok && !candidateTokens.some((c) => c.token === ownerTok)) {
+      candidateTokens.push({ token: ownerTok, source: 'owner' });
     }
   }
 
-  // Case B: Token was issued for a User with role === 'owner'
-  if (decoded?.user?.id) {
-    if (decoded.user.role === 'owner') {
+  if (candidateTokens.length === 0 || !candidateTokens[0].token) {
+    return {
+      status: 401,
+      error: 'Authentication token missing. Owner access required.',
+      error_code: 'AUTH_REQUIRED',
+    };
+  }
+
+  let lastAuthFailure = null;
+
+  const requestedFinanceCandidate =
+    req.headers['finance-id'] ||
+    req.headers['Finance-ID'] ||
+    req.params?.financeId ||
+    req.query?.financeId ||
+    req.query?.finance_id ||
+    req.body?.financeId ||
+    req.body?.finance_id ||
+    null;
+
+  const scopedFinanceId =
+    requestedFinanceCandidate && isValidUuid(String(requestedFinanceCandidate))
+      ? String(requestedFinanceCandidate).trim()
+      : null;
+
+  for (const candidate of candidateTokens) {
+    let decoded;
+    try {
+      decoded = jwt.verify(candidate.token, getJwtSecret());
+    } catch (err) {
+      const isExpired = err && err.name === 'TokenExpiredError';
+      lastAuthFailure = {
+        status: 401,
+        error: 'Invalid or expired authorization token',
+        error_code:
+          candidate.source === 'owner'
+            ? 'INVALID_OWNER_TOKEN'
+            : isExpired
+              ? 'TOKEN_EXPIRED'
+              : 'INVALID_TOKEN',
+      };
+      continue;
+    }
+
+    if (decoded?.tokenType === 'user_refresh') {
+      lastAuthFailure = {
+        status: 401,
+        error: 'Invalid token type',
+        error_code: 'INVALID_TOKEN_TYPE',
+      };
+      continue;
+    }
+
+    // Case A: License/Owner token (`decoded.owner.id`)
+    if (decoded?.owner?.id) {
+      const ownerValidation = await validateOwnerPrincipal(db, decoded);
+      if (ownerValidation.valid) {
+        return {
+          owner: ownerValidation.owner,
+          user: {
+            id: ownerValidation.owner.id,
+            username: ownerValidation.owner.username,
+            role: 'owner',
+          },
+          isOwner: true,
+          authMode: 'license',
+        };
+      }
+      lastAuthFailure = {
+        status: ownerValidation.status || 401,
+        error: ownerValidation.message,
+        error_code: ownerValidation.error_code,
+      };
+      continue;
+    }
+
+    // Case B: User token — must be active in `users`, pass password/session checks,
+    // AND hold active `role = 'owner'` in `user_allowed_companies` linked to an active
+    // `finance_detail` and active `owner` License.
+    if (decoded?.user?.id) {
+      const preferredFinanceId =
+        scopedFinanceId ||
+        (decoded.user.current_finance_id && isValidUuid(String(decoded.user.current_finance_id))
+          ? String(decoded.user.current_finance_id).trim()
+          : null);
+
+      const userValidation = await validateUserPrincipal(db, decoded, {
+        targetFinanceId: preferredFinanceId,
+        requireFinanceContext: false,
+        enforceLoginWindow: false,
+      });
+
+      if (!userValidation.valid) {
+        lastAuthFailure = {
+          status: userValidation.status || 401,
+          error: userValidation.message,
+          error_code: userValidation.error_code,
+        };
+        continue;
+      }
+
+      // Resolve real `owner` record through verified `owner`-role finance membership
       const { rows } = await db.query(
-        `SELECT u.id, u.username, uac.role
-         FROM users u
-         JOIN user_allowed_companies uac ON uac.user_id = u.id AND uac.is_active = 1
-         WHERE u.id = $1 AND u.is_active = 1 AND uac.role = 'owner'
-         LIMIT 1`,
-        [decoded.user.id]
+        `SELECT o.id AS owner_id,
+                o.username AS owner_username,
+                fd.id AS finance_id
+           FROM users u
+           INNER JOIN user_allowed_companies uac
+             ON uac.user_id = u.id
+            AND uac.is_active = 1
+            AND uac.role = 'owner'
+           INNER JOIN finance_detail fd
+             ON fd.id = uac.finance_id
+            AND fd.is_active = 1
+           INNER JOIN owner o
+             ON o.id = fd.owner_id
+            AND o.is_active = 1
+          WHERE u.id = $1
+            AND u.is_active = 1
+            AND ($2::uuid IS NULL OR fd.id = $2::uuid)
+          ORDER BY uac.last_accessed_at DESC NULLS LAST, fd.created_at ASC
+          LIMIT 1`,
+        [decoded.user.id, scopedFinanceId]
+      );
+
+      if (rows.length > 0) {
+        const realOwner = {
+          id: rows[0].owner_id,
+          username: rows[0].owner_username,
+        };
+        return {
+          owner: realOwner,
+          user: {
+            ...decoded.user,
+            id: userValidation.userRow.id,
+            username: userValidation.userRow.username,
+            email: userValidation.userRow.email,
+            role: 'owner',
+          },
+          isOwner: true,
+          authMode: userValidation.authMode,
+        };
+      }
+
+      // User token is valid, but user does NOT hold owner role for the requested/active finance
+      lastAuthFailure = {
+        status: 403,
+        error: 'Access denied. Strictly restricted to account Owner.',
+        error_code: 'OWNER_ROLE_REQUIRED',
+      };
+      continue;
+    }
+
+    // Case C: Legacy Owner ID in decoded root
+    if (decoded?.id && !decoded.user && isValidUuid(String(decoded.id))) {
+      const { rows } = await db.query(
+        'SELECT id, username, password, is_active FROM owner WHERE id = $1 AND is_active = 1 LIMIT 1',
+        [decoded.id]
       );
       if (rows.length > 0) {
+        if (decoded.pwdFp && decoded.pwdFp !== computePasswordFingerprint(rows[0].password)) {
+          lastAuthFailure = {
+            status: 401,
+            error: 'License password was changed. Please sign in again.',
+            error_code: 'PASSWORD_CHANGED',
+          };
+          continue;
+        }
         return {
           owner: { id: rows[0].id, username: rows[0].username },
-          user: decoded.user,
+          user: { id: rows[0].id, username: rows[0].username, role: 'owner' },
           isOwner: true,
+          authMode: 'license',
         };
       }
     }
   }
 
-  // Case C: Owner ID in decoded root
-  if (decoded?.id && !decoded.user) {
-    const { rows } = await db.query(
-      'SELECT id, username FROM owner WHERE id = $1 AND is_active = 1',
-      [decoded.id]
-    );
-    if (rows.length > 0) {
-      return {
-        owner: rows[0],
-        user: { id: rows[0].id, username: rows[0].username, role: 'owner' },
-        isOwner: true,
-      };
+  return (
+    lastAuthFailure || {
+      status: 403,
+      error: 'Access denied. Strictly restricted to account Owner.',
+      error_code: 'OWNER_ROLE_REQUIRED',
     }
-  }
-
-  return { status: 403, error: 'Access denied. Strictly restricted to account Owner.' };
+  );
 };
 
 // ─── Owner-Only Access Control Middleware ────────────────────────────────────
@@ -336,15 +524,18 @@ const ownerOnly = async (req, res, next) => {
       return res.status(result.status || 403).json({
         success: false,
         error: result.error,
+        message: result.error,
+        error_code: result.error_code,
       });
     }
 
     req.owner = result.owner;
     req.user = result.user;
     req.isOwner = true;
+    req.authMode = result.authMode || 'license';
     return next();
   } catch (error) {
-    console.error('ownerOnly middleware error:', error);
+    console.error('ownerOnly middleware error:', error?.message || error);
     return res.status(500).json({
       success: false,
       error: 'Owner authorization verification failed',
@@ -360,15 +551,19 @@ const ownerCheckFinance = async (req, res, next) => {
       return res.status(result.status || 403).json({
         success: false,
         error: result.error,
+        message: result.error,
+        error_code: result.error_code,
       });
     }
 
     req.owner = result.owner;
     req.user = result.user;
     req.isOwner = true;
+    req.authMode = result.authMode || 'license';
 
     // Resolve target finance ID from header, params, query, or body
-    let financeId = req.headers['finance-id'] ||
+    let financeId =
+      req.headers['finance-id'] ||
       req.headers['Finance-ID'] ||
       req.params.financeId ||
       req.params.id ||
@@ -377,8 +572,13 @@ const ownerCheckFinance = async (req, res, next) => {
       req.body?.financeId ||
       req.body?.finance_id;
 
-    // If no financeId provided, default to the owner's first active finance company
-    if (!financeId || String(financeId).trim() === '' || financeId === 'undefined' || financeId === 'null') {
+    if (
+      !financeId ||
+      String(financeId).trim() === '' ||
+      financeId === 'undefined' ||
+      financeId === 'null' ||
+      !isValidUuid(String(financeId))
+    ) {
       const { rows: defaultFinances } = await db.query(
         'SELECT id, finance_name, is_active FROM finance_detail WHERE owner_id = $1 AND is_active = 1 ORDER BY created_at ASC LIMIT 1',
         [req.owner.id]
@@ -389,6 +589,7 @@ const ownerCheckFinance = async (req, res, next) => {
         return res.status(404).json({
           success: false,
           error: 'No active finance company found for this owner account.',
+          error_code: 'FINANCE_NOT_FOUND',
         });
       }
     }
@@ -405,6 +606,7 @@ const ownerCheckFinance = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         error: 'Access denied. You do not have owner authority over this finance company or it is inactive.',
+        error_code: 'FINANCE_ACCESS_DENIED',
       });
     }
 
@@ -412,7 +614,7 @@ const ownerCheckFinance = async (req, res, next) => {
     req.finance = financeRows[0];
     return next();
   } catch (err) {
-    console.error('ownerCheckFinance error:', err);
+    console.error('ownerCheckFinance error:', err?.message || err);
     return res.status(500).json({
       success: false,
       error: 'Finance ownership verification failed',
@@ -425,5 +627,6 @@ module.exports = {
   ownerOnly,
   ownerCheckFinance,
   checkFinance,
-  enhancedCheckFinance
+  enhancedCheckFinance,
+  resolveOwnerFromRequest,
 };

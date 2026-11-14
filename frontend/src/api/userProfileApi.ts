@@ -1,5 +1,7 @@
 // src/api/userProfileApi.ts
+import axios from 'axios';
 import apiClient from './apiClient';
+import { getUserStorage, isDirectUserMode } from '../utils/authStorage';
 
 export interface ProfileSection {
   id: string;
@@ -100,6 +102,10 @@ export interface ChangePasswordResponse {
   success: boolean;
   message: string;
   lastPasswordChange: string;
+  authMode?: 'license' | 'direct_user';
+  token?: string;
+  refreshToken?: string;
+  ownerToken?: string;
 }
 
 /**
@@ -140,5 +146,19 @@ export async function changePassword(
     '/auth/change-password',
     payload
   );
-  return response.data;
+  const data = response.data;
+  if (data?.success) {
+    if (data.token) {
+      const storage = getUserStorage();
+      storage.setItem('authToken', data.token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
+    }
+    if (data.refreshToken && (data.authMode === 'direct_user' || isDirectUserMode())) {
+      localStorage.setItem('refreshToken', data.refreshToken);
+    }
+    if (data.ownerToken && localStorage.getItem('ownerToken')) {
+      localStorage.setItem('ownerToken', data.ownerToken);
+    }
+  }
+  return data;
 }

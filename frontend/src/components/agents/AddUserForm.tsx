@@ -305,9 +305,12 @@ const AddUserForm: React.FC<AddUserFormProps> = ({
 
   // ── Workflow A: Create New User ──
   const handleCreateNewUser = async () => {
-    const token = localStorage.getItem('ownerToken');
+    const token =
+      localStorage.getItem('ownerToken') ||
+      sessionStorage.getItem('authToken') ||
+      localStorage.getItem('authToken');
     if (!token) {
-      setFormError('Owner session expired. Please login as owner again.');
+      setFormError('Session expired. Please sign in again.');
       return;
     }
 

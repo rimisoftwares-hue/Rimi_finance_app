@@ -1,10 +1,26 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { jwtDecode } from 'jwt-decode';
-import apiClient from '../api/apiClient';
+import apiClient, { refreshDirectUserSession } from '../api/apiClient';
+import {
+  AuthMode,
+  CONFIRMED_REVOCATION_CODES,
+  clearDirectUserLocalStorage,
+  clearEphemeralUserSessionStorage,
+  clearLicenseLocalStorage,
+  getActiveFinanceRaw,
+  getActiveUserToken,
+  getAuthMode,
+  getUserStorage,
+  isDirectUserMode,
+  isTokenLocallyExpired,
+} from '../utils/authStorage';
+
+export type { AuthMode } from '../utils/authStorage';
+export { getAuthMode, isDirectUserMode, getUserStorage } from '../utils/authStorage';
 
 // Types
-interface User {
+export interface User {
   id: string;
   email: string;
   username: string;
@@ -18,7 +34,7 @@ interface User {
   created_at: string;
 }
 
-interface Finance {
+export interface Finance {
   id: string | number;
   name: string;
   finance_name?: string;
@@ -55,7 +71,7 @@ interface Finance {
   office_geofence_m?: number;
 }
 
-interface Statistics {
+export interface Statistics {
   customer_count: number;
   loan_count: number;
   total_collection: number;
@@ -70,20 +86,36 @@ export interface LocationLoginPayload {
   deviceName?: string;
 }
 
+export interface UserLoginResult {
+  success: boolean;
+  message?: string;
+  error_code?: string;
+}
+
+export interface UserLogoutResult {
+  remoteClosed: boolean;
+}
+
 interface LoginResponse {
   success: boolean;
+  authMode?: AuthMode;
   user: User;
   finance: Finance;
+  finances?: Finance[];
   statistics: Statistics;
   token: string;
+  refreshToken?: string;
   timestamp: string;
   sessionId?: string;
   locationSource?: string;
   flagged?: boolean;
+  message?: string;
+  error_code?: string;
 }
 
 interface AuthContextType {
   // State
+  authMode: AuthMode | null;
   user: User | null;
   currentFinance: Finance | null;
   statistics: Statistics | null;
@@ -97,12 +129,13 @@ interface AuthContextType {
     password: string,
     financeId: string | number,
     locationPayload?: LocationLoginPayload
-  ) => Promise<{
-    success: boolean;
-    message?: string;
-    error_code?: string;
-  }>;
-  userLogout: (reason?: 'manual' | 'window_close' | 'timeout') => Promise<void> | void;
+  ) => Promise<UserLoginResult>;
+  directUserLogin: (
+    identifier: string,
+    password: string,
+    locationPayload?: LocationLoginPayload
+  ) => Promise<UserLoginResult>;
+  userLogout: (reason?: 'manual' | 'window_close' | 'timeout') => Promise<UserLogoutResult>;
 
   // Finance Management
   switchFinance: (financeId: string | number) => Promise<boolean>;
@@ -121,15 +154,10 @@ interface AuthContextType {
   isWithinLoginTime: () => boolean;
 }
 
-// Create context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Base URL from .env
-const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3004').replace(/\/+$/, '');
-void BASE_URL;
-
-// Clean up headers utility
 const cleanupHeaders = () => {
+  delete axios.defaults.headers.common['Authorization'];
   delete axios.defaults.headers.common['Owner-Authorization'];
   delete axios.defaults.headers.common['owner-authorization'];
   delete axios.defaults.headers.common['Finance-ID'];
@@ -137,8 +165,30 @@ const cleanupHeaders = () => {
   delete axios.defaults.headers.common['finance_id'];
 };
 
+function resolveCleanDeviceName(): string {
+  try {
+    const ua = navigator.userAgent || '';
+    let os = 'Desktop';
+    if (ua.includes('Win')) os = 'Windows Desktop';
+    else if (ua.includes('Mac')) os = 'macOS Desktop';
+    else if (ua.includes('Linux')) os = 'Linux Desktop';
+    else if (ua.includes('Android')) os = 'Android';
+    else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+
+    let browser = 'App';
+    if (ua.includes('Chrome') && !ua.includes('Edg')) browser = 'Chrome';
+    else if (ua.includes('Firefox')) browser = 'Firefox';
+    else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
+    else if (ua.includes('Edg')) browser = 'Edge';
+
+    return `${os} - ${browser}`.slice(0, 150);
+  } catch {
+    return 'Desktop Device';
+  }
+}
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // State
+  const [authMode, setAuthMode] = useState<AuthMode | null>(() => getAuthMode());
   const [user, setUser] = useState<User | null>(null);
   const [currentFinance, setCurrentFinance] = useState<Finance | null>(null);
   const [statistics, setStatistics] = useState<Statistics | null>(null);
@@ -146,107 +196,334 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [financeList, setFinanceList] = useState<Finance[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
 
-  // Initialize auth state
+  // Refresh finance list (supports Direct User Mode, License User session, and pre-login License token)
+  const refreshFinanceList = useCallback(async () => {
+    const directMode = isDirectUserMode();
+    const activeUserToken = getActiveUserToken();
+    const hasAnyToken = Boolean(
+      activeUserToken || (!directMode && localStorage.getItem('ownerToken'))
+    );
+    if (!hasAnyToken) return;
+
+    if (activeUserToken) {
+      try {
+        const response = await apiClient.get<{ success?: boolean; finances?: Finance[] }>(
+          '/finance/allowed-finances'
+        );
+        if (response.data?.success && Array.isArray(response.data.finances)) {
+          setFinanceList(response.data.finances);
+          localStorage.setItem('ownerFinances', JSON.stringify(response.data.finances));
+          return;
+        }
+      } catch (error) {
+        console.warn('Could not fetch via /finance/allowed-finances, checking fallback:', error);
+      }
+    }
+
+    if (!directMode) {
+      try {
+        const ownerToken = localStorage.getItem('ownerToken');
+        if (ownerToken) {
+          const response = await apiClient.get<{ success?: boolean; finances?: Finance[] }>(
+            '/auth/owner-finances'
+          );
+          if (response.data?.success && Array.isArray(response.data.finances)) {
+            setFinanceList(response.data.finances);
+            localStorage.setItem('ownerFinances', JSON.stringify(response.data.finances));
+          }
+        }
+      } catch (error) {
+        console.error('Error refreshing finance list:', error);
+      }
+    }
+  }, []);
+
+  // Listen for cross-context mode switches & confirmed session revocations
+  useEffect(() => {
+    const handleModeChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ authMode?: AuthMode }>).detail;
+      const nextMode = detail?.authMode || getAuthMode();
+      setAuthMode(nextMode);
+
+      if (nextMode === 'license' && !sessionStorage.getItem('authToken')) {
+        cleanupHeaders();
+        setUser(null);
+        setCurrentFinance(null);
+        setStatistics(null);
+        setAllUsers([]);
+        const cachedFinances = localStorage.getItem('ownerFinances');
+        if (cachedFinances) {
+          try {
+            const parsed = JSON.parse(cachedFinances) as Finance[];
+            if (Array.isArray(parsed)) setFinanceList(parsed);
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
+
+    const handleSessionRevoked = () => {
+      cleanupHeaders();
+      setUser(null);
+      setCurrentFinance(null);
+      setStatistics(null);
+      setAllUsers([]);
+      if (!localStorage.getItem('ownerFinances') && !localStorage.getItem('ownerToken')) {
+        setFinanceList([]);
+      }
+      setAuthMode(getAuthMode());
+    };
+
+    window.addEventListener('autofinex:auth-mode-changed', handleModeChanged);
+    window.addEventListener('autofinex:session-revoked', handleSessionRevoked);
+    return () => {
+      window.removeEventListener('autofinex:auth-mode-changed', handleModeChanged);
+      window.removeEventListener('autofinex:session-revoked', handleSessionRevoked);
+    };
+  }, []);
+
+  // Initialize auth state according to active AuthMode
   useEffect(() => {
     const initializeAuth = async () => {
       try {
         cleanupHeaders();
 
-        // Load tokens: user token is ephemeral (sessionStorage), owner token is persistent (localStorage)
-        const userToken = sessionStorage.getItem('authToken') || localStorage.getItem('authToken');
-        const ownerToken = localStorage.getItem('ownerToken');
-        void ownerToken;
-
-        let userData = null;
-        let financeData = null;
-        let statsData = null;
-
-        // Load user data if token exists
-        if (userToken) {
-          try {
-            const decoded: any = jwtDecode(userToken);
-            void decoded;
-            const storedUser = sessionStorage.getItem('userData') || localStorage.getItem('userData');
-
-            if (storedUser) {
-              userData = JSON.parse(storedUser);
-              sessionStorage.setItem('authToken', userToken);
-              sessionStorage.setItem('userData', storedUser);
-              axios.defaults.headers.common['Authorization'] = `Bearer ${userToken}`;
-            }
-          } catch (error) {
-            console.error('Invalid user token:', error);
-            sessionStorage.removeItem('authToken');
-            sessionStorage.removeItem('userData');
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('userData');
-          }
-        }
-
-        // Load finance data
-        const storedFinance =
-          sessionStorage.getItem('financeData') ||
-          sessionStorage.getItem('currentFinance') ||
-          localStorage.getItem('financeData') ||
-          localStorage.getItem('currentFinance');
-        if (storedFinance) {
-          financeData = JSON.parse(storedFinance);
-          if (financeData?.id) {
-            axios.defaults.headers.common['finance-id'] = String(financeData.id);
-          }
-          sessionStorage.setItem('financeData', storedFinance);
-        }
-
-        // Load statistics
-        const storedStats = sessionStorage.getItem('statistics') || localStorage.getItem('statistics');
-        if (storedStats) {
-          statsData = JSON.parse(storedStats);
-          sessionStorage.setItem('statistics', storedStats);
-        }
-
-        // Clean user keys from localStorage so user session is strictly ephemeral
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('userData');
-        localStorage.removeItem('financeData');
-        localStorage.removeItem('statistics');
+        const resolvedMode = getAuthMode();
+        setAuthMode(resolvedMode);
 
         // Load cached finance list if present
         const storedOwnerFinances = localStorage.getItem('ownerFinances');
         if (storedOwnerFinances) {
           try {
-            const parsedFinances = JSON.parse(storedOwnerFinances);
+            const parsedFinances = JSON.parse(storedOwnerFinances) as Finance[];
             if (Array.isArray(parsedFinances) && parsedFinances.length > 0) {
               setFinanceList(parsedFinances);
             }
-          } catch { /* ignore */ }
+          } catch {
+            // ignore parse errors
+          }
         }
 
-        // Set state synchronously first
+        // ─── MODE B: Direct User Authentication (Persistent in localStorage) ───
+        if (resolvedMode === 'direct_user') {
+          clearEphemeralUserSessionStorage();
+
+          let directToken = localStorage.getItem('authToken');
+          const storedRefreshToken = localStorage.getItem('refreshToken');
+          const storedUserRaw = localStorage.getItem('userData');
+          const storedFinanceRaw =
+            localStorage.getItem('financeData') || localStorage.getItem('currentFinance');
+          const storedStatsRaw = localStorage.getItem('statistics');
+
+          if (!directToken && !storedRefreshToken) {
+            clearDirectUserLocalStorage();
+            setAuthMode(null);
+            setIsLoading(false);
+            return;
+          }
+
+          let parsedUser: User | null = null;
+          let parsedFinance: Finance | null = null;
+          let parsedStats: Statistics | null = null;
+
+          try {
+            if (storedUserRaw) parsedUser = JSON.parse(storedUserRaw) as User;
+          } catch {
+            parsedUser = null;
+          }
+          try {
+            if (storedFinanceRaw) parsedFinance = JSON.parse(storedFinanceRaw) as Finance;
+          } catch {
+            parsedFinance = null;
+          }
+          try {
+            if (storedStatsRaw) parsedStats = JSON.parse(storedStatsRaw) as Statistics;
+          } catch {
+            parsedStats = null;
+          }
+
+          // Hydrate state immediately from localStorage so desktop startup has zero blank delay
+          if (parsedUser) {
+            setUser(parsedUser);
+          }
+          if (parsedFinance) {
+            setCurrentFinance(parsedFinance);
+            if (parsedFinance.id) {
+              axios.defaults.headers.common['finance-id'] = String(parsedFinance.id);
+            }
+          }
+          if (parsedStats) {
+            setStatistics(parsedStats);
+          }
+          if (directToken && !isTokenLocallyExpired(directToken)) {
+            axios.defaults.headers.common['Authorization'] = `Bearer ${directToken}`;
+          }
+
+          // Rotate expired access token if refreshToken is available
+          if (isTokenLocallyExpired(directToken) && storedRefreshToken) {
+            try {
+              const refreshed = await refreshDirectUserSession();
+              directToken = refreshed.token;
+              if (refreshed.user) {
+                parsedUser = refreshed.user as unknown as User;
+                setUser(parsedUser);
+              }
+              if (refreshed.finance) {
+                parsedFinance = refreshed.finance as unknown as Finance;
+                setCurrentFinance(parsedFinance);
+              }
+              if (refreshed.statistics) {
+                parsedStats = refreshed.statistics as unknown as Statistics;
+                setStatistics(parsedStats);
+              }
+              if (Array.isArray(refreshed.finances)) {
+                setFinanceList(refreshed.finances as unknown as Finance[]);
+              }
+            } catch (refreshErr) {
+              const axiosErr = refreshErr as AxiosError<{ error_code?: string }>;
+              const errStatus = axiosErr.response?.status;
+              const errCode = axiosErr.response?.data?.error_code || '';
+
+              if (errStatus === 401 || errStatus === 403 || CONFIRMED_REVOCATION_CODES.has(errCode)) {
+                clearDirectUserLocalStorage();
+                cleanupHeaders();
+                setUser(null);
+                setCurrentFinance(null);
+                setStatistics(null);
+                setAuthMode(null);
+                setIsLoading(false);
+                return;
+              }
+              // Temporary network outage: preserve cached Direct User session
+              console.warn('Offline/transient error refreshing Direct User session; keeping cached session.');
+              setIsLoading(false);
+              return;
+            }
+          } else if (isTokenLocallyExpired(directToken) && !storedRefreshToken) {
+            clearDirectUserLocalStorage();
+            cleanupHeaders();
+            setUser(null);
+            setCurrentFinance(null);
+            setStatistics(null);
+            setAuthMode(null);
+            setIsLoading(false);
+            return;
+          }
+
+          // Background-refresh finance list & active finance details (preserving session on offline errors)
+          await refreshFinanceList();
+
+          const activeFinanceId = parsedUser?.current_finance_id || parsedFinance?.id;
+          if (activeFinanceId) {
+            try {
+              const response = await apiClient.get<{ success?: boolean; finance?: Finance }>(
+                `/auth/finance-details/${activeFinanceId}`
+              );
+              if (response.data?.success && response.data.finance) {
+                const updatedFinance = response.data.finance;
+                setCurrentFinance(updatedFinance);
+                localStorage.setItem('financeData', JSON.stringify(updatedFinance));
+                localStorage.setItem('currentFinance', JSON.stringify(updatedFinance));
+                axios.defaults.headers.common['finance-id'] = String(updatedFinance.id);
+              }
+            } catch (error) {
+              // Revocation errors are already handled by apiClient's response interceptor;
+              // network errors preserve the persistent Direct User session.
+              console.warn('Could not refresh finance details during startup:', error);
+            }
+          }
+
+          return;
+        }
+
+        // ─── MODE A: License Authentication (User session strictly ephemeral in sessionStorage) ───
+        // Remove any stale user keys from localStorage while keeping ownerToken & ownerFinances intact
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('userData');
+        localStorage.removeItem('financeData');
+        localStorage.removeItem('currentFinance');
+        localStorage.removeItem('statistics');
+        localStorage.removeItem('currentFinanceId');
+        localStorage.removeItem('lastLogin');
+
+        if (localStorage.getItem('ownerToken') && !localStorage.getItem('authMode')) {
+          localStorage.setItem('authMode', 'license');
+          setAuthMode('license');
+        }
+
+        const sessionToken = sessionStorage.getItem('authToken');
+        let userData: User | null = null;
+        let financeData: Finance | null = null;
+        let statsData: Statistics | null = null;
+
+        if (sessionToken) {
+          if (isTokenLocallyExpired(sessionToken, 0)) {
+            clearEphemeralUserSessionStorage();
+          } else {
+            try {
+              jwtDecode(sessionToken);
+              const storedUser = sessionStorage.getItem('userData');
+              if (storedUser) {
+                userData = JSON.parse(storedUser) as User;
+                axios.defaults.headers.common['Authorization'] = `Bearer ${sessionToken}`;
+              }
+            } catch (error) {
+              console.error('Invalid session user token:', error);
+              clearEphemeralUserSessionStorage();
+            }
+          }
+        }
+
+        if (userData) {
+          const storedFinance =
+            sessionStorage.getItem('financeData') || sessionStorage.getItem('currentFinance');
+          if (storedFinance) {
+            try {
+              financeData = JSON.parse(storedFinance) as Finance;
+              if (financeData?.id) {
+                axios.defaults.headers.common['finance-id'] = String(financeData.id);
+              }
+            } catch {
+              financeData = null;
+            }
+          }
+
+          const storedStats = sessionStorage.getItem('statistics');
+          if (storedStats) {
+            try {
+              statsData = JSON.parse(storedStats) as Statistics;
+            } catch {
+              statsData = null;
+            }
+          }
+        }
+
         setUser(userData);
         setCurrentFinance(financeData);
         setStatistics(statsData);
 
-        // Load finance list
-        await refreshFinanceList();
+        if (userData || localStorage.getItem('ownerToken')) {
+          await refreshFinanceList();
+        }
 
-        // Now refresh finance details if we have user and finance data
         if (userData && userData.current_finance_id) {
           try {
-            const response = await apiClient.get(
+            const response = await apiClient.get<{ success?: boolean; finance?: Finance }>(
               `/auth/finance-details/${userData.current_finance_id}`
             );
-
-            if (response.data.success) {
+            if (response.data?.success && response.data.finance) {
               const updatedFinance = response.data.finance;
               setCurrentFinance(updatedFinance);
               sessionStorage.setItem('financeData', JSON.stringify(updatedFinance));
+              sessionStorage.setItem('currentFinance', JSON.stringify(updatedFinance));
               axios.defaults.headers.common['finance-id'] = String(updatedFinance.id);
             }
           } catch (error) {
             console.error('Error refreshing finance details:', error);
           }
         }
-
       } catch (error) {
         console.error('Auth initialization error:', error);
       } finally {
@@ -254,216 +531,331 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     };
 
-    initializeAuth();
-  }, []);
+    void initializeAuth();
+  }, [refreshFinanceList]);
 
-  // User logout
-  const userLogout = useCallback(async (reason: 'manual' | 'window_close' | 'timeout' = 'manual') => {
-    try {
-      const token = sessionStorage.getItem('authToken');
-      if (token) {
-        await apiClient.post('/auth/user-logout', { reason }).catch(() => {});
-      }
-    } catch { /* ignore network error on logout */ }
-
-    // Clear ephemeral sessionStorage
-    sessionStorage.removeItem('authToken');
-    sessionStorage.removeItem('userData');
-    sessionStorage.removeItem('financeData');
-    sessionStorage.removeItem('currentFinance');
-    sessionStorage.removeItem('statistics');
-    sessionStorage.removeItem('currentFinanceId');
-    sessionStorage.removeItem('lastLogin');
-    sessionStorage.removeItem('lastKnownLocation');
-
-    // Clear legacy localStorage user keys
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('userData');
-    localStorage.removeItem('financeData');
-    localStorage.removeItem('currentFinance');
-    localStorage.removeItem('statistics');
-    localStorage.removeItem('currentFinanceId');
-    localStorage.removeItem('lastLogin');
-
-    // Clear state
-    setUser(null);
-    setCurrentFinance(null);
-    setStatistics(null);
-    setAllUsers([]);
-
-    // Clean up headers
-    cleanupHeaders();
-
-    console.log(`User logged out (reason: ${reason})`);
-  }, []);
-
-  // Heartbeat: while user session exists, call /auth/session-heartbeat every 60 s
-  useEffect(() => {
-    if (!user) return;
-
-    const intervalId = setInterval(async () => {
+  // User logout — terminates user session without deleting License ownerToken in License Mode
+  const userLogout = useCallback(
+    async (reason: 'manual' | 'window_close' | 'timeout' = 'manual'): Promise<UserLogoutResult> => {
+      const directMode = isDirectUserMode();
+      let remoteClosed = true;
       try {
-        const token = sessionStorage.getItem('authToken');
-        if (!token) return;
-        const res = await apiClient.post('/auth/session-heartbeat');
-        if (res.data && res.data.active === false) {
-          userLogout('timeout');
+        const token = getActiveUserToken();
+        if (token) {
+          await apiClient.post('/auth/user-logout', { reason });
         }
-      } catch (err: any) {
-        if (err?.response?.status === 401 || err?.response?.data?.active === false) {
-          userLogout('timeout');
+      } catch (error) {
+        remoteClosed = false;
+        console.warn('Server user-logout request failed; proceeding with local session cleanup:', error);
+      }
+
+      clearEphemeralUserSessionStorage();
+
+      // In Direct User Mode, keep persistent login across window_close, clear on manual/revocation/timeout
+      if (directMode && reason !== 'window_close') {
+        clearDirectUserLocalStorage();
+        setFinanceList([]);
+        setAuthMode(null);
+      } else if (!directMode) {
+        // Ensure no stale user keys remain in localStorage while preserving ownerToken & ownerFinances
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('userData');
+        localStorage.removeItem('financeData');
+        localStorage.removeItem('currentFinance');
+        localStorage.removeItem('statistics');
+        localStorage.removeItem('currentFinanceId');
+        localStorage.removeItem('lastLogin');
+      }
+
+      setUser(null);
+      setCurrentFinance(null);
+      setStatistics(null);
+      setAllUsers([]);
+
+      cleanupHeaders();
+      return { remoteClosed };
+    },
+    []
+  );
+
+  // Heartbeat: keep attendance session alive while app is open
+  useEffect(() => {
+    if (!user) return undefined;
+
+    const intervalId = window.setInterval(async () => {
+      const directMode = isDirectUserMode();
+      try {
+        const token = getActiveUserToken();
+        if (!token) return;
+
+        const res = await apiClient.post<{
+          active?: boolean;
+          revoked?: boolean;
+          token?: string;
+        }>('/auth/session-heartbeat');
+
+        // If backend renewed an attendance session in Direct User Mode, store updated access JWT
+        if (res.data?.token) {
+          const storage = getUserStorage();
+          storage.setItem('authToken', res.data.token);
+          axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`;
+        }
+
+        if (res.data && res.data.active === false) {
+          if (!directMode || res.data.revoked === true) {
+            void userLogout('timeout');
+          }
+        }
+      } catch (err) {
+        const axiosErr = err as AxiosError<{ active?: boolean; revoked?: boolean; error_code?: string }>;
+        const status = axiosErr.response?.status;
+        const errCode = axiosErr.response?.data?.error_code || '';
+
+        if (!directMode) {
+          if (status === 401 || axiosErr.response?.data?.active === false) {
+            void userLogout('timeout');
+          }
+        } else if (
+          axiosErr.response?.data?.revoked === true ||
+          CONFIRMED_REVOCATION_CODES.has(errCode)
+        ) {
+          void userLogout('timeout');
         }
       }
     }, 60000);
 
-    return () => clearInterval(intervalId);
+    return () => window.clearInterval(intervalId);
   }, [user, userLogout]);
 
-  // Fetch all users
+  // Fetch all users for active finance
   const fetchAllUsers = useCallback(async () => {
-    if (!currentFinance?.id) return;
+    if (!currentFinance?.id && !getActiveFinanceRaw()) return;
 
     try {
-      const response = await apiClient.get('/auth/allUsers');
-
-      if (response.data.success) {
+      const response = await apiClient.get<{ success?: boolean; users?: User[] }>('/auth/allUsers');
+      if (response.data?.success && Array.isArray(response.data.users)) {
         setAllUsers(response.data.users);
       }
     } catch (error) {
       console.error('Error fetching users:', error);
     }
-  }, [currentFinance]);
+  }, [currentFinance?.id]);
 
-  // User login with finance details and optional location capture
-  const userLogin = useCallback(async (
-    identifier: string,
-    password: string,
-    financeId: string | number,
-    locationPayload?: LocationLoginPayload
-  ): Promise<{ success: boolean; message?: string; error_code?: string }> => {
-    try {
-      const ownerToken = localStorage.getItem('ownerToken');
-      if (!ownerToken) {
-        return {
-          success: false,
-          message: 'Owner session not found. Please login as owner first.',
-          error_code: 'OWNER_TOKEN_REQUIRED'
-        };
-      }
-
-      const cleanDeviceName = (() => {
-        try {
-          const ua = navigator.userAgent || '';
-          let os = 'Desktop';
-          if (ua.includes('Win')) os = 'Windows Desktop';
-          else if (ua.includes('Mac')) os = 'macOS Desktop';
-          else if (ua.includes('Linux')) os = 'Linux Desktop';
-          else if (ua.includes('Android')) os = 'Android';
-          else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
-
-          let browser = 'App';
-          if (ua.includes('Chrome') && !ua.includes('Edg')) browser = 'Chrome';
-          else if (ua.includes('Firefox')) browser = 'Firefox';
-          else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
-          else if (ua.includes('Edg')) browser = 'Edge';
-
-          return `${os} - ${browser}`.slice(0, 150);
-        } catch {
-          return 'Desktop Device';
+  // Mode A: License Mode User Login (ephemeral sessionStorage)
+  const userLogin = useCallback(
+    async (
+      identifier: string,
+      password: string,
+      financeId: string | number,
+      locationPayload?: LocationLoginPayload
+    ): Promise<UserLoginResult> => {
+      try {
+        const ownerToken = localStorage.getItem('ownerToken');
+        if (!ownerToken) {
+          return {
+            success: false,
+            message: 'License session not found. Please sign in with your License ID first.',
+            error_code: 'OWNER_TOKEN_REQUIRED',
+          };
         }
-      })();
 
-      const reqPayload = {
-        identifier,
-        username: identifier,
-        phone_no: identifier,
-        password,
-        financeId,
-        latitude: locationPayload?.latitude ?? null,
-        longitude: locationPayload?.longitude ?? null,
-        accuracyM: locationPayload?.accuracyM ?? null,
-        locationPermission: locationPayload?.locationPermission ?? 'not_asked',
-        platform: locationPayload?.platform || (navigator.platform?.slice(0, 50) || 'desktop'),
-        deviceName: locationPayload?.deviceName || cleanDeviceName,
-      };
+        const cleanDeviceName = resolveCleanDeviceName();
+        const trimmedIdentifier = identifier.trim();
 
-      // Make login request
-      const response = await apiClient.post<LoginResponse>(
-        '/auth/user-login',
-        reqPayload
-      );
+        const reqPayload = {
+          identifier: trimmedIdentifier,
+          username: trimmedIdentifier,
+          phone_no: trimmedIdentifier,
+          password,
+          financeId,
+          latitude: locationPayload?.latitude ?? null,
+          longitude: locationPayload?.longitude ?? null,
+          accuracyM: locationPayload?.accuracyM ?? null,
+          locationPermission: locationPayload?.locationPermission ?? 'not_asked',
+          platform: locationPayload?.platform || (navigator.platform?.slice(0, 50) || 'desktop'),
+          deviceName: locationPayload?.deviceName || cleanDeviceName,
+        };
 
-      if (response.data.success) {
-        const { token, user: userData, finance, statistics: stats } = response.data;
+        const response = await apiClient.post<LoginResponse>('/auth/user-login', reqPayload);
 
-        // Clean up headers
-        cleanupHeaders();
+        if (response.data?.success) {
+          const { token, user: userData, finance, statistics: stats } = response.data;
 
-        // Store data in sessionStorage (ephemeral session)
-        sessionStorage.setItem('authToken', token);
-        sessionStorage.setItem('userData', JSON.stringify(userData));
-        sessionStorage.setItem('financeData', JSON.stringify(finance));
-        sessionStorage.setItem('statistics', JSON.stringify(stats));
-        sessionStorage.setItem('lastLogin', new Date().toISOString());
+          cleanupHeaders();
+          clearDirectUserLocalStorage();
+          localStorage.setItem('authMode', 'license');
 
-        // Clean any leftover user keys from localStorage
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('userData');
-        localStorage.removeItem('financeData');
-        localStorage.removeItem('statistics');
+          sessionStorage.setItem('authToken', token);
+          sessionStorage.setItem('userData', JSON.stringify(userData));
+          sessionStorage.setItem('financeData', JSON.stringify(finance));
+          sessionStorage.setItem('currentFinance', JSON.stringify(finance));
+          sessionStorage.setItem('statistics', JSON.stringify(stats));
+          sessionStorage.setItem('lastLogin', new Date().toISOString());
 
-        // Set state
-        setUser(userData);
-        setCurrentFinance(finance);
-        setStatistics(stats);
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          axios.defaults.headers.common['finance-id'] = String(finance.id);
 
-        // Set headers
-        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        axios.defaults.headers.common['finance-id'] = String(finance.id);
+          setAuthMode('license');
+          setUser(userData);
+          setCurrentFinance(finance);
+          setStatistics(stats);
 
-        // Fetch all users
-        await fetchAllUsers();
+          await refreshFinanceList();
 
-        console.log('User login successful:', { identifier, financeId });
-        return { success: true };
-      }
+          return { success: true };
+        }
 
-      return { success: false, message: 'Login failed' };
-
-    } catch (error: any) {
-      console.error('Login error:', error);
-
-      if (error.response) {
         return {
           success: false,
-          message: error.response.data?.message || error.response.data?.error || 'Login failed',
-          error_code: error.response.data?.error_code || error.response.data?.code
+          message: response.data?.message || 'Login failed',
+          error_code: response.data?.error_code,
+        };
+      } catch (error) {
+        const axiosErr = error as AxiosError<{ message?: string; error?: string; error_code?: string; code?: string }>;
+        if (axiosErr.response) {
+          return {
+            success: false,
+            message:
+              axiosErr.response.data?.message ||
+              axiosErr.response.data?.error ||
+              'Login failed',
+            error_code:
+              axiosErr.response.data?.error_code || axiosErr.response.data?.code,
+          };
+        }
+
+        return {
+          success: false,
+          message: 'Network error. Please check your connection.',
+          error_code: 'NETWORK_ERROR',
         };
       }
+    },
+    [refreshFinanceList]
+  );
 
-      return {
-        success: false,
-        message: 'Network error. Please check your connection.',
-        error_code: 'NETWORK_ERROR'
-      };
-    }
-  }, [fetchAllUsers]);
+  // Mode B: Direct User Authentication (persistent localStorage with rotating refresh token)
+  const directUserLogin = useCallback(
+    async (
+      identifier: string,
+      password: string,
+      locationPayload?: LocationLoginPayload
+    ): Promise<UserLoginResult> => {
+      try {
+        const cleanDeviceName = resolveCleanDeviceName();
+        const trimmedIdentifier = identifier.trim();
 
-  // Refresh finance details
+        const reqPayload = {
+          identifier: trimmedIdentifier,
+          username: trimmedIdentifier,
+          phone_no: trimmedIdentifier,
+          password,
+          latitude: locationPayload?.latitude ?? null,
+          longitude: locationPayload?.longitude ?? null,
+          accuracyM: locationPayload?.accuracyM ?? null,
+          locationPermission: locationPayload?.locationPermission ?? 'not_asked',
+          platform: locationPayload?.platform || (navigator.platform?.slice(0, 50) || 'desktop'),
+          deviceName: locationPayload?.deviceName || cleanDeviceName,
+        };
+
+        const response = await apiClient.post<LoginResponse>(
+          '/auth/direct-user-login',
+          reqPayload
+        );
+
+        if (response.data?.success) {
+          const {
+            token,
+            refreshToken,
+            user: userData,
+            finance,
+            finances,
+            statistics: stats,
+          } = response.data;
+
+          cleanupHeaders();
+          clearEphemeralUserSessionStorage();
+          clearLicenseLocalStorage();
+
+          localStorage.setItem('authMode', 'direct_user');
+          localStorage.setItem('authToken', token);
+          if (refreshToken) {
+            localStorage.setItem('refreshToken', refreshToken);
+          }
+          localStorage.setItem('userData', JSON.stringify(userData));
+          localStorage.setItem('financeData', JSON.stringify(finance));
+          localStorage.setItem('currentFinance', JSON.stringify(finance));
+          localStorage.setItem('statistics', JSON.stringify(stats));
+          localStorage.setItem('lastLogin', new Date().toISOString());
+
+          if (Array.isArray(finances)) {
+            localStorage.setItem('ownerFinances', JSON.stringify(finances));
+            setFinanceList(finances);
+          }
+
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          axios.defaults.headers.common['finance-id'] = String(finance.id);
+
+          setAuthMode('direct_user');
+          setUser(userData);
+          setCurrentFinance(finance);
+          setStatistics(stats);
+
+          window.dispatchEvent(
+            new CustomEvent('autofinex:auth-mode-changed', {
+              detail: { authMode: 'direct_user' },
+            })
+          );
+
+          if (!Array.isArray(finances)) {
+            await refreshFinanceList();
+          }
+
+          return { success: true };
+        }
+
+        return {
+          success: false,
+          message: response.data?.message || 'Login failed',
+          error_code: response.data?.error_code,
+        };
+      } catch (error) {
+        const axiosErr = error as AxiosError<{ message?: string; error?: string; error_code?: string; code?: string }>;
+        if (axiosErr.response) {
+          return {
+            success: false,
+            message:
+              axiosErr.response.data?.message ||
+              axiosErr.response.data?.error ||
+              'Login failed',
+            error_code:
+              axiosErr.response.data?.error_code || axiosErr.response.data?.code,
+          };
+        }
+
+        return {
+          success: false,
+          message: 'Network error. Please check your connection.',
+          error_code: 'NETWORK_ERROR',
+        };
+      }
+    },
+    [refreshFinanceList]
+  );
+
+  // Refresh finance details using active storage
   const refreshFinanceDetails = useCallback(async () => {
     let activeId: string | number | null = null;
     try {
-      const stored =
-        sessionStorage.getItem('financeData') ||
-        sessionStorage.getItem('currentFinance') ||
-        localStorage.getItem('financeData') ||
-        localStorage.getItem('currentFinance');
+      const stored = getActiveFinanceRaw();
       if (stored) {
-        activeId = JSON.parse(stored)?.id || null;
+        activeId = (JSON.parse(stored) as { id?: string | number })?.id || null;
       }
-    } catch { /* ignore parse errors */ }
+    } catch {
+      // ignore parse errors
+    }
 
-    // Fallback to React state if storage is empty
     if (!activeId) {
       activeId = user?.current_finance_id || currentFinance?.id || null;
     }
@@ -471,218 +863,180 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!activeId) return;
 
     try {
-      const response = await apiClient.get(
+      const response = await apiClient.get<{ success?: boolean; finance?: Finance }>(
         `/auth/finance-details/${activeId}`
       );
 
-      if (response.data.success) {
+      if (response.data?.success && response.data.finance) {
+        const storage = getUserStorage();
         setCurrentFinance(response.data.finance);
-        sessionStorage.setItem('financeData', JSON.stringify(response.data.finance));
-        sessionStorage.setItem('currentFinance', JSON.stringify(response.data.finance));
+        storage.setItem('financeData', JSON.stringify(response.data.finance));
+        storage.setItem('currentFinance', JSON.stringify(response.data.finance));
         axios.defaults.headers.common['finance-id'] = String(response.data.finance.id);
       }
     } catch (error) {
       console.error('Error refreshing finance details:', error);
     }
-  }, [user, currentFinance]);
+  }, [user?.current_finance_id, currentFinance?.id]);
 
-  // Refresh finance list (supports both owner and regular users)
-  const refreshFinanceList = useCallback(async () => {
-    try {
-      const response = await apiClient.get('/finance/allowed-finances');
-      if (response.data.success && Array.isArray(response.data.finances)) {
-        setFinanceList(response.data.finances);
-        localStorage.setItem('ownerFinances', JSON.stringify(response.data.finances));
-        return;
-      }
-    } catch (error) {
-      console.warn('Could not fetch via /finance/allowed-finances, checking fallback:', error);
-    }
+  // Switch finance preserving active AuthMode storage
+  const switchFinance = useCallback(
+    async (financeId: string | number): Promise<boolean> => {
+      const targetIdStr = String(financeId).trim();
+      if (!targetIdStr) return false;
 
-    try {
-      const ownerToken = localStorage.getItem('ownerToken');
-      if (ownerToken) {
-        const response = await apiClient.get('/auth/owner-finances');
-        if (response.data.success && Array.isArray(response.data.finances)) {
-          setFinanceList(response.data.finances);
-          localStorage.setItem('ownerFinances', JSON.stringify(response.data.finances));
-        }
-      }
-    } catch (error) {
-      console.error('Error refreshing finance list:', error);
-    }
-  }, []);
+      try {
+        const response = await apiClient.post<{
+          success?: boolean;
+          token?: string;
+          finance?: Finance;
+          user?: Partial<User>;
+        }>('/finance/switch', { financeId: targetIdStr });
 
-  // Switch finance
-  const switchFinance = useCallback(async (financeId: string | number): Promise<boolean> => {
-    const targetIdStr = String(financeId).trim();
-    if (!targetIdStr) return false;
+        if (response.data?.success) {
+          const { token, finance: newFinanceData, user: returnedUser } = response.data;
+          const storage = getUserStorage();
 
-    try {
-      // 1. Call backend switch endpoint
-      const response = await apiClient.post('/finance/switch', { financeId: targetIdStr });
+          if (token) {
+            storage.setItem('authToken', token);
+            axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          }
 
-      if (response.data?.success) {
-        const { token, finance: newFinanceData, user: returnedUser } = response.data;
+          const matched = financeList.find((f) => String(f.id) === targetIdStr);
+          const updatedFinance: Finance =
+            newFinanceData || matched || { id: targetIdStr, name: `Finance ${targetIdStr}` };
 
-        // 2. Update token if renewed by backend
-        if (token) {
-          sessionStorage.setItem('authToken', token);
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        }
+          storage.setItem('financeData', JSON.stringify(updatedFinance));
+          storage.setItem('currentFinance', JSON.stringify(updatedFinance));
 
-        // 3. Establish active finance data
-        const matched = financeList.find(f => String(f.id) === targetIdStr);
-        const updatedFinance: Finance = newFinanceData || matched || { id: targetIdStr, name: `Finance ${targetIdStr}` };
-        
-        // 4. Update sessionStorage FIRST
-        sessionStorage.setItem('financeData', JSON.stringify(updatedFinance));
-        sessionStorage.setItem('currentFinance', JSON.stringify(updatedFinance));
+          axios.defaults.headers.common['finance-id'] = targetIdStr;
 
-        // 5. Update request headers
-        axios.defaults.headers.common['finance-id'] = targetIdStr;
-
-        // 6. Update user state if user is present or returned
-        if (returnedUser || user) {
-          const updatedUser: User = {
-            ...(user || {
-              id: returnedUser?.id || '',
-              email: returnedUser?.email || '',
-              username: returnedUser?.username || '',
-              phone_no: returnedUser?.phone_no || '',
-              role: returnedUser?.role || 'agent',
-              allowed_companies: returnedUser?.allowed_companies || [targetIdStr],
+          if (returnedUser || user) {
+            const updatedUser: User = {
+              ...(user || {
+                id: returnedUser?.id || '',
+                email: returnedUser?.email || '',
+                username: returnedUser?.username || '',
+                phone_no: returnedUser?.phone_no || '',
+                role: returnedUser?.role || 'agent',
+                allowed_companies: returnedUser?.allowed_companies || [targetIdStr],
+                current_finance_id: targetIdStr,
+                created_at: new Date().toISOString(),
+              }),
+              ...(returnedUser || {}),
               current_finance_id: targetIdStr,
-              created_at: new Date().toISOString()
-            }),
-            ...(returnedUser || {}),
-            current_finance_id: targetIdStr,
-          };
-          setUser(updatedUser);
-          sessionStorage.setItem('userData', JSON.stringify(updatedUser));
+            };
+            setUser(updatedUser);
+            storage.setItem('userData', JSON.stringify(updatedUser));
+          }
+
+          setCurrentFinance(updatedFinance);
+
+          window.dispatchEvent(
+            new CustomEvent('autofinex:finance-switched', {
+              detail: { financeId: targetIdStr, finance: updatedFinance },
+            })
+          );
+
+          return true;
         }
 
-        // 7. Update React state LAST
-        setCurrentFinance(updatedFinance);
+        return false;
+      } catch (error) {
+        console.error('Switch finance error:', error);
+        throw error;
+      }
+    },
+    [financeList, user]
+  );
 
-        // 8. Notify app of finance switch
-        window.dispatchEvent(new CustomEvent('autofinex:finance-switched', { detail: { financeId: targetIdStr, finance: updatedFinance } }));
+  const canUserAccessFinance = useCallback(
+    (financeId: string | number): boolean => {
+      const targetStr = String(financeId);
 
-        console.log(`Successfully switched to finance: ${updatedFinance.name || targetIdStr}`);
+      if (financeList.some((f) => String(f.id) === targetStr)) {
         return true;
       }
 
-      return false;
-    } catch (error: any) {
-      console.error('Switch finance error:', error);
-      throw error;
-    }
-  }, [financeList, user]);
+      if (!user) return false;
 
-  // Check if user can access finance
-  const canUserAccessFinance = useCallback((financeId: string | number): boolean => {
-    const targetStr = String(financeId);
+      if (user.role === 'owner') {
+        return true;
+      }
 
-    // If target is in the validated allowed finances list
-    if (financeList.some(f => String(f.id) === targetStr)) {
-      return true;
-    }
+      const allowedStrs = (user.allowed_companies || []).map(String);
+      return allowedStrs.includes(targetStr);
+    },
+    [financeList, user]
+  );
 
+  const isWithinLoginTime = useCallback((): boolean => {
     if (!user) return false;
 
-    // Owners can access all their finances
-    if (user.role === 'owner') {
+    if (user.role === 'owner' || user.role === 'admin') {
       return true;
     }
 
-    // Other users can only access allowed companies
-    const allowedStrs = (user.allowed_companies || []).map(String);
-    return allowedStrs.includes(targetStr);
-  }, [user, financeList]);
-
-  // Check if current time is within login time restrictions
-  const isWithinLoginTime = useCallback((): boolean => {
-    if (!user?.login_time_from || !user?.login_time_to) {
-      return true; // No restrictions
+    if (!user.login_time_from || !user.login_time_to) {
+      return true;
     }
 
     const now = new Date();
-    const currentTime = now.getHours() * 60 + now.getMinutes(); // Convert to minutes
+    const istString = now.toLocaleTimeString('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const [curH, curM] = istString.split(':').map(Number);
+    const currentMinutes = curH * 60 + curM;
 
     const [fromHours, fromMinutes] = user.login_time_from.split(':').map(Number);
     const [toHours, toMinutes] = user.login_time_to.split(':').map(Number);
 
-    const fromTime = fromHours * 60 + fromMinutes;
-    const toTime = toHours * 60 + toMinutes;
+    const fromTotalMinutes = fromHours * 60 + fromMinutes;
+    const toTotalMinutes = toHours * 60 + toMinutes;
 
-    return currentTime >= fromTime && currentTime <= toTime;
+    if (fromTotalMinutes <= toTotalMinutes) {
+      return currentMinutes >= fromTotalMinutes && currentMinutes <= toTotalMinutes;
+    }
+    return currentMinutes >= fromTotalMinutes || currentMinutes <= toTotalMinutes;
   }, [user]);
 
-  // Status checks
-  const isUserLoggedIn = !!user;
-  const isFinanceSelected = !!currentFinance;
-  // Context value
+  useEffect(() => {
+    if (currentFinance?.id && user) {
+      void fetchAllUsers();
+    }
+  }, [currentFinance?.id, user, fetchAllUsers]);
+
   const value: AuthContextType = {
-    // State
+    authMode,
     user,
     currentFinance,
     statistics,
     isLoading,
     financeList,
     allUsers,
-
-    // Login/Logout
     userLogin,
+    directUserLogin,
     userLogout,
-
-    // Finance Management
     switchFinance,
     refreshFinanceDetails,
     refreshFinanceList,
-
-    // User Management
     fetchAllUsers,
-
-    // Status
-    isUserLoggedIn,
-    isFinanceSelected,
+    isUserLoggedIn: Boolean(user),
+    isFinanceSelected: Boolean(currentFinance),
     canUserAccessFinance,
-
-    // Time Check
-    isWithinLoginTime
+    isWithinLoginTime,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-// Custom hook
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
-
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
-
   return context;
-};
-
-// Helper hook for finance operations
-export const useFinance = () => {
-  const { currentFinance, statistics, refreshFinanceDetails } = useAuth();
-
-  return {
-    finance: currentFinance,
-    statistics,
-    refreshFinanceDetails
-  };
-};
-
-// Helper hook for user management
-export const useUserManagement = () => {
-  const { allUsers, fetchAllUsers } = useAuth();
-
-  return {
-    users: allUsers,
-    refreshUsers: fetchAllUsers
-  };
 };

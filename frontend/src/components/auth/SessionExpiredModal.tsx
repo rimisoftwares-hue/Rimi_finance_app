@@ -38,10 +38,10 @@ export default function SessionExpiredModal() {
     };
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setIsVisible(false);
-    userLogout();
-    navigate('/user-login');
+    await userLogout('timeout');
+    navigate(localStorage.getItem('ownerToken') ? '/user-login' : '/owner-login');
   };
 
   if (!isVisible || !data) return null;

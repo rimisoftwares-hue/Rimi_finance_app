@@ -331,7 +331,7 @@ export function MainDashboard() {
   const navigate = useNavigate();
   const { user, currentFinance } = useAuth();
   const { owner } = useOwnerAuth();
-  const isOwner = Boolean(owner && (!user || user.role === "owner"));
+  const isOwner = Boolean((owner && (!user || user.role === "owner")) || user?.role === "owner");
 
   const [overview, setOverview] = useState<HomeDashboardOverviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);

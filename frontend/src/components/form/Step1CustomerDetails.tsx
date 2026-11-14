@@ -10,6 +10,7 @@
 // import { User, MapPin, Phone, Camera, Briefcase, Shield } from 'lucide-react';
 // // import { useFinanceAuth } from '../../contexts/FinanceAuthContext';
 // import { useOwnerAuth } from '../../contexts/OwnerAuthContext';
+// import { useAuth } from '../../contexts/AuthContext';
 
 // import { useNextHplno } from '../../hooks/useNextHplno'; // Import the hook
 
@@ -315,6 +316,7 @@
 // import { User, MapPin, Phone, Camera, Briefcase, Shield } from 'lucide-react';
 // // import { useFinanceAuth } from '../../contexts/FinanceAuthContext';
 // import { useOwnerAuth } from '../../contexts/OwnerAuthContext';
+// import { useAuth } from '../../contexts/AuthContext';
 
 // import { useNextHplno } from '../../hooks/useNextHplno'; // Import the hook
 
@@ -602,6 +604,7 @@ import { useFormStore } from '../../types/formStore';
 import { User, MapPin, Phone, Camera, Briefcase, Shield } from 'lucide-react';
 // import { useFinanceAuth } from '../../contexts/FinanceAuthContext';
 import { useOwnerAuth } from '../../contexts/OwnerAuthContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 import { useNextHplno } from '../../hooks/useNextHplno'; // Import the hook
 
@@ -634,6 +637,7 @@ const govtIdOptions = [
 export const Step1CustomerDetails: React.FC<Step1Props> = ({ errors }) => {
   const { customer, updateCustomer } = useFormStore();
   const { owner } = useOwnerAuth();
+  const { currentFinance } = useAuth();
   const { nextHplno, loading, error } = useNextHplno();
   const [hasManuallyEdited, setHasManuallyEdited] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
@@ -781,7 +785,7 @@ const handleContactChange = (contacts: any[]) => {
           value={customer.caddress}
           onChange={(address) => updateCustomer({ caddress: address })}
           errors={errors}
-          financeId={String(owner?.id)}
+          financeId={String(currentFinance?.id ?? owner?.id ?? '')}
         />
       </section>
 

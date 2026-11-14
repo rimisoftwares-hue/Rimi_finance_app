@@ -4,22 +4,106 @@ const jwt = require('jsonwebtoken');
 const router = express.Router();
 const { db } = require('../../config/database.config');
 const crypto = require('crypto');
-const { authMiddleware, ownerOnly, checkFinance, enhancedCheckFinance } = require('../../middleware/auth.middleware');
+const {
+  authMiddleware,
+  ownerOnly,
+  checkFinance,
+  enhancedCheckFinance,
+  resolveOwnerFromRequest,
+} = require('../../middleware/auth.middleware');
 const { haversineKm, validCoords, getClientIp, lookupIp } = require('./loginLocation');
 const { changePasswordForPrincipal } = require('./changePassword.service');
+const {
+  getJwtSecret,
+  computePasswordFingerprint,
+  isWithinLoginWindow: checkWithinLoginWindow,
+  issueOwnerLicenseToken,
+  issueUserAccessToken,
+  issueUserRefreshToken,
+  revokeFamiliesInMemory,
+  markSessionsRevokedInDb,
+  validateOwnerPrincipal,
+  validateUserPrincipal,
+  verifyAndRotateRefreshSession,
+} = require('./sessionSecurity.service');
+
+// ── Failed-login sliding-window rate limiter (keyed by IP + identifier) ──
+const loginFailureBuckets = new Map();
+const LOGIN_MAX_FAILURES = 10;
+const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+
+function getLoginBucketKey(req, identifier) {
+  const ip = getClientIp(req) || 'unknown';
+  const normId = String(identifier || '').trim().toLowerCase();
+  return `${ip}:${normId}`;
+}
+
+function checkLoginRateLimit(req, identifier) {
+  const key = getLoginBucketKey(req, identifier);
+  const now = Date.now();
+  const bucket = loginFailureBuckets.get(key);
+  if (!bucket) return { blocked: false, retryAfterSeconds: 0 };
+
+  if (now - bucket.firstFailedAt > LOGIN_FAILURE_WINDOW_MS) {
+    loginFailureBuckets.delete(key);
+    return { blocked: false, retryAfterSeconds: 0 };
+  }
+
+  if (bucket.count >= LOGIN_MAX_FAILURES) {
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((bucket.firstFailedAt + LOGIN_FAILURE_WINDOW_MS - now) / 1000)
+    );
+    return { blocked: true, retryAfterSeconds };
+  }
+
+  return { blocked: false, retryAfterSeconds: 0 };
+}
+
+function recordFailedLoginAttempt(req, identifier) {
+  const key = getLoginBucketKey(req, identifier);
+  const now = Date.now();
+  if (loginFailureBuckets.size > 5000) {
+    for (const [k, v] of loginFailureBuckets.entries()) {
+      if (now - v.firstFailedAt > LOGIN_FAILURE_WINDOW_MS) {
+        loginFailureBuckets.delete(k);
+      }
+    }
+  }
+  const existing = loginFailureBuckets.get(key);
+  if (!existing || now - existing.firstFailedAt > LOGIN_FAILURE_WINDOW_MS) {
+    loginFailureBuckets.set(key, { count: 1, firstFailedAt: now });
+  } else {
+    existing.count += 1;
+  }
+}
+
+function clearFailedLoginAttempts(req, identifier) {
+  loginFailureBuckets.delete(getLoginBucketKey(req, identifier));
+}
 
 const logoutAuth = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'No token, authorization denied' });
+    return res.status(401).json({
+      success: false,
+      message: 'No token, authorization denied',
+      error_code: 'AUTH_REQUIRED',
+    });
   }
   try {
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET, { ignoreExpiration: true });
-    req.user = decoded.user;
-    next();
-  } catch (err) {
-    res.status(401).json({ success: false, message: 'Token is not valid' });
+    const token = authHeader.slice(7).trim();
+    const decoded = jwt.verify(token, getJwtSecret(), { ignoreExpiration: true });
+    req.authDecoded = decoded;
+    req.user = decoded.user || null;
+    req.owner = decoded.owner || null;
+    return next();
+  } catch (_err) {
+    return res.status(401).json({
+      success: false,
+      message: 'Token is not valid',
+      error_code: 'INVALID_TOKEN',
+    });
   }
 };
 const path = require('path');
@@ -321,36 +405,334 @@ router.post('/finance-login', async (req, res) => {
   }
 });
 
-// ========= OWNER LOGIN ==========
+// ========== HELPER: Format 24h time string to 12h AM/PM ==========
+const formatLoginHour12h = (t) => {
+  const parts = String(t || '').split(':');
+  const h = parseInt(parts[0], 10);
+  const m = parts[1] || '00';
+  if (Number.isNaN(h)) return String(t || '');
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${String(h12).padStart(2, '0')}:${m} ${ampm}`;
+};
+
+const isWithinLoginWindow = (loginTimeFrom, loginTimeTo) =>
+  checkWithinLoginWindow(loginTimeFrom, loginTimeTo);
+
+/**
+ * Shared helper: verifies User credentials (username OR phone_no + password),
+ * auto-upgrades legacy plaintext passwords to bcrypt, and verifies active status.
+ */
+async function authenticateUserCredentials(loginIdentifier, password) {
+  const userResult = await db.query(
+    'SELECT * FROM users WHERE username = $1 OR phone_no = $1 LIMIT 1',
+    [loginIdentifier]
+  );
+
+  if (userResult.rows.length === 0) {
+    return {
+      ok: false,
+      status: 401,
+      error_code: 'USER_NOT_FOUND',
+      message: 'Invalid credentials',
+      recordFailure: true,
+    };
+  }
+
+  const user = { ...userResult.rows[0] };
+
+  let isMatch = false;
+  try {
+    isMatch = await bcrypt.compare(password, user.password);
+  } catch (_bcryptError) {
+    isMatch = false;
+  }
+
+  if (!isMatch && password === user.password) {
+    isMatch = true;
+    try {
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+      await db.query('UPDATE users SET password = $1 WHERE id = $2', [hashedPassword, user.id]);
+      user.password = hashedPassword;
+    } catch (_hashErr) {
+      // Non-fatal if upgrade query fails; password matched
+    }
+  }
+
+  if (!isMatch) {
+    return {
+      ok: false,
+      status: 401,
+      error_code: 'INVALID_PASSWORD',
+      message: 'Invalid credentials',
+      recordFailure: true,
+    };
+  }
+
+  if (Number(user.is_active) !== 1) {
+    return {
+      ok: false,
+      status: 403,
+      error_code: 'USER_INACTIVE',
+      message: 'Your user account is inactive. Please contact your administrator.',
+      recordFailure: false,
+    };
+  }
+
+  return { ok: true, user };
+}
+
+/**
+ * Shared helper: loads full finance details + print logo + KPI statistics for a finance ID.
+ */
+async function loadFinanceDetailsAndStatistics(financeIdStr) {
+  const financeResult = await db.query(
+    `SELECT
+       fd.*,
+       a.house_no,
+       a.street,
+       a.street_name,
+       a.village,
+       a.land_mark,
+       a.address,
+       a.city,
+       a.district,
+       a.state,
+       a.pincode,
+       a.location,
+       o.username AS owner_username,
+       o.is_active AS owner_is_active
+     FROM finance_detail fd
+     LEFT JOIN address_history ah
+       ON ah.entity_type = 'finance'
+      AND ah.entity_id = fd.id::text
+      AND ah.is_current = 1
+     LEFT JOIN addresses a ON ah.address_id = a.id
+     LEFT JOIN owner o ON fd.owner_id = o.id
+     WHERE fd.id = $1 AND fd.is_active = 1`,
+    [financeIdStr]
+  );
+
+  if (financeResult.rows.length === 0) {
+    return null;
+  }
+
+  const financeRaw = financeResult.rows[0];
+  const financeData = formatFinanceData(financeRaw);
+  financeData.logo_url = financeRaw.finance_photo
+    ? await getSignedImageUrl(financeRaw.finance_photo)
+    : null;
+  financeData.print_logo_url = await resolveFinancePrintLogoUrl(
+    financeRaw.id,
+    financeRaw.finance_photo
+  );
+
+  const statsResult = await db.query(
+    `SELECT
+       (SELECT COUNT(*) FROM customers WHERE finance_id = $1) AS customer_count,
+       (SELECT COUNT(*) FROM loans WHERE finance_id = $1) AS loan_count,
+       (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE finance_id = $1) AS total_collection`,
+    [financeIdStr]
+  );
+
+  const statistics = {
+    customer_count: parseInt(statsResult.rows[0]?.customer_count, 10) || 0,
+    loan_count: parseInt(statsResult.rows[0]?.loan_count, 10) || 0,
+    total_collection: parseFloat(statsResult.rows[0]?.total_collection) || 0,
+  };
+
+  return { financeRaw, financeData, statistics };
+}
+
+/**
+ * Shared helper: enforces LOGIN_LOCATION_POLICY, evaluates office geofencing,
+ * creates an `agent_login_sessions` attendance row, and optionally reverse-geocodes.
+ */
+async function evaluateLocationAndCreateAttendanceSession(req, user, financeRaw) {
+  const policy = process.env.LOGIN_LOCATION_POLICY || 'prefer';
+  const ip = getClientIp(req);
+  const ipGeo = lookupIp(ip);
+  const lat = parseFloat(req.body.latitude);
+  const lng = parseFloat(req.body.longitude);
+  const hasDevice = policy !== 'off' && validCoords(lat, lng);
+
+  if (policy === 'strict' && !hasDevice) {
+    return {
+      ok: false,
+      status: 403,
+      body: {
+        success: false,
+        code: 'LOCATION_REQUIRED',
+        error_code: 'LOCATION_REQUIRED',
+        message: 'Location access is required to log in. Please enable location and try again.',
+      },
+    };
+  }
+
+  let source = 'none';
+  let useLat = null;
+  let useLng = null;
+  let accuracy = null;
+
+  if (hasDevice) {
+    source = 'device';
+    useLat = lat;
+    useLng = lng;
+    accuracy = Number.isFinite(+req.body.accuracyM) ? Math.round(+req.body.accuracyM) : null;
+  } else if (ipGeo) {
+    source = 'ip';
+    useLat = ipGeo.lat;
+    useLng = ipGeo.lng;
+  }
+
+  let distanceKm = null;
+  let flagged = false;
+  let flagReason = null;
+
+  if (useLat !== null && financeRaw?.office_lat != null && financeRaw?.office_lng != null) {
+    distanceKm = +haversineKm(
+      useLat,
+      useLng,
+      +financeRaw.office_lat,
+      +financeRaw.office_lng
+    ).toFixed(2);
+  }
+
+  if (source === 'device' && ipGeo && haversineKm(lat, lng, ipGeo.lat, ipGeo.lng) > 150) {
+    flagged = true;
+    flagReason = 'IP_DEVICE_MISMATCH';
+  } else if (
+    source === 'device' &&
+    distanceKm !== null &&
+    distanceKm * 1000 > (financeRaw?.office_geofence_m ?? 200)
+  ) {
+    flagged = true;
+    flagReason = 'OUTSIDE_OFFICE';
+  }
+
+  const validPermissions = ['granted', 'declined', 'blocked', 'unavailable', 'not_asked'];
+  const rawPermission =
+    typeof req.body.locationPermission === 'string'
+      ? req.body.locationPermission.toLowerCase().trim()
+      : '';
+  const locationPermission = validPermissions.includes(rawPermission)
+    ? rawPermission
+    : 'not_asked';
+
+  const deviceName = String(req.body.deviceName || req.headers['user-agent'] || '').slice(0, 150);
+  const platform = String(req.body.platform || '').slice(0, 30);
+  const ipCity = ipGeo?.city ? String(ipGeo.city).slice(0, 100) : null;
+  const ipRegion = ipGeo?.region ? String(ipGeo.region).slice(0, 100) : null;
+  const ipCountry = ipGeo?.country ? String(ipGeo.country).slice(0, 10) : null;
+
+  const sessionInsert = await db.query(
+    `INSERT INTO agent_login_sessions (
+       user_id, device_name, platform, ip_address,
+       login_lat, login_lng, distance_from_office, location_label,
+       location_source, location_accuracy_m, location_permission,
+       ip_city, ip_region, ip_country, flagged, flag_reason, last_seen_at
+     ) VALUES (
+       $1::uuid, $2, $3, $4,
+       $5, $6, $7, $8,
+       $9, $10, $11,
+       $12, $13, $14, $15, $16, CURRENT_TIMESTAMP
+     ) RETURNING id`,
+    [
+      user.id,
+      deviceName || null,
+      platform || null,
+      ip || null,
+      useLat,
+      useLng,
+      distanceKm,
+      null,
+      source,
+      accuracy,
+      locationPermission,
+      ipCity,
+      ipRegion,
+      ipCountry,
+      flagged,
+      flagReason,
+    ]
+  );
+
+  const sessionId = sessionInsert.rows[0].id;
+
+  if (process.env.GOOGLE_MAPS_SERVER_KEY && source === 'device' && useLat !== null && useLng !== null) {
+    setImmediate(async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${useLat},${useLng}&key=${process.env.GOOGLE_MAPS_SERVER_KEY}`;
+        const geoRes = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
+        const geoData = await geoRes.json();
+        const label = geoData?.results?.[0]?.formatted_address?.slice(0, 200);
+        if (label) {
+          await db.query(
+            'UPDATE agent_login_sessions SET location_label = $1 WHERE id = $2::uuid',
+            [label, sessionId]
+          );
+        }
+      } catch {
+        // Non-critical background lookup
+      }
+    });
+  }
+
+  return {
+    ok: true,
+    sessionId,
+    source,
+    flagged,
+    deviceName: deviceName || null,
+    platform: platform || null,
+  };
+}
+
+// ========= OWNER / LICENSE LOGIN (Mode A) ==========
 router.post('/owner-login', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const rawUsername = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
-    if (!username || !password) {
+    if (!rawUsername || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Username and password are required'
+        message: 'License ID and password are required',
+        error_code: 'MISSING_CREDENTIALS',
       });
     }
 
-    // PostgreSQL query
-    const result = await db.query(
-      'SELECT * FROM owner WHERE username = $1 AND is_active = 1',
-      [username]
-    );
+    const rateState = checkLoginRateLimit(req, `license:${rawUsername}`);
+    if (rateState.blocked) {
+      res.set('Retry-After', String(rateState.retryAfterSeconds));
+      return res.status(429).json({
+        success: false,
+        message: 'Too many failed login attempts. Please try again later.',
+        error_code: 'RATE_LIMIT_EXCEEDED',
+        retryAfterSeconds: rateState.retryAfterSeconds,
+      });
+    }
+
+    const result = await db.query('SELECT * FROM owner WHERE username = $1 LIMIT 1', [rawUsername]);
 
     if (result.rows.length === 0) {
+      recordFailedLoginAttempt(req, `license:${rawUsername}`);
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials'
+        message: 'Invalid License ID or password',
+        error_code: 'INVALID_CREDENTIALS',
       });
     }
 
-    const owner = result.rows[0];
+    const owner = { ...result.rows[0] };
     let isMatch = false;
     try {
       isMatch = await bcrypt.compare(password, owner.password);
-    } catch (bcryptErr) {
+    } catch (_bcryptErr) {
       isMatch = false;
     }
 
@@ -359,44 +741,45 @@ router.post('/owner-login', async (req, res) => {
       try {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-        await db.query(
-          'UPDATE owner SET password = $1 WHERE id = $2',
-          [hashedPassword, owner.id]
-        );
+        await db.query('UPDATE owner SET password = $1 WHERE id = $2', [hashedPassword, owner.id]);
+        owner.password = hashedPassword;
       } catch (hashErr) {
-        console.error('Failed to auto-hash owner password:', hashErr);
+        console.error('Failed to auto-hash owner password:', hashErr?.message || hashErr);
       }
     }
 
     if (!isMatch) {
+      recordFailedLoginAttempt(req, `license:${rawUsername}`);
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials'
+        message: 'Invalid License ID or password',
+        error_code: 'INVALID_CREDENTIALS',
       });
     }
 
-    const token = jwt.sign(
-      {
-        owner: {
-          id: owner.id,
-          username: owner.username
-        }
-      },
-      JWT_SECRET,
-      { expiresIn: '90d' }
-    );
+    if (Number(owner.is_active) !== 1) {
+      return res.status(403).json({
+        success: false,
+        message: 'This License is currently inactive. Please contact support.',
+        error_code: 'LICENSE_INACTIVE',
+      });
+    }
 
-    // PostgreSQL query for finances
+    clearFailedLoginAttempts(req, `license:${rawUsername}`);
+
+    const token = issueOwnerLicenseToken(owner);
+
     const financesResult = await db.query(
-      `SELECT id, finance_name as name 
-       FROM finance_detail 
-       WHERE owner_id = $1 AND is_active = 1 
-       ORDER BY finance_name ASC`,
+      `SELECT id, finance_name AS name
+         FROM finance_detail
+        WHERE owner_id = $1 AND is_active = 1
+        ORDER BY finance_name ASC`,
       [owner.id]
     );
 
-    res.json({
+    return res.json({
       success: true,
+      authMode: 'license',
       message: 'Login successful',
       owner: {
         id: owner.id,
@@ -405,405 +788,514 @@ router.post('/owner-login', async (req, res) => {
         updated_at: owner.updated_at,
         is_active: owner.is_active === 1,
         finance_count: financesResult.rows.length,
-        finances: financesResult.rows
+        finances: financesResult.rows,
       },
       token,
-      expires_in: '90d'
+      expires_in: '90d',
     });
-
   } catch (error) {
-    console.error('Owner login error:', error);
-    res.status(500).json({
+    console.error('Owner login error:', error?.message || error);
+    return res.status(500).json({
       success: false,
-      message: 'Server error during login'
+      message: 'Server error during login',
     });
   }
 });
 
-// ========== HELPER: Login Time Window Check ==========
-// Supports standard day shifts (from <= to) and overnight shifts (from > to)
-const isWithinLoginWindow = (loginTimeFrom, loginTimeTo) => {
-  if (!loginTimeFrom || !loginTimeTo) return true; // No restriction configured
-
-  const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
-  const currentDate = new Date(now);
-  const currentMinutes = currentDate.getHours() * 60 + currentDate.getMinutes();
-
-  const parseTime = (timeStr) => {
-    const parts = String(timeStr).split(':');
-    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
-  };
-
-  const fromMinutes = parseTime(loginTimeFrom);
-  const toMinutes = parseTime(loginTimeTo);
-
-  if (fromMinutes <= toMinutes) {
-    // Standard day shift: e.g., 09:00 to 18:00
-    return currentMinutes >= fromMinutes && currentMinutes <= toMinutes;
-  } else {
-    // Overnight shift: e.g., 22:00 to 06:00
-    return currentMinutes >= fromMinutes || currentMinutes <= toMinutes;
-  }
-};
-
 // ========== LOGIN POLICY ==========
-router.get('/login-policy', (req, res) => {
+router.get('/login-policy', (_req, res) => {
+  const locationPolicy = process.env.LOGIN_LOCATION_POLICY || 'prefer';
   res.json({
-    locationPolicy: process.env.LOGIN_LOCATION_POLICY || 'prefer'
+    policy: locationPolicy,
+    locationPolicy,
   });
 });
 
-// ========== USER LOGIN WITH FINANCE SELECTION ==========
+// ========== USER LOGIN WITH FINANCE SELECTION (Mode A: License Mode) ==========
 router.post('/user-login', async (req, res) => {
   try {
-    const { identifier, username, phone_no, email, password, financeId } = req.body;
-    // Support login via username or phone_no (accept any identifier sent by client)
-    const loginIdentifier = (identifier || username || phone_no || email || '').trim();
+    const { identifier, username, phone_no, email, password, financeId } = req.body || {};
+    const loginIdentifier = String(identifier || username || phone_no || email || '').trim();
 
     if (!loginIdentifier || !password) {
       return res.status(400).json({
         success: false,
         message: 'Username or phone number and password are required',
-        error_code: 'MISSING_CREDENTIALS'
+        error_code: 'MISSING_CREDENTIALS',
       });
     }
 
-    const ownerToken = req.headers['owner-authorization']?.replace('Bearer ', '');
+    const rateState = checkLoginRateLimit(req, `user:${loginIdentifier}`);
+    if (rateState.blocked) {
+      res.set('Retry-After', String(rateState.retryAfterSeconds));
+      return res.status(429).json({
+        success: false,
+        message: 'Too many failed login attempts. Please try again later.',
+        error_code: 'RATE_LIMIT_EXCEEDED',
+        retryAfterSeconds: rateState.retryAfterSeconds,
+      });
+    }
 
+    const ownerToken = req.headers['owner-authorization']?.replace(/^Bearer\s+/i, '').trim();
     if (!ownerToken) {
       return res.status(401).json({
         success: false,
-        message: 'Owner authentication required',
-        error_code: 'OWNER_TOKEN_REQUIRED'
+        message: 'License authentication required',
+        error_code: 'OWNER_TOKEN_REQUIRED',
       });
     }
 
     let ownerDecoded;
     try {
-      ownerDecoded = jwt.verify(ownerToken, JWT_SECRET);
-    } catch (err) {
+      ownerDecoded = jwt.verify(ownerToken, getJwtSecret());
+    } catch (_err) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid owner token',
-        error_code: 'INVALID_OWNER_TOKEN'
+        message: 'Invalid License token',
+        error_code: 'INVALID_OWNER_TOKEN',
       });
     }
 
-    // PostgreSQL query: find user by username OR phone_no
-    const userResult = await db.query(
-      `SELECT * FROM users WHERE (username = $1 OR phone_no = $1) AND is_active = 1`,
-      [loginIdentifier]
-    );
-
-    if (userResult.rows.length === 0) {
-      return res.status(401).json({
+    const ownerValidation = await validateOwnerPrincipal(db, ownerDecoded);
+    if (!ownerValidation.valid) {
+      return res.status(ownerValidation.status || 401).json({
         success: false,
-        message: 'Invalid credentials',
-        error_code: 'USER_NOT_FOUND'
+        message: ownerValidation.message,
+        error_code: ownerValidation.error_code,
       });
     }
 
-    const user = userResult.rows[0];
-
-    let isMatch = false;
-    try {
-      isMatch = await bcrypt.compare(password, user.password);
-    } catch (bcryptError) {
-      isMatch = (password === user.password);
-      if (isMatch) {
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-        await db.query(
-          'UPDATE users SET password = $1 WHERE id = $2',
-          [hashedPassword, user.id]
-        );
+    const authResult = await authenticateUserCredentials(loginIdentifier, password);
+    if (!authResult.ok) {
+      if (authResult.recordFailure) {
+        recordFailedLoginAttempt(req, `user:${loginIdentifier}`);
       }
-    }
-
-    if (!isMatch && password === user.password) {
-      isMatch = true;
-      try {
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-        await db.query(
-          'UPDATE users SET password = $1 WHERE id = $2',
-          [hashedPassword, user.id]
-        );
-      } catch (hashErr) { }
-    }
-
-    if (!isMatch) {
-      return res.status(401).json({
+      return res.status(authResult.status).json({
         success: false,
-        message: 'Invalid credentials',
-        error_code: 'INVALID_PASSWORD'
+        message: authResult.message,
+        error_code: authResult.error_code,
       });
     }
 
-    const financeIdStr = String(financeId).trim();
-    if (!financeIdStr || financeIdStr === 'undefined' || financeIdStr === 'null' || financeIdStr === 'NaN') {
+    clearFailedLoginAttempts(req, `user:${loginIdentifier}`);
+    const user = authResult.user;
+
+    const financeIdStr = String(financeId || '').trim();
+    if (
+      !financeIdStr ||
+      financeIdStr === 'undefined' ||
+      financeIdStr === 'null' ||
+      financeIdStr === 'NaN' ||
+      !/^[0-9a-fA-F-]{36}$/.test(financeIdStr)
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid financeId',
-        error_code: 'INVALID_FINANCE_ID'
+        message: 'Valid finance company selection is required',
+        error_code: 'INVALID_FINANCE_ID',
       });
     }
 
-    // PostgreSQL query with joins
-    const financeResult = await db.query(`
-      SELECT 
-        fd.*,
-        a.house_no,
-        a.street,
-        a.street_name,
-        a.village,
-        a.land_mark,
-        a.address,
-        a.city,
-        a.district,
-        a.state,
-        a.pincode,
-        a.location,
-        o.username as owner_username
-      FROM finance_detail fd
-      LEFT JOIN address_history ah ON ah.entity_type = 'finance' 
-        AND ah.entity_id = fd.id::text
-        AND ah.is_current = 1
-      LEFT JOIN addresses a ON ah.address_id = a.id
-      LEFT JOIN owner o ON fd.owner_id = o.id
-      WHERE fd.id = $1 AND fd.is_active = 1
-    `, [financeIdStr]);
-
-    if (financeResult.rows.length === 0) {
+    const loadedFinance = await loadFinanceDetailsAndStatistics(financeIdStr);
+    if (!loadedFinance) {
       return res.status(404).json({
         success: false,
-        message: 'Finance company not found',
-        error_code: 'FINANCE_NOT_FOUND'
+        message: 'Finance company not found or inactive',
+        error_code: 'FINANCE_NOT_FOUND',
       });
     }
 
-    const financeRaw = financeResult.rows[0];
+    const { financeRaw, financeData, statistics } = loadedFinance;
 
-    if (String(financeRaw.owner_id) !== String(ownerDecoded.owner.id)) {
+    if (String(financeRaw.owner_id) !== String(ownerValidation.owner.id)) {
       return res.status(403).json({
         success: false,
-        message: 'Finance company does not belong to this owner',
-        error_code: 'FINANCE_OWNER_MISMATCH'
+        message: 'Finance company does not belong to the active License',
+        error_code: 'FINANCE_OWNER_MISMATCH',
       });
     }
 
-    // Query company-scoped membership with role and login restrictions
+    // Query company-scoped memberships scoped to active finances under this License
     const uacResult = await db.query(
-      `SELECT finance_id, role, login_time_from, login_time_to, last_accessed_at, is_active
-       FROM user_allowed_companies WHERE user_id = $1 AND is_active = 1`,
-      [user.id]
+      `SELECT uac.finance_id,
+              uac.role,
+              uac.login_time_from,
+              uac.login_time_to,
+              uac.last_accessed_at,
+              uac.is_active
+         FROM user_allowed_companies uac
+         INNER JOIN finance_detail fd ON fd.id = uac.finance_id
+        WHERE uac.user_id = $1
+          AND uac.is_active = 1
+          AND fd.is_active = 1
+          AND fd.owner_id = $2`,
+      [user.id, ownerValidation.owner.id]
     );
-    const allowedCompanies = uacResult.rows.map(r => String(r.finance_id));
 
-    // Find the specific company membership for the requested finance
+    const allowedCompanies = uacResult.rows.map((r) => String(r.finance_id));
     const targetCompanyMembership = uacResult.rows.find(
-      r => String(r.finance_id) === financeIdStr
+      (r) => String(r.finance_id) === financeIdStr
     );
 
-    // Determine role: company-scoped role takes priority
-    const companyRole = targetCompanyMembership?.role || null;
-    const isOwnerOrAdmin = companyRole === 'owner' || companyRole === 'admin';
-    const isExplicitlyAllowed = allowedCompanies.includes(financeIdStr);
-
-    if (!isOwnerOrAdmin && !isExplicitlyAllowed) {
+    if (!targetCompanyMembership) {
       return res.status(403).json({
         success: false,
         message: 'User not authorized for this finance company',
-        error_code: 'FINANCE_ACCESS_DENIED'
+        error_code: 'FINANCE_ACCESS_DENIED',
       });
     }
 
-    // Enforce login time restrictions for non-owner/admin roles
-    if (targetCompanyMembership && !isOwnerOrAdmin) {
+    const companyRole = targetCompanyMembership.role;
+    const isOwnerOrAdmin = companyRole === 'owner' || companyRole === 'admin';
+
+    if (!isOwnerOrAdmin) {
       const { login_time_from, login_time_to } = targetCompanyMembership;
-      if (login_time_from && login_time_to) {
-        if (!isWithinLoginWindow(login_time_from, login_time_to)) {
-          // Format times for user-friendly display
-          const formatTime = (t) => {
-            const parts = String(t).split(':');
-            const h = parseInt(parts[0], 10);
-            const m = parts[1] || '00';
-            const ampm = h >= 12 ? 'PM' : 'AM';
-            const h12 = h % 12 || 12;
-            return `${String(h12).padStart(2, '0')}:${m} ${ampm}`;
-          };
-          return res.status(403).json({
-            success: false,
-            message: `Login is currently unavailable. Your permitted login hours are ${formatTime(login_time_from)} – ${formatTime(login_time_to)}. Please try again during your authorized working hours.`,
-            error_code: 'LOGIN_TIME_RESTRICTED',
-            allowed_from: String(login_time_from),
-            allowed_to: String(login_time_to)
-          });
-        }
+      if (login_time_from && login_time_to && !isWithinLoginWindow(login_time_from, login_time_to)) {
+        return res.status(403).json({
+          success: false,
+          message: `Login is currently unavailable. Your permitted login hours are ${formatLoginHour12h(login_time_from)} – ${formatLoginHour12h(login_time_to)}. Please try again during your authorized working hours.`,
+          error_code: 'LOGIN_TIME_RESTRICTED',
+          allowed_from: String(login_time_from),
+          allowed_to: String(login_time_to),
+        });
       }
     }
 
-    const financeData = formatFinanceData(financeRaw);
-    financeData.print_logo_url = await resolveFinancePrintLogoUrl(financeRaw.id, financeRaw.finance_photo);
-
-    // 2. Evaluate location according to LOGIN_LOCATION_POLICY
-    const policy = process.env.LOGIN_LOCATION_POLICY || 'prefer';
-    const ip = getClientIp(req);
-    const ipGeo = lookupIp(ip);
-    const lat = parseFloat(req.body.latitude);
-    const lng = parseFloat(req.body.longitude);
-    const hasDevice = policy !== 'off' && validCoords(lat, lng);
-
-    if (policy === 'strict' && !hasDevice) {
-      return res.status(403).json({
-        success: false,
-        code: 'LOCATION_REQUIRED',
-        message: 'Location access is required to log in. Please enable location and try again.'
-      });
+    const sessionResult = await evaluateLocationAndCreateAttendanceSession(req, user, financeRaw);
+    if (!sessionResult.ok) {
+      return res.status(sessionResult.status).json(sessionResult.body);
     }
 
-    let source = 'none', useLat = null, useLng = null, accuracy = null;
-    if (hasDevice) {
-      source = 'device';
-      useLat = lat;
-      useLng = lng;
-      accuracy = Number.isFinite(+req.body.accuracyM) ? Math.round(+req.body.accuracyM) : null;
-    } else if (ipGeo) {
-      source = 'ip';
-      useLat = ipGeo.lat;
-      useLng = ipGeo.lng;
-    }
+    const { sessionId, source, flagged } = sessionResult;
 
-    let distanceKm = null, flagged = false, flagReason = null;
-    if (useLat !== null && financeRaw?.office_lat != null && financeRaw?.office_lng != null) {
-      distanceKm = +haversineKm(useLat, useLng, +financeRaw.office_lat, +financeRaw.office_lng).toFixed(2);
-    }
-    if (source === 'device' && ipGeo && haversineKm(lat, lng, ipGeo.lat, ipGeo.lng) > 150) {
-      flagged = true;
-      flagReason = 'IP_DEVICE_MISMATCH';
-    } else if (source === 'device' && distanceKm !== null && distanceKm * 1000 > (financeRaw.office_geofence_m ?? 200)) {
-      // informational only; do not block login
-      flagged = true;
-      flagReason = 'OUTSIDE_OFFICE';
-    }
+    const userToken = issueUserAccessToken({
+      user,
+      role: companyRole,
+      allowedCompanies,
+      currentFinanceId: financeIdStr,
+      financeName: financeData.name,
+      sessionId,
+      anchorSessionId: sessionId,
+      authMode: 'license',
+    });
 
-    const validPermissions = ['granted', 'declined', 'blocked', 'unavailable', 'not_asked'];
-    const rawPermission = typeof req.body.locationPermission === 'string' ? req.body.locationPermission.toLowerCase().trim() : '';
-    const locationPermission = validPermissions.includes(rawPermission) ? rawPermission : 'not_asked';
-
-    const deviceName = (req.body.deviceName || req.headers['user-agent'] || '').slice(0, 150);
-    const platform = (req.body.platform || '').slice(0, 30);
-    const ipCity = ipGeo?.city ? String(ipGeo.city).slice(0, 100) : null;
-    const ipRegion = ipGeo?.region ? String(ipGeo.region).slice(0, 100) : null;
-    const ipCountry = ipGeo?.country ? String(ipGeo.country).slice(0, 10) : null;
-
-    const sessionInsert = await db.query(
-      `INSERT INTO agent_login_sessions (
-        user_id, device_name, platform, ip_address,
-        login_lat, login_lng, distance_from_office, location_label,
-        location_source, location_accuracy_m, location_permission,
-        ip_city, ip_region, ip_country, flagged, flag_reason, last_seen_at
-      ) VALUES (
-        $1::uuid, $2, $3, $4,
-        $5, $6, $7, $8,
-        $9, $10, $11,
-        $12, $13, $14, $15, $16, CURRENT_TIMESTAMP
-      ) RETURNING id`,
-      [
-        user.id, deviceName || null, platform || null, ip || null,
-        useLat, useLng, distanceKm, null,
-        source, accuracy, locationPermission,
-        ipCity, ipRegion, ipCountry, flagged, flagReason
-      ]
-    );
-    const sessionId = sessionInsert.rows[0].id;
-
-    // PostgreSQL query for statistics
-    const statsResult = await db.query(`
-      SELECT 
-        (SELECT COUNT(*) FROM customers WHERE finance_id = $1) as customer_count,
-        (SELECT COUNT(*) FROM loans WHERE finance_id = $1) as loan_count,
-        (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE finance_id = $1) as total_collection
-    `, [financeIdStr]);
-
-    const userToken = jwt.sign(
-      {
-        user: {
-          id: user.id,
-          sessionId: sessionId,
-          email: user.email,
-          username: user.username,
-          role: companyRole,
-          allowed_companies: allowedCompanies,
-          current_finance_id: financeIdStr,
-          finance_name: financeData.name
-        }
-      },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    // Update last_accessed_at in user_allowed_companies for this company
     await db.query(
       'UPDATE user_allowed_companies SET last_accessed_at = NOW() WHERE user_id = $1 AND finance_id = $2',
       [user.id, financeIdStr]
     );
 
-    res.json({
+    return res.json({
       success: true,
-      sessionId: sessionId,
+      authMode: 'license',
+      sessionId,
       locationSource: source,
-      flagged: flagged,
+      flagged,
       user: {
         id: user.id,
         user_id: user.id,
-        sessionId: sessionId,
+        sessionId,
         email: user.email,
         username: user.username,
         phone_no: user.phone_no,
         role: companyRole,
         allowed_companies: allowedCompanies,
         current_finance_id: financeIdStr,
-        login_time_from: targetCompanyMembership?.login_time_from || null,
-        login_time_to: targetCompanyMembership?.login_time_to || null,
-        last_accessed_at: targetCompanyMembership?.last_accessed_at || null,
-        created_at: user.created_at
+        login_time_from: targetCompanyMembership.login_time_from || null,
+        login_time_to: targetCompanyMembership.login_time_to || null,
+        last_accessed_at: targetCompanyMembership.last_accessed_at || null,
+        created_at: user.created_at,
       },
-      finance: financeData,
-      statistics: {
-        customer_count: parseInt(statsResult.rows[0]?.customer_count) || 0,
-        loan_count: parseInt(statsResult.rows[0]?.loan_count) || 0,
-        total_collection: parseFloat(statsResult.rows[0]?.total_collection) || 0
+      finance: {
+        ...financeData,
+        user_role: companyRole,
+        login_time_from: targetCompanyMembership.login_time_from || null,
+        login_time_to: targetCompanyMembership.login_time_to || null,
       },
+      statistics,
       token: userToken,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
-
-    // Optional reverse-geocoding if GOOGLE_MAPS_SERVER_KEY is configured
-    if (process.env.GOOGLE_MAPS_SERVER_KEY && source === 'device' && useLat !== null && useLng !== null) {
-      setImmediate(async () => {
-        try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 3000);
-          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${useLat},${useLng}&key=${process.env.GOOGLE_MAPS_SERVER_KEY}`;
-          const geoRes = await fetch(url, { signal: controller.signal });
-          clearTimeout(timeout);
-          const geoData = await geoRes.json();
-          const label = geoData?.results?.[0]?.formatted_address?.slice(0, 200);
-          if (label) {
-            await db.query('UPDATE agent_login_sessions SET location_label = $1 WHERE id = $2::uuid', [label, sessionId]);
-          }
-        } catch { }
-      });
-    }
-
   } catch (error) {
-    console.error('User login error:', error);
-    res.status(500).json({
+    console.error('User login error:', error?.message || error);
+    return res.status(500).json({
       success: false,
       message: 'Internal server error',
       error_code: 'INTERNAL_ERROR',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+});
+
+// ========== DIRECT USER LOGIN (Mode B: Direct User Authentication) ==========
+router.post('/direct-user-login', async (req, res) => {
+  try {
+    const { identifier, username, phone_no, password } = req.body || {};
+    const loginIdentifier = String(identifier || username || phone_no || '').trim();
+
+    if (!loginIdentifier || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username or phone number and password are required',
+        error_code: 'MISSING_CREDENTIALS',
+      });
+    }
+
+    const rateState = checkLoginRateLimit(req, `direct:${loginIdentifier}`);
+    if (rateState.blocked) {
+      res.set('Retry-After', String(rateState.retryAfterSeconds));
+      return res.status(429).json({
+        success: false,
+        message: 'Too many failed login attempts. Please try again later.',
+        error_code: 'RATE_LIMIT_EXCEEDED',
+        retryAfterSeconds: rateState.retryAfterSeconds,
+      });
+    }
+
+    const authResult = await authenticateUserCredentials(loginIdentifier, password);
+    if (!authResult.ok) {
+      if (authResult.recordFailure) {
+        recordFailedLoginAttempt(req, `direct:${loginIdentifier}`);
+      }
+      return res.status(authResult.status).json({
+        success: false,
+        message: authResult.message,
+        error_code: authResult.error_code,
+      });
+    }
+
+    clearFailedLoginAttempts(req, `direct:${loginIdentifier}`);
+    const user = authResult.user;
+
+    // Fetch all permitted companies with active status & License status
+    const membershipsRes = await db.query(
+      `SELECT uac.finance_id,
+              uac.role,
+              uac.login_time_from,
+              uac.login_time_to,
+              uac.last_accessed_at,
+              fd.finance_name,
+              fd.owner_id,
+              fd.phone_numbers,
+              fd.emails,
+              fd.since,
+              fd.finance_photo,
+              fd.is_active AS finance_is_active,
+              fd.created_at,
+              a.address,
+              a.city,
+              a.district,
+              a.state,
+              a.pincode,
+              o.username AS owner_username,
+              o.is_active AS owner_is_active
+         FROM user_allowed_companies uac
+         INNER JOIN finance_detail fd ON fd.id = uac.finance_id
+         INNER JOIN owner o ON o.id = fd.owner_id
+         LEFT JOIN address_history ah
+           ON ah.entity_type = 'finance'
+          AND ah.entity_id = fd.id::text
+          AND ah.is_current = 1
+         LEFT JOIN addresses a ON ah.address_id = a.id
+        WHERE uac.user_id = $1
+          AND uac.is_active = 1
+        ORDER BY uac.last_accessed_at DESC NULLS LAST, fd.finance_name ASC`,
+      [user.id]
+    );
+
+    const activeMemberships = membershipsRes.rows.filter(
+      (m) => Number(m.finance_is_active) === 1 && Number(m.owner_is_active) === 1
+    );
+
+    if (activeMemberships.length === 0) {
+      const hasInactiveLicense = membershipsRes.rows.some(
+        (m) => Number(m.finance_is_active) === 1 && Number(m.owner_is_active) !== 1
+      );
+      return res.status(403).json({
+        success: false,
+        message: hasInactiveLicense
+          ? 'The License associated with your workspace is currently inactive.'
+          : 'Your account does not have access to any active finance company.',
+        error_code: hasInactiveLicense ? 'LICENSE_INACTIVE' : 'NO_ACTIVE_FINANCE_ACCESS',
+      });
+    }
+
+    // Select the default finance company (most recently accessed whose login window is currently open)
+    const eligibleCompany = activeMemberships.find((m) => {
+      if (m.role === 'owner' || m.role === 'admin') return true;
+      return isWithinLoginWindow(m.login_time_from, m.login_time_to);
+    });
+
+    if (!eligibleCompany) {
+      const primary = activeMemberships[0];
+      return res.status(403).json({
+        success: false,
+        message: `Login is currently unavailable. Your permitted login hours are ${formatLoginHour12h(primary.login_time_from)} – ${formatLoginHour12h(primary.login_time_to)}. Please try again during your authorized working hours.`,
+        error_code: 'LOGIN_TIME_RESTRICTED',
+        allowed_from: String(primary.login_time_from),
+        allowed_to: String(primary.login_time_to),
+      });
+    }
+
+    const selectedFinanceId = String(eligibleCompany.finance_id);
+    const loadedFinance = await loadFinanceDetailsAndStatistics(selectedFinanceId);
+    if (!loadedFinance) {
+      return res.status(404).json({
+        success: false,
+        message: 'Selected finance company is unavailable',
+        error_code: 'FINANCE_NOT_FOUND',
+      });
+    }
+
+    const { financeRaw, financeData, statistics } = loadedFinance;
+
+    const sessionResult = await evaluateLocationAndCreateAttendanceSession(req, user, financeRaw);
+    if (!sessionResult.ok) {
+      return res.status(sessionResult.status).json(sessionResult.body);
+    }
+
+    const { sessionId, source, flagged, deviceName, platform } = sessionResult;
+    const allowedCompanies = activeMemberships.map((m) => String(m.finance_id));
+    const companyRole = eligibleCompany.role;
+    const pwdFp = computePasswordFingerprint(user.password);
+
+    const accessToken = issueUserAccessToken({
+      user,
+      role: companyRole,
+      allowedCompanies,
+      currentFinanceId: selectedFinanceId,
+      financeName: financeData.name,
+      sessionId,
+      anchorSessionId: sessionId,
+      authMode: 'direct_user',
+      pwdFp,
+    });
+
+    const { refreshToken } = issueUserRefreshToken({
+      userId: user.id,
+      anchorSessionId: sessionId,
+      currentSessionId: sessionId,
+      currentFinanceId: selectedFinanceId,
+      pwdFp,
+      deviceName,
+      platform,
+    });
+
+    await db.query(
+      'UPDATE user_allowed_companies SET last_accessed_at = NOW() WHERE user_id = $1 AND finance_id = $2',
+      [user.id, selectedFinanceId]
+    );
+
+    const formattedFinances = await Promise.all(
+      activeMemberships.map(async (m) => {
+        const formatted = formatFinanceData({
+          ...m,
+          id: m.finance_id,
+          name: m.finance_name,
+        });
+        const signedLogo = m.finance_photo ? await getSignedImageUrl(m.finance_photo) : null;
+        return {
+          id: m.finance_id,
+          name: m.finance_name,
+          finance_name: m.finance_name,
+          owner_id: m.owner_id,
+          owner_username: m.owner_username,
+          user_role: m.role,
+          login_time_from: m.login_time_from || null,
+          login_time_to: m.login_time_to || null,
+          last_accessed_at: m.last_accessed_at || null,
+          phone: formatted.phone,
+          email: formatted.email,
+          address: formatted.address,
+          city: m.city || '',
+          district: m.district || '',
+          state: m.state || '',
+          pincode: m.pincode || '',
+          since: m.since || null,
+          finance_photo: signedLogo || m.finance_photo || null,
+          logo_url: signedLogo,
+          is_active: true,
+        };
+      })
+    );
+
+    return res.json({
+      success: true,
+      authMode: 'direct_user',
+      sessionId,
+      locationSource: source,
+      flagged,
+      user: {
+        id: user.id,
+        user_id: user.id,
+        sessionId,
+        email: user.email,
+        username: user.username,
+        phone_no: user.phone_no,
+        role: companyRole,
+        allowed_companies: allowedCompanies,
+        current_finance_id: selectedFinanceId,
+        login_time_from: eligibleCompany.login_time_from || null,
+        login_time_to: eligibleCompany.login_time_to || null,
+        last_accessed_at: new Date().toISOString(),
+        created_at: user.created_at,
+      },
+      finance: {
+        ...financeData,
+        user_role: companyRole,
+        login_time_from: eligibleCompany.login_time_from || null,
+        login_time_to: eligibleCompany.login_time_to || null,
+      },
+      finances: formattedFinances,
+      statistics,
+      token: accessToken,
+      refreshToken,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Direct user login error:', error?.message || error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error_code: 'INTERNAL_ERROR',
+    });
+  }
+});
+
+// ========== REFRESH PERSISTENT DIRECT-USER SESSION ==========
+router.post('/refresh-session', async (req, res) => {
+  try {
+    const rawRefreshToken = req.body?.refreshToken;
+    const result = await verifyAndRotateRefreshSession(db, rawRefreshToken, {
+      ipAddress: getClientIp(req),
+      ensureAttendanceSession: true,
+    });
+
+    if (!result.valid) {
+      return res.status(result.status || 401).json({
+        success: false,
+        message: result.message,
+        error_code: result.error_code,
+        allowed_from: result.allowed_from,
+        allowed_to: result.allowed_to,
+      });
+    }
+
+    return res.json({
+      success: true,
+      authMode: 'direct_user',
+      token: result.accessToken,
+      refreshToken: result.refreshToken,
+      sessionId: result.sessionId,
+      renewed: result.attendanceRenewed,
+      currentFinanceId: String(result.selectedMembership.finance_id),
+      role: result.selectedMembership.role,
+      allowedCompanies: result.allowedCompanies,
+    });
+  } catch (error) {
+    console.error('Refresh session error:', error?.message || error);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to refresh session',
+      error_code: 'INTERNAL_ERROR',
     });
   }
 });
@@ -811,184 +1303,450 @@ router.post('/user-login', async (req, res) => {
 // ========== USER LOGOUT ==========
 router.post('/user-logout', logoutAuth, async (req, res) => {
   try {
-    const sessionId = req.user?.sessionId;
-    const reason = ['manual', 'window_close'].includes(req.body?.reason) ? req.body.reason : 'manual';
-    if (sessionId) {
+    // Explicit token-type separation: an Owner/License token must NEVER be invalidated by User Logout
+    if (req.owner && !req.user) {
+      return res.json({ success: true, ignored: true });
+    }
+
+    const userId = req.user?.id;
+    const sessionId = req.user?.sessionId || null;
+    const anchorSessionId = req.user?.anchorSessionId || sessionId || null;
+    const allowedReasons = ['manual', 'window_close', 'timeout'];
+    const reason = allowedReasons.includes(req.body?.reason) ? req.body.reason : 'manual';
+
+    if (userId && sessionId && /^[0-9a-fA-F-]{36}$/.test(String(sessionId))) {
       await db.query(
         `UPDATE agent_login_sessions
-           SET logout_time = CURRENT_TIMESTAMP,
-               duration_seconds = EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - login_time))::int,
-               logout_reason = $2
-         WHERE id = $1::uuid AND user_id = $3::uuid AND logout_time IS NULL`,
-        [sessionId, reason, req.user.id]
+            SET logout_time = CURRENT_TIMESTAMP,
+                duration_seconds = GREATEST(0, EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - login_time))::int),
+                logout_reason = $2
+          WHERE id = $1::uuid
+            AND user_id = $3::uuid
+            AND logout_time IS NULL`,
+        [sessionId, reason, userId]
       );
     }
-    res.json({ success: true });
+
+    // Only explicit manual logout revokes persistent Direct User refresh sessions;
+    // window_close and timeout close the attendance shift while preserving Direct User persistence.
+    if (userId && reason === 'manual') {
+      revokeFamiliesInMemory({ anchorSessionId });
+      await markSessionsRevokedInDb(db, {
+        userId,
+        sessionIds: [sessionId, anchorSessionId],
+        reason: 'manual',
+      });
+    }
+
+    return res.json({ success: true });
   } catch (err) {
-    console.error('Logout error:', err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error('Logout error:', err?.message || err);
+    return res.status(500).json({ success: false, error: 'Failed to process logout' });
   }
 });
 
-// ========== SESSION HEARTBEAT ==========
+// ========== SESSION HEARTBEAT & ATTENDANCE MANAGEMENT ==========
 router.post('/session-heartbeat', authMiddleware, async (req, res) => {
   try {
-    const sessionId = req.user?.sessionId;
-    if (!sessionId) {
-      return res.json({ active: false });
+    const decoded = req.authDecoded || {};
+    const authMode = decoded.authMode === 'direct_user' ? 'direct_user' : 'license';
+    const userId = req.user?.id;
+    const sessionId = req.user?.sessionId || null;
+    const anchorSessionId = req.user?.anchorSessionId || sessionId || null;
+    const targetFinanceId =
+      req.headers['finance-id'] ||
+      req.headers['Finance-ID'] ||
+      req.user?.current_finance_id ||
+      null;
+
+    // Validate live account, License, finance membership, password fingerprint, and revocation
+    const validation = await validateUserPrincipal(db, decoded, {
+      targetFinanceId: targetFinanceId ? String(targetFinanceId).trim() : null,
+      requireFinanceContext: false,
+      enforceLoginWindow: true,
+      enforceOpenAttendanceInLicenseMode: authMode === 'license',
+    });
+
+    if (!validation.valid) {
+      // Close any open attendance shift if authentication was revoked/invalidated
+      if (userId && sessionId && /^[0-9a-fA-F-]{36}$/.test(String(sessionId))) {
+        const closeReason =
+          validation.error_code === 'PASSWORD_CHANGED'
+            ? 'password_changed'
+            : validation.error_code === 'SESSION_EXPIRED'
+              ? 'timeout'
+              : 'revoked';
+        await db.query(
+          `UPDATE agent_login_sessions
+              SET logout_time = CURRENT_TIMESTAMP,
+                  duration_seconds = GREATEST(0, EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - login_time))::int),
+                  logout_reason = $2
+            WHERE id = $1::uuid
+              AND user_id = $3::uuid
+              AND logout_time IS NULL`,
+          [sessionId, closeReason, userId]
+        );
+      }
+
+      if (validation.error_code === 'LOGIN_TIME_RESTRICTED') {
+        return res.status(403).json({
+          active: false,
+          revoked: false,
+          authMode,
+          error_code: 'LOGIN_TIME_RESTRICTED',
+          message: validation.message,
+          allowed_from: validation.allowed_from,
+          allowed_to: validation.allowed_to,
+        });
+      }
+
+      // In License Mode, normal attendance timeout returns 200 { active: false } so client
+      // clears only the ephemeral user session without treating it as a License error.
+      if (authMode === 'license' && validation.error_code === 'SESSION_EXPIRED') {
+        return res.json({
+          active: false,
+          revoked: false,
+          authMode: 'license',
+          error_code: 'SESSION_EXPIRED',
+        });
+      }
+
+      return res.status(validation.status || 401).json({
+        active: false,
+        revoked: true,
+        authMode,
+        error_code: validation.error_code,
+        message: validation.message,
+      });
     }
-    const r = await db.query(
-      `UPDATE agent_login_sessions SET last_seen_at = CURRENT_TIMESTAMP
-        WHERE id = $1::uuid AND user_id = $2::uuid AND logout_time IS NULL`,
-      [sessionId, req.user.id]
+
+    // Mode A: License Mode — ephemeral user session must have an open attendance record
+    if (authMode === 'license') {
+      if (!sessionId) {
+        return res.json({ active: false, authMode: 'license' });
+      }
+      const r = await db.query(
+        `UPDATE agent_login_sessions
+            SET last_seen_at = CURRENT_TIMESTAMP
+          WHERE id = $1::uuid
+            AND user_id = $2::uuid
+            AND logout_time IS NULL`,
+        [sessionId, userId]
+      );
+      return res.json({ active: r.rowCount > 0, authMode: 'license', sessionId });
+    }
+
+    // Mode B: Direct User Mode — keep attendance accurate without forcing credential re-entry
+    if (sessionId && /^[0-9a-fA-F-]{36}$/.test(String(sessionId))) {
+      const r = await db.query(
+        `UPDATE agent_login_sessions
+            SET last_seen_at = CURRENT_TIMESTAMP
+          WHERE id = $1::uuid
+            AND user_id = $2::uuid
+            AND logout_time IS NULL`,
+        [sessionId, userId]
+      );
+      if (r.rowCount > 0) {
+        return res.json({
+          active: true,
+          renewed: false,
+          authMode: 'direct_user',
+          sessionId,
+        });
+      }
+    }
+
+    // Attendance session was closed (e.g., app restart or system sleep > 3 min),
+    // while persistent authentication passed all security checks -> open a fresh attendance shift!
+    const ip = getClientIp(req);
+    const deviceName = String(req.headers['user-agent'] || 'Desktop App (Resumed)').slice(0, 150);
+    const newSessionRes = await db.query(
+      `INSERT INTO agent_login_sessions (
+         user_id, device_name, platform, ip_address, location_source, flagged, last_seen_at
+       ) VALUES ($1::uuid, $2, 'Web', $3, 'none', false, CURRENT_TIMESTAMP)
+       RETURNING id`,
+      [userId, deviceName || null, ip || null]
     );
-    res.json({ active: r.rowCount > 0 });
+    const newSessionId = newSessionRes.rows[0].id;
+    const effectiveAnchor = anchorSessionId || newSessionId;
+    const membership = validation.selectedMembership;
+
+    const renewedToken = issueUserAccessToken({
+      user: validation.userRow,
+      role: membership.role,
+      allowedCompanies: validation.allowedCompanies,
+      currentFinanceId: membership.finance_id,
+      financeName: membership.finance_name,
+      sessionId: newSessionId,
+      anchorSessionId: effectiveAnchor,
+      authMode: 'direct_user',
+    });
+
+    return res.json({
+      active: true,
+      renewed: true,
+      authMode: 'direct_user',
+      sessionId: newSessionId,
+      token: renewedToken,
+    });
   } catch (err) {
-    console.error('Heartbeat error:', err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error('Heartbeat error:', err?.message || err);
+    return res.status(500).json({ success: false, error: 'Failed to process session heartbeat' });
   }
 });
 
 // ========== GET OWNER'S FINANCE COMPANIES ==========
 router.get('/owner-finances', async (req, res) => {
   try {
-    const ownerToken = req.headers['owner-authorization']?.replace('Bearer ', '');
-
-    if (!ownerToken) {
-      return res.status(401).json({ success: false, message: 'Owner authentication required' });
-    }
-
-    let ownerDecoded;
-    try {
-      ownerDecoded = jwt.verify(ownerToken, JWT_SECRET);
-    } catch (err) {
-      return res.status(401).json({ success: false, message: 'Invalid owner token' });
-    }
-
-    // PostgreSQL query
-    const result = await db.query(`
-      SELECT 
-        fd.id, 
-        fd.finance_name as name, 
-        fd.owner_id, 
-        fd.phone_numbers,
-        fd.emails,
-        fd.since,
-        fd.finance_photo,
-        fd.is_active,
-        fd.created_at,
-        a.address,
-        a.city,
-        a.district,
-        a.state,
-        a.pincode
-      FROM finance_detail fd
-      LEFT JOIN address_history ah ON ah.entity_type = 'finance' 
-        AND ah.entity_id = fd.id::text
-        AND ah.is_current = 1
-      LEFT JOIN addresses a ON ah.address_id = a.id
-      WHERE fd.owner_id = $1 AND fd.is_active = 1
-      ORDER BY fd.finance_name ASC
-    `, [ownerDecoded.owner.id]);
-
-    const processedFinances = result.rows.map(finance => {
-      const financeData = formatFinanceData(finance);
-      return {
-        id: finance.id,
-        name: finance.name,
-        owner_id: finance.owner_id,
-        phone: financeData.phone,
-        email: financeData.email,
-        address: financeData.address,
-        city: finance.city,
-        district: finance.district,
-        state: finance.state,
-        pincode: finance.pincode,
-        since: finance.since,
-        finance_photo: finance.finance_photo,
-        is_active: finance.is_active,
-        created_at: finance.created_at
-      };
-    });
-
-    res.json({
-      success: true,
-      finances: processedFinances,
-      total: processedFinances.length
-    });
-  } catch (error) {
-    console.error('Error fetching owner finances:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
-  }
-});
-
-// ========== REFRESH FINANCE DETAILS ==========
-router.get('/finance-details/:financeId', async (req, res) => {
-  try {
-    const ownerToken = req.headers['owner-authorization']?.replace('Bearer ', '');
+    const ownerToken = req.headers['owner-authorization']?.replace(/^Bearer\s+/i, '').trim();
 
     if (!ownerToken) {
       return res.status(401).json({
         success: false,
-        message: 'Owner authentication required'
+        message: 'License authentication required',
+        error_code: 'OWNER_TOKEN_REQUIRED',
       });
     }
-
-    const financeId = String(req.params.financeId).trim();
 
     let ownerDecoded;
     try {
-      ownerDecoded = jwt.verify(ownerToken, JWT_SECRET);
-    } catch (err) {
-      return res.status(401).json({ success: false, message: 'Invalid owner token' });
-    }
-
-    // PostgreSQL query
-    const result = await db.query(`
-      SELECT 
-        fd.*,
-        a.house_no,
-        a.street,
-        a.street_name,
-        a.village,
-        a.land_mark,
-        a.address,
-        a.city,
-        a.district,
-        a.state,
-        a.pincode,
-        a.location
-      FROM finance_detail fd
-      LEFT JOIN address_history ah ON ah.entity_type = 'finance' 
-        AND ah.entity_id = fd.id::text
-        AND ah.is_current = 1
-      LEFT JOIN addresses a ON ah.address_id = a.id
-      WHERE fd.id = $1 AND fd.owner_id = $2 AND fd.is_active = 1
-    `, [financeId, ownerDecoded.owner.id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
+      ownerDecoded = jwt.verify(ownerToken, getJwtSecret());
+    } catch (_err) {
+      return res.status(401).json({
         success: false,
-        message: 'Finance company not found'
+        message: 'Invalid License token',
+        error_code: 'INVALID_OWNER_TOKEN',
       });
     }
 
-    const financeData = formatFinanceData(result.rows[0]);
-    financeData.print_logo_url = await resolveFinancePrintLogoUrl(result.rows[0].id, result.rows[0].finance_photo);
+    const ownerValidation = await validateOwnerPrincipal(db, ownerDecoded);
+    if (!ownerValidation.valid) {
+      return res.status(ownerValidation.status || 401).json({
+        success: false,
+        message: ownerValidation.message,
+        error_code: ownerValidation.error_code,
+      });
+    }
 
-    res.json({
+    const result = await db.query(
+      `SELECT
+         fd.id,
+         fd.finance_name AS name,
+         fd.owner_id,
+         fd.phone_numbers,
+         fd.emails,
+         fd.since,
+         fd.finance_photo,
+         fd.is_active,
+         fd.created_at,
+         a.address,
+         a.city,
+         a.district,
+         a.state,
+         a.pincode
+       FROM finance_detail fd
+       LEFT JOIN address_history ah
+         ON ah.entity_type = 'finance'
+        AND ah.entity_id = fd.id::text
+        AND ah.is_current = 1
+       LEFT JOIN addresses a ON ah.address_id = a.id
+       WHERE fd.owner_id = $1 AND fd.is_active = 1
+       ORDER BY fd.finance_name ASC`,
+      [ownerValidation.owner.id]
+    );
+
+    const processedFinances = await Promise.all(
+      result.rows.map(async (finance) => {
+        const financeData = formatFinanceData(finance);
+        const signedLogo = finance.finance_photo
+          ? await getSignedImageUrl(finance.finance_photo)
+          : null;
+        return {
+          id: finance.id,
+          name: finance.name,
+          owner_id: finance.owner_id,
+          phone: financeData.phone,
+          email: financeData.email,
+          address: financeData.address,
+          city: finance.city,
+          district: finance.district,
+          state: finance.state,
+          pincode: finance.pincode,
+          since: finance.since,
+          finance_photo: signedLogo || finance.finance_photo,
+          logo_url: signedLogo,
+          is_active: finance.is_active,
+          created_at: finance.created_at,
+        };
+      })
+    );
+
+    return res.json({
       success: true,
-      finance: financeData
+      finances: processedFinances,
+      total: processedFinances.length,
     });
-
   } catch (error) {
-    console.error('Error fetching finance details:', error);
-    res.status(500).json({
+    console.error('Error fetching owner finances:', error?.message || error);
+    return res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: 'Server error',
+    });
+  }
+});
+
+// ========== REFRESH FINANCE DETAILS (Supports License Mode & Direct User Mode) ==========
+router.get('/finance-details/:financeId', async (req, res) => {
+  try {
+    const financeId = String(req.params.financeId || '').trim();
+    if (!financeId || !/^[0-9a-fA-F-]{36}$/.test(financeId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid finance ID',
+        error_code: 'INVALID_FINANCE_ID',
+      });
+    }
+
+    const userToken = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim() || '';
+    const ownerToken = req.headers['owner-authorization']?.replace(/^Bearer\s+/i, '').trim() || '';
+
+    if (!userToken && !ownerToken) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+        error_code: 'AUTH_REQUIRED',
+      });
+    }
+
+    let authorized = false;
+    let verifiedUserRole = null;
+
+    // Path 1: Authenticated User (Direct User Mode or License Mode) — verify real DB membership
+    if (userToken) {
+      let decodedUser = null;
+      try {
+        decodedUser = jwt.verify(userToken, getJwtSecret());
+      } catch (err) {
+        if (!ownerToken) {
+          const isExpired = err && err.name === 'TokenExpiredError';
+          return res.status(401).json({
+            success: false,
+            message: isExpired ? 'Session token expired' : 'Invalid authentication token',
+            error_code: isExpired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
+          });
+        }
+      }
+
+      if (decodedUser?.user?.id) {
+        const userValidation = await validateUserPrincipal(db, decodedUser, {
+          targetFinanceId: financeId,
+          requireFinanceContext: true,
+          enforceLoginWindow: false,
+        });
+
+        if (!userValidation.valid) {
+          return res.status(userValidation.status || 403).json({
+            success: false,
+            message: userValidation.message,
+            error_code: userValidation.error_code,
+          });
+        }
+
+        authorized = true;
+        verifiedUserRole = userValidation.selectedMembership.role;
+      } else if (decodedUser?.owner?.id) {
+        const ownerValidation = await validateOwnerPrincipal(db, decodedUser);
+        if (!ownerValidation.valid) {
+          return res.status(ownerValidation.status || 401).json({
+            success: false,
+            message: ownerValidation.message,
+            error_code: ownerValidation.error_code,
+          });
+        }
+        const ownCheck = await db.query(
+          'SELECT id FROM finance_detail WHERE id = $1 AND owner_id = $2 AND is_active = 1 LIMIT 1',
+          [financeId, ownerValidation.owner.id]
+        );
+        if (ownCheck.rows.length === 0) {
+          return res.status(403).json({
+            success: false,
+            message: 'Not authorized for this finance company',
+            error_code: 'FINANCE_ACCESS_DENIED',
+          });
+        }
+        authorized = true;
+        verifiedUserRole = 'owner';
+      }
+    }
+
+    // Path 2: License/Owner header authentication
+    if (!authorized && ownerToken) {
+      let ownerDecoded;
+      try {
+        ownerDecoded = jwt.verify(ownerToken, getJwtSecret());
+      } catch (_err) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid License token',
+          error_code: 'INVALID_OWNER_TOKEN',
+        });
+      }
+
+      const ownerValidation = await validateOwnerPrincipal(db, ownerDecoded);
+      if (!ownerValidation.valid) {
+        return res.status(ownerValidation.status || 401).json({
+          success: false,
+          message: ownerValidation.message,
+          error_code: ownerValidation.error_code,
+        });
+      }
+
+      const ownCheck = await db.query(
+        'SELECT id FROM finance_detail WHERE id = $1 AND owner_id = $2 AND is_active = 1 LIMIT 1',
+        [financeId, ownerValidation.owner.id]
+      );
+
+      if (ownCheck.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Finance company not found',
+          error_code: 'FINANCE_NOT_FOUND',
+        });
+      }
+
+      authorized = true;
+      verifiedUserRole = 'owner';
+    }
+
+    if (!authorized) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+        error_code: 'AUTH_REQUIRED',
+      });
+    }
+
+    const loaded = await loadFinanceDetailsAndStatistics(financeId);
+    if (!loaded) {
+      return res.status(404).json({
+        success: false,
+        message: 'Finance company not found',
+        error_code: 'FINANCE_NOT_FOUND',
+      });
+    }
+
+    return res.json({
+      success: true,
+      finance: {
+        ...loaded.financeData,
+        ...(verifiedUserRole ? { user_role: verifiedUserRole } : {}),
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching finance details:', error?.message || error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
     });
   }
 });
@@ -1001,16 +1759,13 @@ router.post(
     let uploadedPhotoUrl = null;
 
     try {
-      const ownerToken = req.headers['owner-authorization']?.replace('Bearer ', '');
-      if (!ownerToken) {
-        return res.status(401).json({ success: false, message: 'Owner authentication required' });
-      }
-
-      let ownerDecoded;
-      try {
-        ownerDecoded = jwt.verify(ownerToken, JWT_SECRET);
-      } catch (err) {
-        return res.status(401).json({ success: false, message: 'Invalid owner token' });
+      const ownerAuth = await resolveOwnerFromRequest(req);
+      if (!ownerAuth.isOwner || !ownerAuth.owner?.id) {
+        return res.status(ownerAuth.status || 403).json({
+          success: false,
+          message: ownerAuth.error || 'Owner authentication required',
+          error_code: ownerAuth.error_code || 'OWNER_AUTH_REQUIRED',
+        });
       }
 
       let user, staff_details;
@@ -1023,6 +1778,38 @@ router.post(
 
       if (!user || !user.email || !user.password || !user.username || !user.phone_no) {
         return res.status(400).json({ success: false, message: 'Missing required user fields' });
+      }
+
+      // Verify any assigned finance companies belong to the authenticated owner
+      const companiesToVerify = Array.from(
+        new Set(
+          [
+            ...(Array.isArray(user.allowed_companies) ? user.allowed_companies : []),
+            ...(staff_details?.finance_id ? [staff_details.finance_id] : []),
+          ]
+            .filter(Boolean)
+            .map(String)
+        )
+      );
+      if (companiesToVerify.length > 0) {
+        const ownershipRes = await db.query(
+          'SELECT id, owner_id FROM finance_detail WHERE id = ANY($1::uuid[]) AND is_active = 1',
+          [companiesToVerify]
+        );
+        const validOwnedIds = new Set(
+          ownershipRes.rows
+            .filter((r) => String(r.owner_id) === String(ownerAuth.owner.id))
+            .map((r) => String(r.id))
+        );
+        for (const cid of companiesToVerify) {
+          if (!validOwnedIds.has(cid)) {
+            return res.status(403).json({
+              success: false,
+              message: `Finance company ${cid} does not belong to this owner`,
+              error_code: 'FINANCE_OWNER_MISMATCH',
+            });
+          }
+        }
       }
 
       // PostgreSQL uniqueness checks
@@ -1458,19 +2245,15 @@ router.post(
     const client = await db.connect();
 
     try {
-      // Authenticate owner
-      const ownerToken = req.headers['owner-authorization']?.replace('Bearer ', '');
-      if (!ownerToken) {
+      // Authenticate owner (supports both License Mode owner token and Direct User Mode owner-role user token)
+      const ownerAuth = await resolveOwnerFromRequest(req);
+      if (!ownerAuth.isOwner || !ownerAuth.owner?.id) {
         client.release();
-        return res.status(401).json({ success: false, message: 'Owner authentication required' });
-      }
-
-      let ownerDecoded;
-      try {
-        ownerDecoded = jwt.verify(ownerToken, JWT_SECRET);
-      } catch (err) {
-        client.release();
-        return res.status(401).json({ success: false, message: 'Invalid owner token' });
+        return res.status(ownerAuth.status || 403).json({
+          success: false,
+          message: ownerAuth.error || 'Owner authentication required',
+          error_code: ownerAuth.error_code || 'OWNER_AUTH_REQUIRED',
+        });
       }
 
       // Parse body — supports both JSON and multipart/form-data
@@ -1523,7 +2306,7 @@ router.post(
       }
       const targetUser = userCheck.rows[0];
 
-      const ownerId = String(ownerDecoded.owner?.id || ownerDecoded.user?.id);
+      const ownerId = String(ownerAuth.owner.id);
 
       // Validate each target finance company belongs to the owner
       for (const fid of targetFinanceIds) {
@@ -1579,12 +2362,19 @@ router.post(
 
       // Resolve inviter user ID
       let invitedByUserId = null;
-      if (ownerDecoded.user?.id) {
-        invitedByUserId = ownerDecoded.user.id;
-      } else if (ownerDecoded.owner?.id) {
-        const ownerUserCheck = await client.query('SELECT id FROM users WHERE id = $1', [ownerDecoded.owner.id]);
+      if (ownerAuth.user?.id) {
+        invitedByUserId = ownerAuth.user.id;
+      } else {
+        const ownerUserCheck = await client.query(
+          `SELECT uac.user_id
+             FROM user_allowed_companies uac
+             INNER JOIN finance_detail fd ON fd.id = uac.finance_id
+            WHERE fd.owner_id = $1 AND uac.role = 'owner' AND uac.is_active = 1
+            LIMIT 1`,
+          [ownerAuth.owner.id]
+        );
         if (ownerUserCheck.rows.length > 0) {
-          invitedByUserId = ownerDecoded.owner.id;
+          invitedByUserId = ownerUserCheck.rows[0].user_id;
         }
       }
 
@@ -1649,7 +2439,7 @@ router.post(
             `UPDATE users_details 
              SET staff_name = $1, staff_code = $2, father_spouse_name = COALESCE($3, father_spouse_name),
                  experience_years = $4, education_qualification = COALESCE($5, education_qualification),
-                 photo = COALESCE($6, photo), joining_date = COALESCE($7, joining_date), updated_at = CURRENT_TIMESTAMP
+                 photo = COALESCE($6, photo), joining_date = COALESCE($7, joining_date)
              WHERE user_id = $8 AND finance_id = $9`,
             [
               resolvedStaffName,
@@ -1712,34 +2502,72 @@ router.post(
 // ========== DELETE USER ==========
 router.delete('/users/:id', async (req, res) => {
   try {
-    const ownerToken = req.headers['owner-authorization']?.replace('Bearer ', '');
-
-    if (!ownerToken) {
-      return res.status(401).json({
+    const ownerAuth = await resolveOwnerFromRequest(req);
+    if (!ownerAuth.isOwner || !ownerAuth.owner?.id) {
+      return res.status(ownerAuth.status || 403).json({
         success: false,
-        message: 'Owner authentication required'
+        message: ownerAuth.error || 'Owner authentication required',
+        error_code: ownerAuth.error_code || 'OWNER_AUTH_REQUIRED',
       });
     }
 
     const userId = req.params.id;
 
-    // PostgreSQL UPDATE
+    // Verify target user belongs to at least one finance company under this owner
+    const tenantCheck = await db.query(
+      `SELECT 1
+         FROM user_allowed_companies uac
+         INNER JOIN finance_detail fd ON fd.id = uac.finance_id
+        WHERE uac.user_id = $1::uuid
+          AND fd.owner_id = $2::uuid
+       UNION ALL
+       SELECT 1
+         FROM users_details ud
+         INNER JOIN finance_detail fd ON fd.id = ud.finance_id
+        WHERE (ud.user_id = $1::uuid OR ud.id = $1::uuid)
+          AND fd.owner_id = $2::uuid
+       LIMIT 1`,
+      [userId, ownerAuth.owner.id]
+    );
+
+    if (tenantCheck.rows.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to deactivate this user',
+        error_code: 'FORBIDDEN',
+      });
+    }
+
+    // Deactivate user and revoke all active sessions / refresh tokens
     await db.query(
-      'UPDATE users SET is_active = 0 WHERE id = $1',
+      'UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid',
+      [userId]
+    );
+
+    revokeFamiliesInMemory({ userId });
+    await db.query(
+      `UPDATE agent_login_sessions
+          SET logout_time = COALESCE(logout_time, CURRENT_TIMESTAMP),
+              duration_seconds = CASE
+                WHEN logout_time IS NULL THEN GREATEST(0, EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - login_time))::int)
+                ELSE duration_seconds
+              END,
+              logout_reason = 'revoked'
+        WHERE user_id = $1::uuid
+          AND (logout_time IS NULL OR logout_reason IS NULL OR logout_reason NOT IN ('manual', 'password_changed', 'revoked'))`,
       [userId]
     );
 
     res.json({
       success: true,
-      message: 'User deactivated successfully'
+      message: 'User deactivated successfully',
     });
-
   } catch (error) {
     console.error('Delete user error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
-      error: error.message
+      error: error.message,
     });
   }
 });

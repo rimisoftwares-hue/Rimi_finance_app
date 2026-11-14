@@ -7,7 +7,17 @@ const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/clien
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const Jimp = require('jimp');
 const { db } = require('../../config/database.config');
-const { ownerOnly, ownerCheckFinance, enhancedCheckFinance } = require('../../middleware/auth.middleware');
+const {
+  ownerOnly,
+  ownerCheckFinance,
+  enhancedCheckFinance,
+  resolveOwnerFromRequest,
+} = require('../../middleware/auth.middleware');
+const {
+  issueUserAccessToken,
+  validateOwnerPrincipal,
+  validateUserPrincipal,
+} = require('../auth/sessionSecurity.service');
 const { ensureSystemGroups } = require('../accounting/ledgerGroup/group.service');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -103,68 +113,15 @@ const getSignedImageUrl = async (imageUrl, expiresIn = 86400) => {
 
 // ─── Helper: Authenticate & Bind Owner Dynamically ─────────────────────────────
 const resolveAuthenticatedOwner = async (req) => {
-  // 1. Owner-Authorization header (Primary for owner actions)
-  const ownerTokenHeader = req.headers['owner-authorization'] || req.headers['Owner-Authorization'];
-  if (ownerTokenHeader) {
-    try {
-      const token = ownerTokenHeader.replace(/^Bearer\s+/i, '').trim();
-      const decoded = jwt.verify(token, JWT_SECRET);
-      if (decoded?.owner?.id) {
-        const { rows } = await db.query(
-          'SELECT id, username FROM owner WHERE id = $1 AND is_active = 1',
-          [decoded.owner.id]
-        );
-        if (rows.length > 0) return rows[0];
-      }
-    } catch (err) {
-      console.warn('Owner-Authorization token verification failed:', err.message);
-    }
+  const ownerAuth = await resolveOwnerFromRequest(req);
+  if (!ownerAuth.isOwner || !ownerAuth.owner?.id) {
+    return null;
   }
-
-  // 2. Standard Authorization header
-  const authHeader = req.headers.authorization;
-  if (authHeader) {
-    try {
-      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-      const decoded = jwt.verify(token, JWT_SECRET);
-
-      if (decoded?.owner?.id) {
-        const { rows } = await db.query(
-          'SELECT id, username FROM owner WHERE id = $1 AND is_active = 1',
-          [decoded.owner.id]
-        );
-        if (rows.length > 0) return rows[0];
-      }
-
-      if (decoded?.user?.id) {
-        // Direct owner query by user ID
-        const { rows: ownerRows } = await db.query(
-          'SELECT id, username FROM owner WHERE id = $1 AND is_active = 1',
-          [decoded.user.id]
-        );
-        if (ownerRows.length > 0) return ownerRows[0];
-      }
-    } catch (err) {
-      console.warn('Authorization token verification failed:', err.message);
-    }
-  }
-
-  // 3. Fallback: owner_id passed explicitly from client (if verified in owner table)
-  if (req.body.owner_id) {
-    const { rows } = await db.query(
-      'SELECT id, username FROM owner WHERE id = $1 AND is_active = 1',
-      [req.body.owner_id]
-    );
-    if (rows.length > 0) return rows[0];
-  }
-
-  // 4. Default active owner
-  const { rows: defaultOwner } = await db.query(
-    'SELECT id, username FROM owner WHERE is_active = 1 LIMIT 1'
-  );
-  if (defaultOwner.length > 0) return defaultOwner[0];
-
-  return null;
+  return {
+    id: ownerAuth.owner.id,
+    username: ownerAuth.owner.username,
+    callingUserId: ownerAuth.user?.id || null,
+  };
 };
 
 // ─── Helper: Parse JSON or Array field safely ──────────────────────────────────
@@ -395,20 +352,29 @@ const handleCreateFinance = async (req, res) => {
         brandingAsset = brandingResult.rows[0];
       }
 
-      // 6. Update Owner's allowed companies in user_allowed_companies table
-      const { rows: ownerUsers } = await client.query(
-        `SELECT id FROM users WHERE id = $1`,
-        [String(authenticatedOwner.id)]
+      // 6. Grant existing owner-role users under this License access to the new company
+      const { rows: ownerRoleUsers } = await client.query(
+        `SELECT DISTINCT uac.user_id AS id
+           FROM user_allowed_companies uac
+           INNER JOIN finance_detail fd ON fd.id = uac.finance_id
+           INNER JOIN users u ON u.id = uac.user_id
+          WHERE fd.owner_id = $1::uuid
+            AND uac.role = 'owner'
+            AND uac.is_active = 1
+            AND u.is_active = 1`,
+        [authenticatedOwner.id]
       );
-      if (ownerUsers.length > 0) {
-        for (const u of ownerUsers) {
-          await client.query(
-            `INSERT INTO user_allowed_companies (user_id, finance_id, is_active)
-             VALUES ($1, $2, 1)
-             ON CONFLICT (user_id, finance_id) DO NOTHING`,
-            [u.id, financeId]
-          );
-        }
+      const ownerUserIdsToLink = new Set(ownerRoleUsers.map((u) => String(u.id)));
+      if (authenticatedOwner.callingUserId) {
+        ownerUserIdsToLink.add(String(authenticatedOwner.callingUserId));
+      }
+      for (const uid of ownerUserIdsToLink) {
+        await client.query(
+          `INSERT INTO user_allowed_companies (user_id, finance_id, role, is_active)
+           VALUES ($1::uuid, $2::uuid, 'owner', 1)
+           ON CONFLICT (user_id, finance_id) DO UPDATE SET role = 'owner', is_active = 1`,
+          [uid, financeId]
+        );
       }
 
       // 7. Audit log in recent_activity
@@ -483,111 +449,127 @@ const isWithinLoginWindow = (loginTimeFrom, loginTimeTo) => {
   }
 };
 
-// ─── Helper: Resolve Authenticated Owner or User Identity ─────────────────────
+// ─── Helper: Resolve Authenticated User or Owner Identity ─────────────────────
 const resolveAuthenticatedIdentity = async (req) => {
-  let token = null;
+  // 1. Prioritize standard Authorization header (active User session in both Direct User & License modes)
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  if (authHeader) {
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (token) {
+      let decoded;
+      try {
+        decoded = jwt.verify(token, JWT_SECRET);
+      } catch (err) {
+        const isExpired = err && err.name === 'TokenExpiredError';
+        return {
+          error: isExpired ? 'Token expired' : 'Invalid authentication token',
+          error_code: isExpired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
+          status: 401,
+        };
+      }
 
-  // 1. Owner-Authorization header
+      if (decoded?.tokenType === 'user_refresh') {
+        return {
+          error: 'Refresh token cannot be used as an access token',
+          error_code: 'INVALID_TOKEN_TYPE',
+          status: 401,
+        };
+      }
+
+      // User token (`users` principal, including owner-role users)
+      if (decoded?.user?.id) {
+        const check = await validateUserPrincipal(db, decoded, {
+          requireFinanceContext: false,
+          enforceLoginWindow: false,
+        });
+        if (!check.valid) {
+          return {
+            error: check.message,
+            error_code: check.error_code,
+            status: check.status || 401,
+          };
+        }
+
+        return {
+          isOwner: false,
+          authMode: check.authMode,
+          pwdFp: decoded.pwdFp || null,
+          sessionId: decoded.user.sessionId || null,
+          anchorSessionId: decoded.user.anchorSessionId || decoded.user.sessionId || null,
+          user: {
+            id: check.userRow.id,
+            username: check.userRow.username,
+            email: check.userRow.email,
+            phone_no: check.userRow.phone_no,
+            password: check.userRow.password,
+            role: check.selectedMembership?.role || decoded.user.role || 'agent',
+          },
+          currentFinanceId: decoded.user.current_finance_id || req.headers['finance-id'] || null,
+        };
+      }
+
+      // Owner token passed in Authorization header (e.g. pre-user-login License screen)
+      if (decoded?.owner?.id) {
+        const check = await validateOwnerPrincipal(db, decoded);
+        if (!check.valid) {
+          return {
+            error: check.message,
+            error_code: check.error_code,
+            status: check.status || 401,
+          };
+        }
+        return {
+          isOwner: true,
+          authMode: 'license',
+          owner: check.owner,
+          user: { id: check.owner.id, username: check.owner.username, role: 'owner' },
+          currentFinanceId: req.headers['finance-id'] || null,
+        };
+      }
+    }
+  }
+
+  // 2. Fallback: Owner-Authorization header (when no active User Authorization header exists)
   const ownerHeader = req.headers['owner-authorization'] || req.headers['Owner-Authorization'];
   if (ownerHeader) {
-    token = ownerHeader.replace(/^Bearer\s+/i, '').trim();
-  }
+    const ownerToken = ownerHeader.replace(/^Bearer\s+/i, '').trim();
+    if (ownerToken) {
+      let decoded;
+      try {
+        decoded = jwt.verify(ownerToken, JWT_SECRET);
+      } catch (err) {
+        const isExpired = err && err.name === 'TokenExpiredError';
+        return {
+          error: isExpired ? 'License token expired' : 'Invalid License token',
+          error_code: 'INVALID_OWNER_TOKEN',
+          status: 401,
+        };
+      }
 
-  // 2. Standard Authorization header
-  if (!token && req.headers.authorization) {
-    token = req.headers.authorization.replace(/^Bearer\s+/i, '').trim();
-  }
+      const check = await validateOwnerPrincipal(db, decoded);
+      if (!check.valid) {
+        return {
+          error: check.message,
+          error_code: check.error_code,
+          status: check.status || 401,
+        };
+      }
 
-  if (!token) {
-    return { error: 'Authentication token missing', status: 401 };
-  }
-
-  let decoded;
-  try {
-    decoded = jwt.verify(token, JWT_SECRET);
-  } catch (err) {
-    return { error: 'Invalid or expired token', status: 401 };
-  }
-
-  // Identity Option 1: Owner token (issued from owner-login)
-  if (decoded?.owner?.id) {
-    const { rows } = await db.query(
-      'SELECT id, username FROM owner WHERE id = $1 AND is_active = 1',
-      [decoded.owner.id]
-    );
-    if (rows.length > 0) {
       return {
         isOwner: true,
-        owner: rows[0],
-        user: { id: rows[0].id, username: rows[0].username, role: 'owner' },
+        authMode: 'license',
+        owner: check.owner,
+        user: { id: check.owner.id, username: check.owner.username, role: 'owner' },
         currentFinanceId: req.headers['finance-id'] || null,
       };
     }
   }
 
-  // Identity Option 2: User token with role === 'owner'
-  if (decoded?.user?.id && decoded.user.role === 'owner') {
-    const { rows: ownerRows } = await db.query(
-      'SELECT id, username FROM owner WHERE id = $1 AND is_active = 1',
-      [decoded.user.id]
-    );
-    if (ownerRows.length > 0) {
-      return {
-        isOwner: true,
-        owner: ownerRows[0],
-        user: decoded.user,
-        currentFinanceId: decoded.user.current_finance_id || req.headers['finance-id'] || null,
-      };
-    }
-  }
-
-  // Identity Option 3: User token (issued from user-login or login)
-  if (decoded?.user?.id) {
-    const { rows: userRows } = await db.query(
-      'SELECT id, username, email, phone_no, is_active FROM users WHERE id = $1 AND is_active = 1',
-      [decoded.user.id]
-    );
-    if (userRows.length > 0) {
-      return {
-        isOwner: false,
-        user: {
-          ...decoded.user,
-          ...userRows[0],
-        },
-        currentFinanceId: decoded.user.current_finance_id || req.headers['finance-id'] || null,
-      };
-    }
-  }
-
-  // Identity Option 4: Direct root id in decoded payload
-  if (decoded?.id && !decoded.user) {
-    const { rows: ownerRows } = await db.query(
-      'SELECT id, username FROM owner WHERE id = $1 AND is_active = 1',
-      [decoded.id]
-    );
-    if (ownerRows.length > 0) {
-      return {
-        isOwner: true,
-        owner: ownerRows[0],
-        user: { id: ownerRows[0].id, username: ownerRows[0].username, role: 'owner' },
-        currentFinanceId: req.headers['finance-id'] || null,
-      };
-    }
-
-    const { rows: userRows } = await db.query(
-      'SELECT id, username, email, phone_no, is_active FROM users WHERE id = $1 AND is_active = 1',
-      [decoded.id]
-    );
-    if (userRows.length > 0) {
-      return {
-        isOwner: false,
-        user: userRows[0],
-        currentFinanceId: req.headers['finance-id'] || null,
-      };
-    }
-  }
-
-  return { error: 'Authorized account not found or inactive', status: 401 };
+  return {
+    error: 'Authentication token missing',
+    error_code: 'NO_TOKEN',
+    status: 401,
+  };
 };
 
 // ─── GET /allowed-finances ─ List All Authorized Finances for Current Identity ─
@@ -598,6 +580,7 @@ router.get('/allowed-finances', async (req, res) => {
       return res.status(identity.status || 401).json({
         success: false,
         error: identity.error,
+        ...(identity.error_code ? { error_code: identity.error_code } : {}),
       });
     }
 
@@ -663,6 +646,7 @@ router.get('/allowed-finances', async (req, res) => {
           a.state
         FROM user_allowed_companies uac
         JOIN finance_detail fd ON fd.id = uac.finance_id
+        JOIN owner o ON o.id = fd.owner_id
         LEFT JOIN address_history ah ON ah.entity_type = 'finance' 
           AND ah.entity_id = fd.id::varchar 
           AND ah.is_current = 1
@@ -670,7 +654,7 @@ router.get('/allowed-finances', async (req, res) => {
         LEFT JOIN finance_branding_assets fba ON fba.finance_id = fd.id 
           AND fba.asset_type = 'web_logo' 
           AND fba.is_active = true
-        WHERE uac.user_id = $1 AND uac.is_active = 1 AND fd.is_active = 1
+        WHERE uac.user_id = $1 AND uac.is_active = 1 AND fd.is_active = 1 AND o.is_active = 1
         ORDER BY fd.finance_name ASC
       `, [identity.user.id]);
       rows = result.rows;
@@ -767,18 +751,21 @@ router.post('/switch', async (req, res) => {
       return res.status(identity.status || 401).json({
         success: false,
         error: identity.error,
+        ...(identity.error_code ? { error_code: identity.error_code } : {}),
       });
     }
 
-    // 1. Fetch Target Finance Company Details
+    // 1. Fetch Target Finance Company Details (including Owner License status)
     const { rows: financeRows } = await db.query(`
       SELECT 
         fd.id, fd.finance_name, fd.owner_id, fd.phone_numbers, fd.emails,
         fd.since, fd.established_date, fd.finance_photo, fd.is_active,
+        o.username AS owner_username, o.is_active AS owner_is_active,
         a.house_no, a.street, a.street_name, a.village, a.land_mark,
         a.address, a.city, a.district, a.state, a.pincode, a.location,
         fd.created_at, fd.updated_at
       FROM finance_detail fd
+      INNER JOIN owner o ON o.id = fd.owner_id
       LEFT JOIN address_history ah ON ah.entity_type = 'finance' 
         AND ah.entity_id = fd.id::varchar 
         AND ah.is_current = 1
@@ -795,6 +782,13 @@ router.post('/switch', async (req, res) => {
     }
 
     const targetFinance = financeRows[0];
+    if (Number(targetFinance.owner_is_active) !== 1) {
+      return res.status(401).json({
+        success: false,
+        error: 'The associated License is inactive',
+        error_code: 'LICENSE_INACTIVE',
+      });
+    }
     let companyRole = 'agent';
     let targetLoginFrom = null;
     let targetLoginTo = null;
@@ -880,7 +874,11 @@ router.post('/switch', async (req, res) => {
     let allowedCompanies = [targetFinanceId];
     if (!identity.isOwner && identity.user?.id) {
       const { rows: allUac } = await db.query(
-        'SELECT finance_id FROM user_allowed_companies WHERE user_id = $1 AND is_active = 1',
+        `SELECT uac.finance_id
+           FROM user_allowed_companies uac
+           INNER JOIN finance_detail fd ON fd.id = uac.finance_id
+           INNER JOIN owner o ON o.id = fd.owner_id
+          WHERE uac.user_id = $1 AND uac.is_active = 1 AND fd.is_active = 1 AND o.is_active = 1`,
         [identity.user.id]
       );
       allowedCompanies = allUac.map(r => String(r.finance_id));
@@ -892,26 +890,39 @@ router.post('/switch', async (req, res) => {
       allowedCompanies = allOwnerFin.map(r => String(r.id));
     }
 
-    // 7. Issue refreshed JWT token with new current_finance_id & role
-    const tokenPayload = {
-      user: {
-        id: identity.user.id,
-        username: identity.user.username,
-        email: identity.user.email,
+    // 7. Issue refreshed JWT token preserving authMode, sessionId, anchorSessionId, and pwdFp
+    let updatedToken;
+    if (!identity.isOwner) {
+      updatedToken = issueUserAccessToken({
+        user: identity.user,
         role: companyRole,
-        allowed_companies: allowedCompanies,
-        current_finance_id: targetFinanceId,
-        finance_name: targetFinance.finance_name,
-      }
-    };
-    if (identity.isOwner) {
-      tokenPayload.owner = {
-        id: identity.owner.id,
-        username: identity.owner.username,
+        allowedCompanies,
+        currentFinanceId: targetFinanceId,
+        financeName: targetFinance.finance_name,
+        sessionId: identity.sessionId || null,
+        anchorSessionId: identity.anchorSessionId || identity.sessionId || null,
+        authMode: identity.authMode || 'license',
+        pwdFp: identity.pwdFp || null,
+      });
+    } else {
+      const tokenPayload = {
+        tokenType: 'owner_license',
+        authMode: 'license',
+        owner: {
+          id: identity.owner.id,
+          username: identity.owner.username,
+        },
+        user: {
+          id: identity.user.id,
+          username: identity.user.username,
+          role: companyRole,
+          allowed_companies: allowedCompanies,
+          current_finance_id: targetFinanceId,
+          finance_name: targetFinance.finance_name,
+        },
       };
+      updatedToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '24h' });
     }
-
-    const updatedToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '24h' });
 
     // Format address
     const addressParts = [];
@@ -938,6 +949,7 @@ router.post('/switch', async (req, res) => {
         name: targetFinance.finance_name,
         finance_name: targetFinance.finance_name,
         owner_id: targetFinance.owner_id,
+        owner_username: targetFinance.owner_username || undefined,
         phone_numbers: parseArrayField(targetFinance.phone_numbers),
         emails: parseArrayField(targetFinance.emails),
         phone: parseArrayField(targetFinance.phone_numbers)[0] || '',

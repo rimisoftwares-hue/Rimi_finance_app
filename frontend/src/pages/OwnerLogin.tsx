@@ -1,565 +1,577 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import {
+  AlertCircle,
+  Eye,
+  EyeOff,
+  Info,
+  KeyRound,
+  Loader2,
+  Lock,
+  ShieldCheck,
+  User,
+} from 'lucide-react';
 import { useOwnerAuth } from '../contexts/OwnerAuthContext';
-import axios from 'axios';
+import { useAuth, LocationLoginPayload } from '../contexts/AuthContext';
+import apiClient from '../api/apiClient';
+import { useLoginLocation } from '../hooks/useLoginLocation';
+import { PermissionModal } from '../components/common/PermissionModal';
+import { ImageSlider, ImageSlideItem } from '../components/ui/image-slider';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { cn } from '../components/lib/utils';
 
-const OwnerLogin = () => {
-  const [username, setUsername] = useState('');
+type LoginMethodTab = 'license' | 'user';
+
+const SIGNUP_URL =
+  (import.meta.env.VITE_SIGNUP_URL as string | undefined)?.trim() ||
+  'https://rimio.in/autofinex';
+
+const SHOWCASE_SLIDES: ImageSlideItem[] = [
+  {
+    url: 'https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=1200&q=80',
+    title: 'Unified Lending & Collection Operations',
+    subtitle:
+      'Manage vehicle loans, consulting finance, EMI schedules, and daily field collections in one workspace.',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=80',
+    title: 'Real-Time Multi-Company Accounting',
+    subtitle:
+      'Switch seamlessly across finance branches with Tally-grade ledgers, daybooks, and executive analytics.',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=80',
+    title: 'Enterprise-Grade Access & Attendance Control',
+    subtitle:
+      'Role-scoped permissions, geofenced staff attendance, and instant security revocation built for scale.',
+  },
+];
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.08,
+      delayChildren: 0.1,
+    },
+  },
+};
+
+const itemVariants = {
+  hidden: { y: 14, opacity: 0 },
+  visible: {
+    y: 0,
+    opacity: 1,
+    transition: {
+      type: 'spring' as const,
+      stiffness: 120,
+      damping: 16,
+    },
+  },
+};
+
+const OwnerLogin: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<LoginMethodTab>('license');
+  const [licenseId, setLicenseId] = useState('');
+  const [userIdentifier, setUserIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
-  const [errorType, setErrorType] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [debugInfo, setDebugInfo] = useState<any>(null);
-  const [showDebug, setShowDebug] = useState(false);
-  const [backendStatus, setBackendStatus] = useState<'unknown' | 'connecting' | 'connected' | 'error'>('unknown');
+  const [infoNotice, setInfoNotice] = useState<string | null>(null);
+  const [locationNotice, setLocationNotice] = useState<string | null>(null);
+  const [policy, setPolicy] = useState<'strict' | 'prefer' | 'off'>('prefer');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { owner, ownerLogin, isLoading: authLoading } = useOwnerAuth();
+  const { ownerLoginDetailed } = useOwnerAuth();
+  const { directUserLogin } = useAuth();
   const navigate = useNavigate();
-  const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3004').replace(/\/+$/, '');
+  const loginLoc = useLoginLocation();
 
-  // Check backend status on component mount
+  // Fetch login location policy when User tab is selected
   useEffect(() => {
-    checkBackendStatus();
-  }, []);
+    if (activeTab !== 'user') return;
+    let cancelled = false;
 
-  const checkBackendStatus = async () => {
+    apiClient
+      .get<{ policy?: 'strict' | 'prefer' | 'off'; locationPolicy?: 'strict' | 'prefer' | 'off' }>(
+        '/auth/login-policy'
+      )
+      .then((res) => {
+        if (cancelled) return;
+        const resolved = res.data?.policy || res.data?.locationPolicy;
+        if (resolved === 'strict' || resolved === 'prefer' || resolved === 'off') {
+          setPolicy(resolved);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPolicy('prefer');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  const handleSelectTab = (tab: LoginMethodTab) => {
+    if (tab === activeTab || isSubmitting) return;
+    setActiveTab(tab);
+    setPassword('');
+    setShowPassword(false);
+    setError(null);
+    setInfoNotice(null);
+    setLocationNotice(null);
+  };
+
+  const handleForgotPassword = () => {
+    setError(null);
+    setInfoNotice('Password recovery will be available soon.');
+  };
+
+  const handleOpenSignUp = async () => {
     try {
-      setBackendStatus('connecting');
-      console.log('🔍 Checking backend status...');
-
-      const response = await axios.get(`${BASE_URL}/`, {
-        timeout: 3000
-      });
-
-      if (response.data) {
-        console.log('✅ Backend is connected:', response.data.message || 'Server is running');
-        setBackendStatus('connected');
-        setError(null);
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        const { open } = await import('@tauri-apps/plugin-shell');
+        await open(SIGNUP_URL);
+        return;
       }
-    } catch (error: any) {
-      console.error('❌ Backend connection failed:', error.message);
-      setBackendStatus('error');
-      setError('Backend server is not responding');
-      setErrorType('BACKEND_CONNECTION_FAILED');
+    } catch (err) {
+      console.warn('Tauri shell open fallback to browser:', err);
+    }
 
-      setDebugInfo({
-        timestamp: new Date().toISOString(),
-        error: error.message,
-        code: error.code,
-        url: `${BASE_URL}/`,
-        suggestions: [
-          'Check if backend server is running',
-          `Verify ${BASE_URL} is running and reachable`,
-          'Check if Node.js process is active'
-        ]
-      });
+    if (typeof window !== 'undefined') {
+      window.open(SIGNUP_URL, '_blank', 'noopener,noreferrer');
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLicenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setErrorType(null);
-    setDebugInfo(null);
-    setIsLoading(true);
+    setInfoNotice(null);
 
-    console.log('🚀 Starting owner login process...');
-    console.log('Username:', username);
-    console.log('Password length:', password?.length);
+    const trimmedLicenseId = licenseId.trim();
+    if (!trimmedLicenseId || !password) {
+      setError('License ID and password are required.');
+      return;
+    }
 
+    setIsSubmitting(true);
     try {
-      // Step 1: Validate inputs
-      if (!username.trim() || !password.trim()) {
-        throw new Error('Username and password are required');
+      const result = await ownerLoginDetailed(trimmedLicenseId, password);
+      if (result.success) {
+        navigate('/user-login', { replace: true });
+      } else {
+        setError(result.message || 'Invalid License ID or password.');
       }
-
-      // Step 2: Check backend status before attempting login
-      if (backendStatus === 'error') {
-        await checkBackendStatus();
-        if (backendStatus === 'error') {
-          throw new Error(`Cannot connect to backend server. Please ensure the server is running on ${BASE_URL}.`);
-        }
-      }
-
-      // Step 3: Try direct API call for debugging
-      console.log('🔐 Attempting owner login via direct API call...');
-
-      const startTime = Date.now();
-
-      // First try direct API call to see raw response
-      try {
-        const directResponse = await axios.post(`${BASE_URL}/api/auth/owner-login`, {
-          username,
-          password
-        }, {
-          timeout: 10000,
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        });
-
-        const endTime = Date.now();
-        const duration = endTime - startTime;
-
-        console.log('📥 Direct API Response:', {
-          status: directResponse.status,
-          data: directResponse.data,
-          duration: `${duration}ms`
-        });
-
-        if (directResponse.data.success) {
-          console.log('✅ Direct API login successful');
-
-          // Now use the context function to properly handle the login
-          console.log('🔄 Using ownerLogin context function...');
-          const contextSuccess = await ownerLogin(username, password);
-
-          if (contextSuccess) {
-            console.log('✅ Context login successful, navigating...');
-            // Navigate to user login
-            navigate('/user-login');
-          } else {
-            console.warn('⚠️ Context login failed despite API success');
-            setError('Login successful but session could not be established');
-            setErrorType('SESSION_ERROR');
-          }
-        } else {
-          console.warn('⚠️ API returned success: false');
-          setError(directResponse.data.message || 'Invalid credentials');
-          setErrorType('INVALID_CREDENTIALS');
-        }
-
-      } catch (apiError: any) {
-        console.error('💥 API Call Error:', {
-          message: apiError.message,
-          response: apiError.response?.data,
-          status: apiError.response?.status,
-          config: {
-            url: apiError.config?.url,
-            method: apiError.config?.method,
-            data: apiError.config?.data
-          }
-        });
-
-        // Handle specific error cases
-        if (apiError.code === 'ECONNREFUSED') {
-          setError(`Backend server is not running. Please start the server on ${BASE_URL}.`);
-          setErrorType('BACKEND_DOWN');
-        } else if (apiError.code === 'ENETUNREACH') {
-          setError('Network connection failed. Check your internet connection.');
-          setErrorType('NETWORK_ERROR');
-        } else if (apiError.code === 'ETIMEDOUT') {
-          setError('Request timed out. Server may be busy or not responding.');
-          setErrorType('TIMEOUT');
-        } else if (apiError.response) {
-          // Server responded with error status
-          const status = apiError.response.status;
-          const data = apiError.response.data;
-
-          switch (status) {
-            case 401:
-              if (data.error_code === 'OWNER_NOT_FOUND') {
-                setError(`Username "${username}" not found`);
-                setErrorType('USERNAME_NOT_FOUND');
-              } else if (data.error_code === 'INVALID_PASSWORD') {
-                setError('Password is incorrect');
-                setErrorType('WRONG_PASSWORD');
-              } else {
-                setError('Invalid username or password');
-                setErrorType('INVALID_CREDENTIALS');
-              }
-              break;
-
-            case 404:
-              setError('Login endpoint not found. Check backend routes.');
-              setErrorType('ENDPOINT_NOT_FOUND');
-              break;
-
-            case 500:
-              setError('Server error occurred. Please try again later.');
-              setErrorType('SERVER_ERROR');
-              break;
-
-            default:
-              setError(`Error ${status}: ${data.message || 'Unknown error'}`);
-              setErrorType(`HTTP_${status}`);
-          }
-        } else {
-          // Network or other error
-          setError(`Connection error: ${apiError.message}`);
-          setErrorType('CONNECTION_ERROR');
-        }
-
-        // Store debug info
-        setDebugInfo({
-          timestamp: new Date().toISOString(),
-          error: apiError.message,
-          code: apiError.code,
-          response: apiError.response?.data,
-          status: apiError.response?.status,
-          config: apiError.config
-        });
-      }
-
-    } catch (err: any) {
-      console.error('💥 Form submission error:', err);
-      setError(err.message || 'An unexpected error occurred');
-      setErrorType('FORM_ERROR');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to verify License credentials.');
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
-  const handleQuickTest = async () => {
+  const handleDirectUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError(null);
-    setErrorType(null);
-    setIsLoading(true);
+    setInfoNotice(null);
+    setLocationNotice(null);
 
-    console.log('🧪 Running quick test...');
+    const trimmedIdentifier = userIdentifier.trim();
+    if (!trimmedIdentifier || !password) {
+      setError('Username or phone number and password are required.');
+      return;
+    }
 
+    setIsSubmitting(true);
     try {
-      // Test 1: Backend connectivity
-      console.log('1. Testing backend connectivity...');
-      const healthResponse = await axios.get(`${BASE_URL}/`, { timeout: 3000 });
-      console.log('✅ Backend:', healthResponse.data);
+      let locationPayload: LocationLoginPayload | undefined = undefined;
 
-      // Test 2: Auth endpoint
-      console.log('2. Testing auth endpoint...');
-      const authResponse = await axios.get(`${BASE_URL}/api/auth/health`, { timeout: 3000 });
-      console.log('✅ Auth endpoint:', authResponse.data);
+      if (policy !== 'off') {
+        const locResult = await loginLoc.captureForLogin();
+        const hasCoords = locResult.latitude != null && locResult.longitude != null;
 
-      // Test 3: Test login with common test credentials
-      console.log('3. Testing with common credentials...');
-      const testCredentials = [
-        { username: 'admin', password: 'admin123' },
-        { username: 'owner', password: 'password' },
-        { username: 'test', password: 'test123' }
-      ];
-
-      for (const cred of testCredentials) {
-        try {
-          const testLogin = await axios.post(`${BASE_URL}/api/auth/owner-login`, cred, { timeout: 5000 });
-          if (testLogin.data.success) {
-            console.log(`✅ Found working credentials: ${cred.username}`);
-            setUsername(cred.username);
-            setPassword(cred.password);
-            setError('Test successful! Using found credentials.');
-            setErrorType('TEST_SUCCESS');
-            break;
-          }
-        } catch (testError) {
-          console.log(`❌ ${cred.username}: Failed`);
+        if (policy === 'strict' && !hasCoords) {
+          setError('Location access is required by your organization policy to log in.');
+          setIsSubmitting(false);
+          return;
         }
+
+        if (policy === 'prefer' && !hasCoords) {
+          setLocationNotice('Location is off; approximate location was recorded.');
+        }
+
+        locationPayload = {
+          latitude: locResult.latitude,
+          longitude: locResult.longitude,
+          accuracyM: locResult.accuracyM,
+          locationPermission: locResult.locationPermission,
+        };
       }
 
-      setDebugInfo({
-        backend: healthResponse.data,
-        auth: authResponse.data,
-        timestamp: new Date().toISOString()
-      });
-
-    } catch (testError: any) {
-      console.error('❌ Quick test failed:', testError);
-      setError('Test failed: ' + testError.message);
-      setErrorType('TEST_FAILED');
+      const result = await directUserLogin(trimmedIdentifier, password, locationPayload);
+      if (result.success) {
+        navigate('/', { replace: true });
+      } else if (result.error_code === 'LOCATION_REQUIRED') {
+        setError(result.message || 'Location access is required by policy.');
+        void loginLoc.captureForLogin();
+      } else {
+        setError(result.message || 'Invalid credentials or company access denied.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred during login.');
     } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const getErrorMessage = () => {
-    if (!error) return null;
-
-    switch (errorType) {
-      // case 'BACKEND_CONNECTION_FAILED':
-      // case 'BACKEND_DOWN':
-      //   return (
-      //     <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-      //       <div className="flex items-center">
-      //         <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      //           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-      //         </svg>
-      //         <h3 className="text-sm font-medium text-red-800">Backend Server Error</h3>
-      //       </div>
-      //       <p className="mt-2 text-sm text-red-700">{error}</p>
-      //       <div className="mt-3">
-      //         <h4 className="text-sm font-medium text-red-800">Troubleshooting Steps:</h4>
-      //         <ul className="mt-1 text-sm text-red-700 list-disc pl-5">
-      //           <li>Ensure backend server is running</li>
-      //           <li>Check if https://autofinex-desktop-api.rimio.in is available</li>
-      //           <li>Run <code className="bg-red-100 px-1 py-0.5 rounded">npm start</code> in backend directory</li>
-      //           <li>Verify Node.js is installed and running</li>
-      //         </ul>
-      //       </div>
-      //       <button
-      //         onClick={checkBackendStatus}
-      //         className="mt-3 inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-      //       >
-      //         Retry Connection
-      //       </button>
-      //     </div>
-      //   );
-
-      case 'USERNAME_NOT_FOUND':
-        return (
-          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="flex items-center">
-              <svg className="w-5 h-5 text-yellow-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <h3 className="text-sm font-medium text-yellow-800">Username Not Found</h3>
-            </div>
-            <p className="mt-2 text-sm text-yellow-700">{error}</p>
-            <div className="mt-2 text-sm text-yellow-600">
-              <p>Please check if:</p>
-              <ul className="list-disc pl-5 mt-1">
-                <li>Username is spelled correctly</li>
-                <li>Owner account exists in database</li>
-                <li>Account is active (is_active = TRUE)</li>
-              </ul>
-            </div>
-          </div>
-        );
-
-      case 'WRONG_PASSWORD':
-        return (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center">
-              <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-              <h3 className="text-sm font-medium text-red-800">Incorrect Password</h3>
-            </div>
-            <p className="mt-2 text-sm text-red-700">{error}</p>
-            <p className="mt-2 text-sm text-red-600">
-              Make sure you're using the correct password. Passwords are case-sensitive.
-            </p>
-          </div>
-        );
-
-      case 'NETWORK_ERROR':
-      case 'CONNECTION_ERROR':
-        return (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center">
-              <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
-              </svg>
-              <h3 className="text-sm font-medium text-red-800">Network Error</h3>
-            </div>
-            <p className="mt-2 text-sm text-red-700">{error}</p>
-            <div className="mt-2 text-sm text-red-600">
-              <p>Check your network connection and try again.</p>
-            </div>
-          </div>
-        );
-
-      case 'SERVER_ERROR':
-        return (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center">
-              <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-              </svg>
-              <h3 className="text-sm font-medium text-red-800">Server Error</h3>
-            </div>
-            <p className="mt-2 text-sm text-red-700">{error}</p>
-            <p className="mt-2 text-sm text-red-600">
-              The server encountered an error. Please try again or contact support.
-            </p>
-          </div>
-        );
-
-      // default:
-      //   return (
-      //     <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-      //       <div className="flex items-center">
-      //         <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      //           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-      //         </svg>
-      //         <h3 className="text-sm font-medium text-red-800">Error</h3>
-      //       </div>
-      //       <p className="mt-2 text-sm text-red-700">{error}</p>
-      //     </div>
-      //   );
-    }
-  };
-
-  const getBackendStatusBadge = () => {
-    switch (backendStatus) {
-      case 'connected':
-        return (
-          <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-            <span className="w-2 h-2 mr-1 bg-green-500 rounded-full"></span>
-            Backend Connected
-          </div>
-        );
-      case 'connecting':
-        return (
-          <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-            <span className="w-2 h-2 mr-1 bg-yellow-500 rounded-full animate-pulse"></span>
-            Connecting...
-          </div>
-        );
-      case 'error':
-        return (
-          <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-            <span className="w-2 h-2 mr-1 bg-red-500 rounded-full"></span>
-            Backend Offline
-          </div>
-        );
-      default:
-        return (
-          <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-            <span className="w-2 h-2 mr-1 bg-gray-500 rounded-full"></span>
-            Unknown Status
-          </div>
-        );
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-4" data-tauri-drag-region>
-      <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-200">
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-            </svg>
-          </div>
-          <h2 className="text-3xl font-bold text-gray-900">Owner Login</h2>
-          <p className="text-gray-600 mt-2">Access your finance companies dashboard</p>
-
-          <div className="mt-4">
-            {getBackendStatusBadge()}
-          </div>
+    <div
+      className="min-h-screen w-full flex items-center justify-center bg-background p-4 sm:p-6 overflow-x-hidden select-none"
+      data-tauri-drag-region
+    >
+      <motion.div
+        className="w-full max-w-5xl lg:h-[640px] grid grid-cols-1 lg:grid-cols-2 rounded-2xl overflow-hidden shadow-2xl border border-border bg-card"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        initial={{ opacity: 0, scale: 0.97 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.4, ease: 'easeOut' }}
+      >
+        {/* Left Side: Branded Visual Showcase Slider */}
+        <div className="hidden lg:block h-full">
+          <ImageSlider
+            images={SHOWCASE_SLIDES}
+            interval={4500}
+            overlayContent={
+              <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/15">
+                <ShieldCheck className="h-4 w-4 text-blue-400" />
+                <span className="text-xs font-semibold tracking-wide text-white">
+                  AutoFinex &middot; Rimi Software
+                </span>
+              </div>
+            }
+          />
         </div>
 
-        {backendStatus === 'error' && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-                <span className="text-sm font-medium text-red-800">Backend Server Offline</span>
-              </div>
-              <button
-                onClick={checkBackendStatus}
-                className="text-sm text-red-600 hover:text-red-800 font-medium"
-              >
-                Retry
-              </button>
-            </div>
-            <p className="mt-2 text-sm text-red-600">
-              The backend server is not responding. You cannot login until the server is running.
-            </p>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit}>
-          {/* Error Display */}
-          {error && getErrorMessage()}
-
-          {/* Username Field */}
-          <div className="mb-6">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              <div className="flex items-center">
-                <svg className="w-4 h-4 text-gray-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Username
-              </div>
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className={`block w-full pl-10 pr-3 py-3 border rounded-lg focus:ring-2 focus:ring-offset-1 transition-colors ${errorType === 'USERNAME_NOT_FOUND'
-                  ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
-                  : 'border-gray-300 focus:border-blue-500 focus:ring-blue-200'
-                  }`}
-                placeholder="Enter owner username"
-                required
-                disabled={isLoading || backendStatus === 'error'}
-                autoComplete="username"
-              />
-            </div>
-            {errorType === 'USERNAME_NOT_FOUND' && (
-              <p className="mt-1 text-xs text-red-600">
-                This username was not found in the database.
-              </p>
-            )}
-          </div>
-
-          {/* Password Field */}
-          <div className="mb-6">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              <div className="flex items-center">
-                <svg className="w-4 h-4 text-gray-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-                Password
-              </div>
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                </svg>
-              </div>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={`block w-full pl-10 pr-3 py-3 border rounded-lg focus:ring-2 focus:ring-offset-1 transition-colors ${errorType === 'WRONG_PASSWORD'
-                  ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
-                  : 'border-gray-300 focus:border-blue-500 focus:ring-blue-200'
-                  }`}
-                placeholder="Enter your password"
-                required
-                disabled={isLoading || backendStatus === 'error'}
-                autoComplete="current-password"
-              />
-            </div>
-            {errorType === 'WRONG_PASSWORD' && (
-              <p className="mt-1 text-xs text-red-600">
-                The password you entered is incorrect.
-              </p>
-            )}
-          </div>
-
-          {/* Login Button */}
-          <button
-            type="submit"
-            disabled={isLoading || backendStatus === 'error'}
-            className={`w-full py-3 px-4 font-medium rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-200 flex items-center justify-center ${isLoading || backendStatus === 'error'
-              ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
-              : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 focus:ring-blue-500 shadow-md hover:shadow-lg'
-              }`}
+        {/* Right Side: Unified Authentication Card */}
+        <div className="w-full h-full bg-card text-card-foreground flex flex-col items-center justify-center p-6 sm:p-8 md:p-10">
+          <motion.div
+            className="w-full max-w-sm"
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
           >
-            {isLoading ? (
-              <>
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Logging in...
-              </>
-            ) : backendStatus === 'error' ? (
-              'Server Offline'
-            ) : (
-              'Login as Owner'
+            {/* Mobile Brand Pill */}
+            <motion.div variants={itemVariants} className="lg:hidden mb-5 flex items-center gap-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>AutoFinex</span>
+              </div>
+            </motion.div>
+
+            {/* Heading & Dynamic Subtitle */}
+            <motion.div variants={itemVariants} className="mb-6">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+                Welcome Back
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1.5">
+                {activeTab === 'license'
+                  ? 'Enter your License ID to activate your workspace.'
+                  : 'Sign in directly with your username or phone number.'}
+              </p>
+            </motion.div>
+
+            {/* Authentication Method Selector Tabs */}
+            <motion.div
+              variants={itemVariants}
+              role="tablist"
+              aria-label="Authentication Mode"
+              className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-muted/70 border border-border mb-6"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'license'}
+                onClick={() => handleSelectTab('license')}
+                className={cn(
+                  'flex items-center justify-center gap-2 h-9 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer',
+                  activeTab === 'license'
+                    ? 'bg-background text-foreground shadow-sm border border-border/80'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <KeyRound className="h-4 w-4 shrink-0" />
+                <span>License</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'user'}
+                onClick={() => handleSelectTab('user')}
+                className={cn(
+                  'flex items-center justify-center gap-2 h-9 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer',
+                  activeTab === 'user'
+                    ? 'bg-background text-foreground shadow-sm border border-border/80'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <User className="h-4 w-4 shrink-0" />
+                <span>User</span>
+              </button>
+            </motion.div>
+
+            {/* Error Banner */}
+            {error && (
+              <div
+                role="alert"
+                className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 flex items-start gap-2.5 text-xs sm:text-sm text-destructive"
+              >
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span className="leading-snug">{error}</span>
+              </div>
             )}
-          </button>
-        </form>
-      </div>
+
+            {/* Info Banner (Forgot Password Notice) */}
+            {infoNotice && (
+              <div
+                role="status"
+                className="mb-4 rounded-xl border border-primary/25 bg-primary/10 px-3.5 py-2.5 flex items-start gap-2.5 text-xs sm:text-sm text-foreground"
+              >
+                <Info className="h-4 w-4 shrink-0 mt-0.5 text-primary" />
+                <span className="leading-snug">{infoNotice}</span>
+              </div>
+            )}
+
+            {/* Mode A: License Login Form */}
+            {activeTab === 'license' ? (
+              <motion.form
+                key="license-form"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+                onSubmit={handleLicenseSubmit}
+                className="space-y-4"
+              >
+                <div className="space-y-1.5">
+                  <Label htmlFor="license-id">License ID</Label>
+                  <div className="relative">
+                    <KeyRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="license-id"
+                      name="licenseId"
+                      type="text"
+                      autoComplete="username"
+                      value={licenseId}
+                      onChange={(e) => setLicenseId(e.target.value)}
+                      placeholder="Enter your License ID"
+                      className="pl-9 h-10 rounded-xl"
+                      disabled={isSubmitting}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="license-password">Password</Label>
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-xs font-medium text-primary hover:underline focus:outline-none cursor-pointer"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="license-password"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="pl-9 pr-10 h-10 rounded-xl"
+                      disabled={isSubmitting}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus:outline-none cursor-pointer"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full h-10 rounded-xl font-medium mt-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Verifying License...
+                    </>
+                  ) : (
+                    'Continue with License'
+                  )}
+                </Button>
+              </motion.form>
+            ) : (
+              /* Mode B: Direct User Login Form */
+              <motion.form
+                key="direct-user-form"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+                onSubmit={handleDirectUserSubmit}
+                className="space-y-4"
+              >
+                <div className="space-y-1.5">
+                  <Label htmlFor="user-identifier">Username or Phone Number</Label>
+                  <div className="relative">
+                    <User className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="user-identifier"
+                      name="identifier"
+                      type="text"
+                      autoComplete="username"
+                      value={userIdentifier}
+                      onChange={(e) => setUserIdentifier(e.target.value)}
+                      placeholder="Enter username or phone number"
+                      className="pl-9 h-10 rounded-xl"
+                      disabled={isSubmitting}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="user-password">Password</Label>
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-xs font-medium text-primary hover:underline focus:outline-none cursor-pointer"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="user-password"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="pl-9 pr-10 h-10 rounded-xl"
+                      disabled={isSubmitting}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus:outline-none cursor-pointer"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Location Status Indicator (when attendance location policy is active) */}
+                {policy !== 'off' && (
+                  <div className="flex items-center justify-between text-xs px-1 text-muted-foreground">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          'w-2 h-2 rounded-full',
+                          loginLoc.status === 'granted' ? 'bg-emerald-500' : 'bg-amber-500'
+                        )}
+                      />
+                      <span>
+                        Location:{' '}
+                        <strong className="font-semibold text-foreground">
+                          {loginLoc.status === 'granted' ? 'Enabled' : 'Off'}
+                        </strong>
+                      </span>
+                    </div>
+                    {loginLoc.status !== 'granted' && (
+                      <button
+                        type="button"
+                        onClick={() => void loginLoc.captureForLogin()}
+                        className="text-primary hover:underline font-medium cursor-pointer"
+                      >
+                        Enable
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {locationNotice && (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                    {locationNotice}
+                  </div>
+                )}
+
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full h-10 rounded-xl font-medium mt-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Signing in...
+                    </>
+                  ) : (
+                    'Log In'
+                  )}
+                </Button>
+              </motion.form>
+            )}
+
+            {/* Sign Up External Link */}
+            <motion.p
+              variants={itemVariants}
+              className="text-center text-sm text-muted-foreground mt-6"
+            >
+              Don&apos;t have an account?{' '}
+              <button
+                type="button"
+                onClick={handleOpenSignUp}
+                className="font-semibold text-primary hover:underline focus:outline-none cursor-pointer"
+              >
+                Sign up
+              </button>
+            </motion.p>
+          </motion.div>
+        </div>
+      </motion.div>
+
+      <PermissionModal
+        open={loginLoc.flow.phase === 'soft' || loginLoc.flow.phase === 'blocked'}
+        type="location"
+        mode={loginLoc.flow.phase === 'blocked' ? 'blocked' : 'soft'}
+        busy={loginLoc.flow.phase === 'requesting'}
+        onAllow={loginLoc.flow.onAllow}
+        onCancel={loginLoc.flow.onCancel}
+        onRetry={loginLoc.flow.retryAfterSettings}
+      />
     </div>
   );
 };
