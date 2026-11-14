@@ -69,10 +69,10 @@ export default function Insights() {
 
   return (
     <div className="space-y-5 p-1">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-start justify-between">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-black text-foreground">Customer Locator — Insights</h1>
-          <p className="text-sm text-muted-foreground">Live portfolio risk distribution, aging buckets & location concentration</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Customer Locator — Insights</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Live portfolio risk distribution, aging buckets & location concentration</p>
         </div>
         <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh

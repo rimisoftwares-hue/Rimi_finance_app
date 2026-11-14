@@ -244,13 +244,15 @@ export default function Bill() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold text-foreground">Bill Report</h1>
-        <p className="text-muted-foreground mt-1">Receipt-wise billing breakdown with status tracking</p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Bill Report</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Receipt-wise billing breakdown with status tracking</p>
+        </div>
       </motion.div>
 
       {/* Filters */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="dashboard-card">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="dashboard-card !p-4 hover:translate-y-0">
         <div className="flex flex-wrap items-end gap-4">
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">From Date</label>
@@ -295,48 +297,51 @@ export default function Bill() {
       </motion.div>
 
       {/* Table */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full text-left border-collapse">
             <thead className="sticky top-0 z-10">
               <tr className="border-b border-border bg-secondary/50">
-                {["Receipt No", "HPL No", "Customer", "Status", "Date", "Total", "Principal", "Interest", "Penalty", "Mode", "Options", "Created By", "Altered By"].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 whitespace-nowrap">{h}</th>
-                ))}
+                {["Receipt No", "HPL No", "Customer", "Status", "Date", "Total", "Principal", "Interest", "Penalty", "Mode", "Options", "Created By", "Altered By"].map(h => {
+                  const isNumeric = ["Total", "Principal", "Interest", "Penalty"].includes(h);
+                  return (
+                    <th key={h} className={`${isNumeric ? "text-right" : "text-left"} text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 whitespace-nowrap`}>{h}</th>
+                  );
+                })}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-border/50">
               {loading ? (
                 <TableSkeletonRows columns={13} rows={6} />
               ) : error ? (
-                <tr className="border-b border-border/50">
-                  <td colSpan={13} className="px-4 py-3 text-center text-sm text-expense">{error}</td>
+                <tr>
+                  <td colSpan={13} className="px-4 py-6 text-center text-sm text-expense">{error}</td>
                 </tr>
               ) : filtered.length === 0 ? (
-                <tr className="border-b border-border/50">
-                  <td colSpan={13} className="px-4 py-3 text-center text-sm text-muted-foreground">No records found</td>
+                <tr>
+                  <td colSpan={13} className="px-4 py-6 text-center text-sm text-muted-foreground">No records found</td>
                 </tr>
               ) : (
                 paginatedBills.map((r, i) => (
-                  <motion.tr key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.02 * i }} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+                  <motion.tr key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.02 * i }} className="hover:bg-secondary/40 transition-colors">
                     <td className="px-4 py-3 text-sm font-medium text-primary">{r.receiptNo}</td>
                     <td className="px-4 py-3 text-sm font-medium text-foreground">{r.hpAcNo}</td>
                     <td className="px-4 py-3 text-sm font-medium text-foreground">{r.customer}</td>
-                    <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full font-medium ${statusBadge[r.status] || ""}`}>{r.status}</span></td>
+                    <td className="px-4 py-3 text-sm"><span className={`text-xs px-2 py-1 rounded-full font-medium ${statusBadge[r.status] || ""}`}>{r.status}</span></td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">{r.date}</td>
                     <td className="px-4 py-3 text-sm font-semibold text-foreground text-right">₹{fmt(r.total)}</td>
                     <td className="px-4 py-3 text-sm text-foreground text-right">₹{fmt(r.principal)}</td>
                     <td className="px-4 py-3 text-sm text-foreground text-right">₹{fmt(r.interest)}</td>
                     <td className="px-4 py-3 text-sm text-warning text-right">{r.penalty > 0 ? `₹${fmt(r.penalty)}` : "—"}</td>
-                    <td className="px-4 py-3"><Badge variant={r.mode === "Cash" ? "default" : "secondary"} className="text-xs">{r.mode}</Badge></td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-sm"><Badge variant={r.mode === "Cash" ? "default" : "secondary"} className="text-xs">{r.mode}</Badge></td>
+                    <td className="px-4 py-3 text-sm">
                       <span className="text-xs text-muted-foreground">—</span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-sm">
                       <div className="text-sm font-medium text-foreground">{r.createdBy || "—"}</div>
                       {r.createdTime && <div className="text-xs text-muted-foreground">{r.createdTime}</div>}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-sm">
                       {r.status === "Cancelled" && r.cancelledBy ? (
                         <div>
                           <div className="text-sm font-medium text-expense">Cancelled by {r.cancelledBy}</div>
@@ -352,19 +357,21 @@ export default function Bill() {
                 ))
               )}
             </tbody>
-            <tfoot>
-              <tr className="bg-income/10 font-bold">
-                <td colSpan={5} className="px-4 py-3 text-sm text-foreground">Total ({filtered.length} records)</td>
-                <td className="px-4 py-3 text-sm text-foreground text-right font-bold">₹{fmt(totals.total)}</td>
-                <td className="px-4 py-3 text-sm text-foreground text-right font-bold">₹{fmt(totals.principal)}</td>
-                <td className="px-4 py-3 text-sm text-foreground text-right font-bold">₹{fmt(totals.interest)}</td>
-                <td className="px-4 py-3 text-sm text-warning text-right font-bold">₹{fmt(totals.penalty)}</td>
-                <td colSpan={4}></td>
-              </tr>
-            </tfoot>
+            {!loading && !error && filtered.length > 0 && (
+              <tfoot className="bg-secondary/60 border-t-2 border-border font-bold">
+                <tr>
+                  <td colSpan={5} className="px-4 py-3 text-sm text-foreground">Total ({filtered.length} records)</td>
+                  <td className="px-4 py-3 text-sm text-foreground text-right font-bold">₹{fmt(totals.total)}</td>
+                  <td className="px-4 py-3 text-sm text-foreground text-right font-bold">₹{fmt(totals.principal)}</td>
+                  <td className="px-4 py-3 text-sm text-foreground text-right font-bold">₹{fmt(totals.interest)}</td>
+                  <td className="px-4 py-3 text-sm text-warning text-right font-bold">₹{fmt(totals.penalty)}</td>
+                  <td colSpan={4}></td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
-        {!loading && !error && totalItems > 0 && (
+        {!loading && !error && (
           <TablePagination
             page={page}
             totalPages={totalPages}
@@ -374,7 +381,6 @@ export default function Bill() {
             endIndex={endIndex}
             onPageChange={setPage}
             onPageSizeChange={setPageSize}
-            pageSizeOptions={[15, 25, 50]}
             disabled={loading}
           />
         )}

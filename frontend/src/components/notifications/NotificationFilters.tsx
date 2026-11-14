@@ -9,18 +9,28 @@ import {
   AlertTriangle, 
   Archive, 
   Search,
-  X
+  X,
+  KeyRound,
+  RotateCw,
+  CheckCheck
 } from 'lucide-react';
 import { NotificationCategory, NotificationFilterCounts } from '../../types/notification';
 import { Input } from '../ui/input';
+import { Button } from '../ui/button';
 
-interface NotificationFiltersProps {
+export interface NotificationFiltersProps {
   selectedCategory: NotificationCategory;
   onSelectCategory: (category: NotificationCategory) => void;
   counts: NotificationFilterCounts;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   filteredCount?: number;
+  onJoinCodeClick?: () => void;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
+  isLoading?: boolean;
+  onMarkAllAsRead?: () => void;
+  unreadCount?: number;
 }
 
 export const NotificationFilters: React.FC<NotificationFiltersProps> = ({
@@ -30,6 +40,12 @@ export const NotificationFilters: React.FC<NotificationFiltersProps> = ({
   searchQuery,
   onSearchChange,
   filteredCount,
+  onJoinCodeClick,
+  onRefresh,
+  isRefreshing = false,
+  isLoading = false,
+  onMarkAllAsRead,
+  unreadCount = 0,
 }) => {
   const filterTabs: Array<{
     id: NotificationCategory;
@@ -48,50 +64,66 @@ export const NotificationFilters: React.FC<NotificationFiltersProps> = ({
 
   return (
     <div className="space-y-3.5">
-      {/* ─── Row 2: Search Toolbar (Above Filter Tabs, Aligned Right) ─── */}
+      {/* ─── Row 2: Search Toolbar & Global Actions ─── */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        {/* Left: Results counter and active search pill */}
-        <div className="flex items-center gap-2 text-xs text-muted-foreground min-h-[36px]">
-          {filteredCount !== undefined && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-card border border-border/80 font-medium text-foreground">
-              <span className="font-semibold text-primary">{filteredCount}</span>
-              <span>{filteredCount === 1 ? 'notification' : 'notifications'}</span>
-            </span>
-          )}
-
-          {searchQuery && (
-            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span>matching</span>
-              <span className="font-semibold text-foreground truncate max-w-[140px] sm:max-w-[200px]">
-                "{searchQuery}"
-              </span>
-              <button
-                onClick={() => onSearchChange('')}
-                className="text-primary hover:underline ml-0.5 font-medium cursor-pointer"
-              >
-                Clear
-              </button>
-            </span>
-          )}
-        </div>
-
-        {/* Right: Search Input with clear placeholder */}
-        <div className="relative w-full sm:w-[380px] lg:w-[440px] flex-shrink-0">
+        {/* Left: Search Input */}
+        <div className="relative w-full sm:w-[340px] md:w-[380px] lg:w-[420px] flex-shrink-0">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/80 pointer-events-none" />
           <Input
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search notifications by customer, payment, agent, or reference ID..."
-            className="pl-9 pr-9 h-9 text-xs sm:text-sm rounded-xl bg-card border-border/80 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/60 transition-all shadow-sm"
+            className="pl-9 pr-9 h-9 text-xs sm:text-sm rounded-xl bg-card border-border/80 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/60 transition-all shadow-2xs"
           />
           {searchQuery && (
             <button
               onClick={() => onSearchChange('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground rounded-full hover:bg-secondary transition-colors"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground rounded-full hover:bg-secondary transition-colors cursor-pointer"
               title="Clear search"
+              type="button"
             >
               <X className="h-3.5 w-3.5" />
             </button>
+          )}
+        </div>
+
+        {/* Right: Actions Toolbar (Join with Code, Refresh & Mark All as Read) */}
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap sm:flex-nowrap justify-start sm:justify-end">
+          {onJoinCodeClick && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onJoinCodeClick}
+              className="h-9 px-3.5 rounded-xl border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+            >
+              <KeyRound className="h-3.5 w-3.5 mr-2 text-primary" />
+              <span>Join with Code</span>
+            </Button>
+          )}
+
+          {onRefresh && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRefresh}
+              disabled={isRefreshing || isLoading}
+              className="h-9 px-3.5 rounded-xl border-border/80 hover:bg-secondary text-xs font-medium transition-all shadow-2xs cursor-pointer"
+            >
+              <RotateCw className={`h-3.5 w-3.5 mr-2 ${isRefreshing ? 'animate-spin text-primary' : 'text-muted-foreground'}`} />
+              <span>Refresh</span>
+            </Button>
+          )}
+
+          {onMarkAllAsRead && unreadCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onMarkAllAsRead}
+              className="h-9 px-3.5 rounded-xl border-border/80 hover:bg-primary/5 hover:border-primary/40 text-xs font-medium text-foreground hover:text-primary transition-all shadow-2xs cursor-pointer"
+            >
+              <CheckCheck className="h-4 w-4 mr-2 text-primary" />
+              <span>Mark all as read</span>
+            </Button>
           )}
         </div>
       </div>

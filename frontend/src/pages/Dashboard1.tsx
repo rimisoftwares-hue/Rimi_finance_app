@@ -47,8 +47,8 @@ export default function Dashboard1() {
     return (
       <div className="space-y-6 animate-fade-in">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
             Loading dashboard data...
           </p>
         </div>
@@ -65,8 +65,8 @@ export default function Dashboard1() {
     <div className="space-y-6 animate-fade-in">
       {/* Page Header */}
       <div>
-        <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
+        <p className="text-muted-foreground mt-1 text-sm">
           Welcome back! Here's what's happening with your finance business.
         </p>
       </div>

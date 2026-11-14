@@ -737,7 +737,7 @@ export default function InvitePage() {
   return (
     <div className="space-y-6 pb-10">
       {/* ─── HEADER ───────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
           <Button
             variant="outline"
@@ -749,9 +749,9 @@ export default function InvitePage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Invitations</h1>
-            <p className="text-xs text-muted-foreground">
-              Create shareable invite codes or send direct invitations to existing AutoFinex users.
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Invitations</h1>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Create shareable invite codes or send direct invitations to existing AutoFinex users
             </p>
           </div>
         </div>

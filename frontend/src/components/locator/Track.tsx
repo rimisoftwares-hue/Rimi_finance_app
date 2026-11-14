@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   Search, MapPin, AlertTriangle, Navigation, Users,
@@ -6,7 +6,6 @@ import {
 } from "lucide-react";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
-import { Card } from "../ui/card";
 import { Skeleton } from "../ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { CustomerDeepView, DeepViewCustomerSeed } from "../CustomerDeepView";
@@ -14,12 +13,14 @@ import { getRiskBadgeVariant } from "../data/customerLocatorData";
 import {
   fetchLocatorOverview, getRiskErrorMessage, LocatorCustomer, LocatorOverviewResponse, RiskLevelFilter,
 } from "../../api/riskApi";
+import { useClientPagination } from "../../hooks/useClientPagination";
+import { TablePagination } from "../common/table/TablePagination";
 
 const formatINR = (val: number) => `₹${Math.round(Number(val || 0)).toLocaleString("en-IN")}`;
 
 function KPICard({ label, value, icon: Icon, color }: { label: string; value: string | number; icon: React.ElementType; color: string }) {
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="p-4 rounded-2xl border border-border bg-card shadow-sm hover:shadow-md transition-shadow">
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="dashboard-card !p-4">
       <div className="flex items-center gap-3">
         <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${color}`}>
           <Icon className="h-5 w-5" />
@@ -163,16 +164,31 @@ export default function CustomerTrack() {
     setDeepViewOpen(true);
   }, []);
 
-  const customers = data?.customers ?? [];
+  const customers = useMemo(() => data?.customers ?? [], [data]);
   const summary = data?.summary;
   const initialLoading = loading && !data;
 
+  const {
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    paginatedItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(customers, {
+    initialPageSize: 15,
+    resetKey: `${debouncedSearch}|${riskFilter}`,
+  });
+
   return (
     <div className="space-y-5 p-1">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-black text-foreground">Customer Locator — Track</h1>
-          <p className="text-sm text-muted-foreground">Live portfolio location intelligence & verified overdue risk</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Customer Locator — Track</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Live portfolio location intelligence & verified overdue risk</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
           <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} /> Refresh
@@ -212,9 +228,9 @@ export default function CustomerTrack() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KPICard label="Active Portfolio" value={initialLoading ? "—" : (summary?.filteredCount ?? 0)} icon={Users} color="bg-primary/10 text-primary" />
-        <KPICard label="High / Critical Risk" value={initialLoading ? "—" : ((summary?.criticalAlerts ?? 0) + (summary?.highAlerts ?? 0))} icon={AlertTriangle} color="bg-red-100 text-red-600" />
-        <KPICard label="Avg GPS Distance" value={initialLoading ? "—" : (summary?.avgDistanceKm != null ? `${summary.avgDistanceKm} KM` : "—")} icon={Navigation} color="bg-yellow-100 text-yellow-700" />
-        <KPICard label="Active Risk Alerts" value={initialLoading ? "—" : (summary?.totalAlerts ?? 0)} icon={AlertTriangle} color="bg-orange-100 text-orange-600" />
+        <KPICard label="High / Critical Risk" value={initialLoading ? "—" : ((summary?.criticalAlerts ?? 0) + (summary?.highAlerts ?? 0))} icon={AlertTriangle} color="bg-red-500/10 text-red-600 dark:text-red-400" />
+        <KPICard label="Avg GPS Distance" value={initialLoading ? "—" : (summary?.avgDistanceKm != null ? `${summary.avgDistanceKm} KM` : "—")} icon={Navigation} color="bg-amber-500/10 text-amber-700 dark:text-amber-400" />
+        <KPICard label="Active Risk Alerts" value={initialLoading ? "—" : (summary?.totalAlerts ?? 0)} icon={AlertTriangle} color="bg-orange-500/10 text-orange-600 dark:text-orange-400" />
       </div>
 
       {/* Split: Map + Customer Card */}
@@ -231,7 +247,7 @@ export default function CustomerTrack() {
               onClose={() => setSelectedCustomer(null)}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center py-12 text-muted-foreground rounded-2xl border border-border bg-card/50">
+            <div className="dashboard-card hover:translate-y-0 flex flex-col items-center justify-center h-full text-center py-12 text-muted-foreground">
               <MapPin className="h-8 w-8 mb-2 opacity-40" />
               <p className="text-sm">Select a marker or table row to inspect customer details</p>
             </div>
@@ -240,67 +256,67 @@ export default function CustomerTrack() {
       </div>
 
       {/* Customer Table */}
-      <Card className="p-0 overflow-hidden border border-border">
+      <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-border bg-secondary/50">
                 {["Customer", "HPL No", "Vehicle", "Distance", "Risk", "Overdue EMI", "Agent", "Action"].map((h) => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">{h}</th>
+                  <th key={h} className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-border/50">
               {initialLoading && Array.from({ length: 4 }).map((_, i) => (
-                <tr key={i} className="border-b border-border">
+                <tr key={i}>
                   {Array.from({ length: 8 }).map((__, j) => (
-                    <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
+                    <td key={j} className="px-4 py-3 text-sm"><Skeleton className="h-4 w-24" /></td>
                   ))}
                 </tr>
               ))}
               {!initialLoading && error && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-red-600">{error}</td>
+                  <td colSpan={8} className="px-4 py-8 text-sm text-center text-destructive">{error}</td>
                 </tr>
               )}
-              {!initialLoading && !error && customers.map((c) => (
+              {!initialLoading && !error && paginatedItems.map((c) => (
                 <tr
                   key={c.id}
-                  className="border-b border-border hover:bg-muted/30 transition-colors cursor-pointer"
+                  className="hover:bg-secondary/40 transition-colors cursor-pointer"
                   onClick={() => {
                     setSelectedCustomer(c);
                     openDeepView(c);
                   }}
                 >
-                  <td className="px-4 py-3 font-medium">
+                  <td className="px-4 py-3 text-sm font-medium">
                     <div>
                       <p>{c.name}</p>
                       <p className="text-xs text-muted-foreground">{c.phone ?? "—"}</p>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.hplno != null ? `HPL-${c.hplno}` : "—"}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.vehicleNumber ?? "—"}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 text-sm text-muted-foreground">{c.hplno != null ? `HPL-${c.hplno}` : "—"}</td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">{c.vehicleNumber ?? "—"}</td>
+                  <td className="px-4 py-3 text-sm">
                     {c.distanceFromHome !== null ? (
-                      <span className={`font-bold ${c.distanceFromHome > 25 ? "text-red-600" : c.distanceFromHome > 10 ? "text-yellow-600" : "text-green-600"}`}>
+                      <span className={`font-bold ${c.distanceFromHome > 25 ? "text-red-600 dark:text-red-400" : c.distanceFromHome > 10 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                         {c.distanceFromHome} KM
                       </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 text-sm">
                     <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border capitalize ${getRiskBadgeVariant(c.riskLevel)}`}>
                       {c.riskLevel}
                     </span>
                     <p className="text-[11px] text-muted-foreground mt-0.5">Credit {c.creditScore}/100</p>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    <span className={c.overdueAmount > 0 ? "font-semibold text-red-600" : ""}>{formatINR(c.overdueAmount)}</span>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">
+                    <span className={c.overdueAmount > 0 ? "font-semibold text-red-600 dark:text-red-400" : ""}>{formatINR(c.overdueAmount)}</span>
                     {c.overdueDays > 0 && <p className="text-[11px] text-muted-foreground">{c.overdueDays}d overdue</p>}
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{c.assignedAgent || "—"}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 text-sm text-muted-foreground">{c.assignedAgent || "—"}</td>
+                  <td className="px-4 py-3 text-sm">
                     <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={(e) => { e.stopPropagation(); openDeepView(c); }}>
                       View <ExternalLink className="h-3 w-3" />
                     </Button>
@@ -309,7 +325,7 @@ export default function CustomerTrack() {
               ))}
               {!initialLoading && !error && customers.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-10 text-sm text-center text-muted-foreground">
                     No customers match the current filters
                   </td>
                 </tr>
@@ -317,7 +333,18 @@ export default function CustomerTrack() {
             </tbody>
           </table>
         </div>
-      </Card>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          disabled={loading}
+        />
+      </div>
 
       <CustomerDeepView customer={deepViewSeed} open={deepViewOpen} onClose={() => setDeepViewOpen(false)} />
     </div>
@@ -339,7 +366,7 @@ function CustomerCard({
   };
 
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="p-4 rounded-2xl border border-border bg-card shadow-sm space-y-3">
+    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="dashboard-card !p-4 hover:translate-y-0 space-y-3">
       <div className="flex items-start justify-between">
         <div>
           <p className="font-bold text-foreground">{c.name}</p>
@@ -355,19 +382,19 @@ function CustomerCard({
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="p-2 rounded-lg bg-muted/50">
+        <div className="p-2 rounded-xl bg-secondary/40 border border-border/60">
           <span className="text-muted-foreground">Distance</span>
           <p className="font-bold">{c.distanceFromHome != null ? `${c.distanceFromHome} KM` : "—"}</p>
         </div>
-        <div className="p-2 rounded-lg bg-muted/50">
+        <div className="p-2 rounded-xl bg-secondary/40 border border-border/60">
           <span className="text-muted-foreground">Overdue EMI</span>
           <p className="font-bold">{formatINR(c.overdueAmount)}</p>
         </div>
-        <div className="p-2 rounded-lg bg-muted/50">
+        <div className="p-2 rounded-xl bg-secondary/40 border border-border/60">
           <span className="text-muted-foreground">Overdue Days</span>
           <p className="font-bold">{c.overdueDays}d</p>
         </div>
-        <div className="p-2 rounded-lg bg-muted/50">
+        <div className="p-2 rounded-xl bg-secondary/40 border border-border/60">
           <span className="text-muted-foreground">Credit / Due Risk</span>
           <p className="font-bold">{c.creditScore}/100 · {c.dueRiskScore}%</p>
         </div>

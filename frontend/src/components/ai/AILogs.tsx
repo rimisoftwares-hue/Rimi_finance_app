@@ -7,8 +7,8 @@ import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import { TableSkeletonRows } from "../common";
+import { TablePagination, TableSkeletonRows } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
 import { aiApi } from "../../api/aiApi";
 
 interface LogEntry {
@@ -31,20 +31,20 @@ interface LogEntry {
 }
 
 const sentimentBadge = (s: string) => {
-  if (s === "positive") return <Badge className="bg-green-500/15 text-green-700 border-green-500/30">Positive</Badge>;
-  if (s === "negative") return <Badge className="bg-red-500/15 text-red-700 border-red-500/30">Negative</Badge>;
-  return <Badge className="bg-yellow-500/15 text-yellow-700 border-yellow-500/30">Neutral</Badge>;
+  if (s === "positive") return <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30">Positive</Badge>;
+  if (s === "negative") return <Badge className="bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30">Negative</Badge>;
+  return <Badge className="bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/30">Neutral</Badge>;
 };
 
 const statusBadge = (log: LogEntry) => {
   const lifecycle = log.callLifecycleStatus || (log.status === "Resolved" ? "completed" : "pending");
   if (lifecycle === "completed" && log.status === "Resolved") {
-    return <Badge className="bg-green-500/15 text-green-700 border-green-500/30">Completed</Badge>;
+    return <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30">Completed</Badge>;
   }
   if (lifecycle === "failed") {
-    return <Badge className="bg-red-500/15 text-red-700 border-red-500/30">Failed</Badge>;
+    return <Badge className="bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30">Failed</Badge>;
   }
-  return <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 capitalize">{lifecycle.replace(/_/g, " ")}</Badge>;
+  return <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 capitalize">{lifecycle.replace(/_/g, " ")}</Badge>;
 };
 
 export default function AILogs() {
@@ -57,8 +57,6 @@ export default function AILogs() {
   const [sentimentFilter, setSentimentFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
-  const [page, setPage] = useState(1);
-  const perPage = 10;
 
   useEffect(() => {
     let mounted = true;
@@ -88,7 +86,6 @@ export default function AILogs() {
 
   const handleSearch = useCallback((val: string) => {
     setSearch(val);
-    setPage(1);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => setDebouncedSearch(val), 300);
   }, []);
@@ -108,8 +105,20 @@ export default function AILogs() {
     });
   }, [logs, debouncedSearch, sentimentFilter, statusFilter]);
 
-  const paginated = filtered.slice((page - 1) * perPage, page * perPage);
-  const totalPages = Math.ceil(filtered.length / perPage);
+  const {
+    paginatedItems,
+    page,
+    setPage,
+    pageSize,
+    setPageSize,
+    totalItems,
+    totalPages,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, {
+    initialPageSize: 15,
+    resetKey: `${debouncedSearch}|${sentimentFilter}|${statusFilter}`,
+  });
 
   const openCallDetails = (log: LogEntry) => {
     const id = log.callId || log.logUuid;
@@ -121,7 +130,7 @@ export default function AILogs() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 w-full">
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
@@ -187,106 +196,103 @@ export default function AILogs() {
 
       {/* Table */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-        <Card className="hover:shadow-lg transition-shadow">
-          <CardContent className="p-0">
-            <div className="overflow-auto">
-              <Table>
-                <TableHeader className="sticky top-0 bg-card z-10">
-                  <TableRow>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Phone</TableHead>
-                    <TableHead>HPL No</TableHead>
-                    <TableHead>Vehicle</TableHead>
-                    <TableHead>Date/Time</TableHead>
-                    <TableHead>Sentiment</TableHead>
-                    <TableHead>Lifecycle</TableHead>
-                    <TableHead>Outcome</TableHead>
-                    <TableHead>Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loading && (
-                    <TableSkeletonRows columns={9} rows={6} />
-                  )}
-                  {!loading && error && (
-                    <TableRow>
-                      <TableCell colSpan={9} className="text-center py-10 text-red-600">
-                        {error}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {!loading && !error && paginated.map((log) => (
-                    <TableRow
-                      key={log.logUuid || log.id}
-                      className="hover:bg-muted/50 cursor-pointer transition-colors"
-                      onClick={() => openCallDetails(log)}
-                    >
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          {log.customer}
-                          {log.tags.includes("Recovery Needed") && <AlertTriangle className="h-4 w-4 text-red-500" />}
-                        </div>
-                      </TableCell>
-                      <TableCell>{log.phone || "—"}</TableCell>
-                      <TableCell>{log.hpl}</TableCell>
-                      <TableCell>{log.vehicle}</TableCell>
-                      <TableCell className="text-sm">{log.date}</TableCell>
-                      <TableCell>{sentimentBadge(log.sentiment)}</TableCell>
-                      <TableCell>{statusBadge(log)}</TableCell>
-                      <TableCell className="text-xs capitalize text-muted-foreground">
-                        {(log.callOutcome || "no_response").replace(/_/g, " ")}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
+        <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-border bg-secondary/50">
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Customer</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Phone</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">HPL No</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Vehicle</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Date/Time</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Sentiment</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Lifecycle</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Outcome</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {loading && (
+                  <TableSkeletonRows columns={9} rows={6} />
+                )}
+                {!loading && error && (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-10 text-center text-sm text-red-600 dark:text-red-400">
+                      {error}
+                    </td>
+                  </tr>
+                )}
+                {!loading && !error && paginatedItems.map((log) => (
+                  <tr
+                    key={log.logUuid || log.id}
+                    className="hover:bg-secondary/40 cursor-pointer transition-colors"
+                    onClick={() => openCallDetails(log)}
+                  >
+                    <td className="px-4 py-3 text-sm font-medium text-foreground">
+                      <div className="flex items-center gap-2">
+                        {log.customer}
+                        {log.tags.includes("Recovery Needed") && <AlertTriangle className="h-4 w-4 text-red-500" />}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-foreground">{log.phone || "—"}</td>
+                    <td className="px-4 py-3 text-sm text-foreground">{log.hpl}</td>
+                    <td className="px-4 py-3 text-sm text-foreground">{log.vehicle}</td>
+                    <td className="px-4 py-3 text-sm text-foreground">{log.date}</td>
+                    <td className="px-4 py-3 text-sm">{sentimentBadge(log.sentiment)}</td>
+                    <td className="px-4 py-3 text-sm">{statusBadge(log)}</td>
+                    <td className="px-4 py-3 text-xs capitalize text-muted-foreground">
+                      {(log.callOutcome || "no_response").replace(/_/g, " ")}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedLog(log);
+                          }}
+                        >
+                          Transcript
+                        </Button>
+                        {(log.callId || log.logUuid) && (
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedLog(log);
+                              openCallDetails(log);
                             }}
                           >
-                            Transcript
+                            Details <ExternalLink className="h-3 w-3 ml-1" />
                           </Button>
-                          {(log.callId || log.logUuid) && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openCallDetails(log);
-                              }}
-                            >
-                              Details <ExternalLink className="h-3 w-3 ml-1" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {!loading && !error && paginated.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
-                        No AI call logs recorded yet for this finance company
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between p-4 border-t">
-                <p className="text-sm text-muted-foreground">
-                  Showing {(page - 1) * perPage + 1}-{Math.min(page * perPage, filtered.length)} of {filtered.length}
-                </p>
-                <div className="flex gap-1">
-                  <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(page - 1)}>Prev</Button>
-                  <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(page + 1)}>Next</Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!loading && !error && paginatedItems.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                      No AI call logs recorded yet for this finance company
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalItems}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </div>
       </motion.div>
 
       {/* Quick Transcript Modal */}
@@ -303,7 +309,7 @@ export default function AILogs() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-card rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+              className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="p-4 border-b flex items-center justify-between">
@@ -324,7 +330,7 @@ export default function AILogs() {
 
               {selectedLog.summaryText && (
                 <div className="px-4 pt-3">
-                  <div className="p-3 rounded-lg bg-muted/40 text-xs text-foreground">
+                  <div className="p-3 rounded-xl border border-border/60 bg-muted/40 text-xs text-foreground">
                     <span className="font-semibold">Summary: </span>{selectedLog.summaryText}
                   </div>
                 </div>

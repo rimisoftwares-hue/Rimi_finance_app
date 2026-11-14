@@ -32,7 +32,7 @@ const editVehicleSchema = z.object({
   vehicle_modal: z.string().min(1, 'Vehicle model is required'),
   chassis_number: z.string().optional(),
   engine_number: z.string().optional(),
-  
+
   // Vehicle Details
   brand: z.string().min(1, 'Brand is required'),
   model: z.string().min(1, 'Model is required'),
@@ -40,21 +40,21 @@ const editVehicleSchema = z.object({
   fuel_type: z.enum(['petrol', 'diesel', 'electric', 'cng', 'hybrid']).optional(),
   engine_capacity: z.string().optional(),
   body_type: z.enum(['bike', 'car', 'scooter', 'sedan', 'hatchback', 'suv', 'muv', 'coupe', 'convertible']).optional(),
-  
+
   // Ownership Details
   num_owner: z.number().min(1, 'Number of owners must be at least 1').default(1),
   trip_driven: z.number().min(0, 'Trip driven cannot be negative').default(0),
-  
+
   // Appearance
   color: z.string().min(1, 'Color is required'),
   variant: z.string().optional(),
-  
+
   // Pricing
   base_price: z.number().min(0, 'Base price must be greater than 0').default(0),
   final_price: z.number().min(0, 'Final price must be greater than 0').default(0),
   selling_price: z.number().min(0, 'Selling price cannot be negative').default(0),
   emi_from: z.number().min(0, 'EMI from cannot be negative').default(0),
-  
+
   // Vehicle Status
   status: z.enum(['available', 'hosted', 'sales', 'sold', 'seized']).default('available'),
   deal_type: z.enum(['finance', 'consulting']).default('consulting'),
@@ -86,7 +86,7 @@ interface EditVehicleFormProps {
   onCancel?: () => void;
 }
 
-export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleFormProps) {
+export function EditVehicleForm({ vehicle, onSuccess, onCancel }: EditVehicleFormProps) {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -98,7 +98,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
   const [additionalImages, setAdditionalImages] = useState<File[]>([]);
   const [existingImages, setExistingImages] = useState<VehicleImage[]>(vehicle.images || []);
   const [imagesToDelete, setImagesToDelete] = useState<string[]>([]);
-  
+
   // State for vehicle info search
   const [brandSearch, setBrandSearch] = useState('');
   const [modelSearch, setModelSearch] = useState('');
@@ -108,13 +108,13 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
   const [selectedVehicleInfo, setSelectedVehicleInfo] = useState<VehicleInfo | null>(null);
   const [showBrandDropdown, setShowBrandDropdown] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
-  
+
   // Refs for dropdown closing
   const brandDropdownRef = useRef<HTMLDivElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const brandInputRef = useRef<HTMLInputElement>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
-  
+
   const { toast } = useToast();
 
   const form = useForm<EditVehicleFormData>({
@@ -127,7 +127,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
       vehicle_modal: vehicle.vehicle_modal || '',
       chassis_number: vehicle.chassis_number || '',
       engine_number: vehicle.engine_number || '',
-      
+
       // Vehicle Details
       brand: vehicle.brand || '',
       model: vehicle.model_name || '',
@@ -135,21 +135,21 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
       fuel_type: vehicle.fuel_type as any || 'petrol',
       engine_capacity: vehicle.engine_capacity || '',
       body_type: vehicle.body_type as any || 'car',
-      
+
       // Ownership Details
       num_owner: vehicle.num_owner || 1,
       trip_driven: vehicle.trip_driven || 0,
-      
+
       // Appearance
       color: vehicle.color || '',
       variant: vehicle.variant || '',
-      
+
       // Pricing
       base_price: vehicle.base_price || 0,
       final_price: vehicle.final_price || 0,
       selling_price: vehicle.selling_price || 0,
       emi_from: vehicle.emi_from || 0,
-      
+
       // Vehicle Status
       deal_type: vehicle?.deal_type || 'consulting',
       rc_holder: vehicle?.rc_holder || 'Company',
@@ -194,16 +194,16 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
     try {
       const response = await apiClient.get('/vehicle-info');
       setVehicleInfoList(response.data);
-      
+
       // Extract unique brands
       const uniqueBrands = [...new Set(response.data.map((item: VehicleInfo) => item.brand))] as string[];
       setFilteredBrands(uniqueBrands);
-      
+
       // If vehicle has brand and model, find the vehicle info
       if (vehicle.brand && vehicle.model_name) {
         const vehicleInfo = response.data.find(
-          (item: VehicleInfo) => 
-            item.brand === vehicle.brand && 
+          (item: VehicleInfo) =>
+            item.brand === vehicle.brand &&
             item.model_name === vehicle.model_name
         );
         if (vehicleInfo) {
@@ -266,7 +266,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
     setFilteredModels([]);
     setModelSearch('');
     setSelectedVehicleInfo(null);
-    
+
     // Clear model related fields when brand changes
     form.setValue('model', '');
     form.setValue('make_year', new Date().getFullYear());
@@ -274,7 +274,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
     form.setValue('engine_capacity', '');
     form.setValue('body_type', 'car');
     form.setValue('base_price', 0);
-    
+
     // Focus on model input
     setTimeout(() => {
       modelInputRef.current?.focus();
@@ -290,17 +290,17 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
   // Helper function to get full image URL
   const getFullImageUrl = (imageUrl?: string): string | null => {
     if (!isValidImageUrl(imageUrl)) return null;
-    
+
     const url = imageUrl!.trim();
     if (url.startsWith('http')) {
       return url;
     }
-    
+
     const baseUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3004').replace(/\/+$/, '');
     if (url.startsWith('/uploads')) {
       return `${baseUrl}${url}`;
     }
-    
+
     return `${baseUrl}${url}`;
   };
 
@@ -312,7 +312,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
     setSelectedVehicleInfo(null);
     setFilteredModels([]);
     setModelSearch('');
-    
+
     // Clear model related fields
     form.setValue('model', '');
     form.setValue('make_year', new Date().getFullYear());
@@ -328,7 +328,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
     const vehicleInfo = vehicleInfoList.find(
       item => item.brand === brand && item.model_name === modelName
     );
-    
+
     if (vehicleInfo) {
       setSelectedVehicleInfo(vehicleInfo);
       form.setValue('model', modelName);
@@ -338,7 +338,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
       form.setValue('body_type', vehicleInfo.body_type as any);
       form.setValue('base_price', vehicleInfo.base_price);
       form.setValue('vehicle_info_id', vehicleInfo.id);
-      
+
       setModelSearch(modelName);
       setShowModelDropdown(false);
     }
@@ -350,7 +350,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
     form.setValue('vehicle_name', form.getValues('brand') || '');
     setModelSearch('');
     setSelectedVehicleInfo(null);
-    
+
     // Reset vehicle specific fields
     form.setValue('make_year', new Date().getFullYear());
     form.setValue('fuel_type', 'petrol');
@@ -367,124 +367,124 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
   };
 
   const onSubmit = async (data: EditVehicleFormData) => {
-  console.log('Form submitted:', data);
-  console.log('Selected vehicle info:', selectedVehicleInfo);
-  console.log('Existing images to keep:', existingImages.map(img => img.id));
-  console.log('Images to delete:', imagesToDelete);
+    console.log('Form submitted:', data);
+    console.log('Selected vehicle info:', selectedVehicleInfo);
+    console.log('Existing images to keep:', existingImages.map(img => img.id));
+    console.log('Images to delete:', imagesToDelete);
 
-  // Validate that at least front and side images exist (either existing or new)
-  const hasFrontImage = existingImages.some(img => img.image_type === 'front') || frontImage;
-  const hasSideImage = existingImages.some(img => img.image_type === 'side') || sideImage;
-  
-  if (!hasFrontImage || !hasSideImage) {
-    toast({
-      title: "Missing Required Images",
-      description: "Please ensure both front and side images are provided (either existing or new uploads).",
-      variant: "destructive",
-    });
-    return;
-  }
+    // Validate that at least front and side images exist (either existing or new)
+    const hasFrontImage = existingImages.some(img => img.image_type === 'front') || frontImage;
+    const hasSideImage = existingImages.some(img => img.image_type === 'side') || sideImage;
 
-  setIsSubmitting(true);
-  
-  try {
-    const formData = new FormData();
-    
-    // Add all vehicle data fields
-    if (data.vehicle_info_id) {
-      formData.append('vehicle_info_id', data.vehicle_info_id.toString());
-    }
-    // FIX: Add vehicle_name is not in your backend schema
-    // formData.append('vehicle_name', data.vehicle_name); // Remove this line
-    
-    // FIX: The backend expects vehicle_modal not vehicle_name
-    formData.append('vehicle_number', data.vehicle_number);
-    formData.append('vehicle_modal', data.vehicle_modal); // This is correct
-    
-    // FIX: Add missing fields that backend expects
-    formData.append('chassis_number', data.chassis_number || '');
-    formData.append('engine_number', data.engine_number || '');
-    formData.append('num_owner', data.num_owner.toString());
-    formData.append('trip_driven', data.trip_driven.toString());
-    formData.append('color', data.color);
-    formData.append('variant', data.variant || '');
-    formData.append('selling_price', data.selling_price.toString());
-    formData.append('emi_from', data.emi_from.toString());
-    formData.append('base_price', data.base_price.toString());
-    formData.append('final_price', data.final_price.toString());
-    formData.append('status', data.status);
-    formData.append('created_date', data.created_date);
-    formData.append('selling_date', data.selling_date || '');
-    
-    // FIX: Add hosting_info and monthly_income_data if they exist
-    if (vehicle.hosting_info) {
-      formData.append('hosting_info', JSON.stringify(vehicle.hosting_info));
-    } else {
-      formData.append('hosting_info', '');
-    }
-    
-    if (vehicle.monthly_income_data) {
-      formData.append('monthly_income_data', JSON.stringify(vehicle.monthly_income_data));
-    } else {
-      formData.append('monthly_income_data', '');
-    }
-    
-    formData.append('deal_type', data.deal_type);
-    formData.append('rc_holder', data.rc_holder || 'Company');
-    formData.append('rc_status', data.rc_status || 'original');
-    formData.append('fc_expiry_date', data.fc_expiry_date || '');
-    formData.append('insurance_expiry_date', data.insurance_expiry_date || '');
-    formData.append('remarks', data.remarks || '');
-    
-    // Add existing images to keep
-    formData.append('existing_images', JSON.stringify(existingImages.map(img => img.id)));
-
-    // Add new images
-    if (frontImage) formData.append('front', frontImage);
-    if (sideImage) formData.append('side', sideImage);
-    if (backImage) formData.append('back', backImage);
-    if (interiorImage) formData.append('interior', interiorImage);
-    
-    if (additionalImages && additionalImages.length > 0) {
-      additionalImages.forEach((file, index) => {
-        formData.append('additional', file);
+    if (!hasFrontImage || !hasSideImage) {
+      toast({
+        title: "Missing Required Images",
+        description: "Please ensure both front and side images are provided (either existing or new uploads).",
+        variant: "destructive",
       });
+      return;
     }
 
-    // Debug log FormData
-    console.log('FormData entries for update:');
-    for (let pair of formData.entries()) {
-      console.log(pair[0], pair[1] instanceof File ? `${pair[1].name} (${pair[1].type})` : pair[1]);
+    setIsSubmitting(true);
+
+    try {
+      const formData = new FormData();
+
+      // Add all vehicle data fields
+      if (data.vehicle_info_id) {
+        formData.append('vehicle_info_id', data.vehicle_info_id.toString());
+      }
+      // FIX: Add vehicle_name is not in your backend schema
+      // formData.append('vehicle_name', data.vehicle_name); // Remove this line
+
+      // FIX: The backend expects vehicle_modal not vehicle_name
+      formData.append('vehicle_number', data.vehicle_number);
+      formData.append('vehicle_modal', data.vehicle_modal); // This is correct
+
+      // FIX: Add missing fields that backend expects
+      formData.append('chassis_number', data.chassis_number || '');
+      formData.append('engine_number', data.engine_number || '');
+      formData.append('num_owner', data.num_owner.toString());
+      formData.append('trip_driven', data.trip_driven.toString());
+      formData.append('color', data.color);
+      formData.append('variant', data.variant || '');
+      formData.append('selling_price', data.selling_price.toString());
+      formData.append('emi_from', data.emi_from.toString());
+      formData.append('base_price', data.base_price.toString());
+      formData.append('final_price', data.final_price.toString());
+      formData.append('status', data.status);
+      formData.append('created_date', data.created_date);
+      formData.append('selling_date', data.selling_date || '');
+
+      // FIX: Add hosting_info and monthly_income_data if they exist
+      if (vehicle.hosting_info) {
+        formData.append('hosting_info', JSON.stringify(vehicle.hosting_info));
+      } else {
+        formData.append('hosting_info', '');
+      }
+
+      if (vehicle.monthly_income_data) {
+        formData.append('monthly_income_data', JSON.stringify(vehicle.monthly_income_data));
+      } else {
+        formData.append('monthly_income_data', '');
+      }
+
+      formData.append('deal_type', data.deal_type);
+      formData.append('rc_holder', data.rc_holder || 'Company');
+      formData.append('rc_status', data.rc_status || 'original');
+      formData.append('fc_expiry_date', data.fc_expiry_date || '');
+      formData.append('insurance_expiry_date', data.insurance_expiry_date || '');
+      formData.append('remarks', data.remarks || '');
+
+      // Add existing images to keep
+      formData.append('existing_images', JSON.stringify(existingImages.map(img => img.id)));
+
+      // Add new images
+      if (frontImage) formData.append('front', frontImage);
+      if (sideImage) formData.append('side', sideImage);
+      if (backImage) formData.append('back', backImage);
+      if (interiorImage) formData.append('interior', interiorImage);
+
+      if (additionalImages && additionalImages.length > 0) {
+        additionalImages.forEach((file, index) => {
+          formData.append('additional', file);
+        });
+      }
+
+      // Debug log FormData
+      console.log('FormData entries for update:');
+      for (let pair of formData.entries()) {
+        console.log(pair[0], pair[1] instanceof File ? `${pair[1].name} (${pair[1].type})` : pair[1]);
+      }
+
+      const response = await apiClient.put(
+        `/vehicles/${vehicle.id}`,
+        formData
+      );
+
+      console.log('Response from server:', response.data);
+
+      toast({
+        title: "Success",
+        description: "Vehicle updated successfully!",
+      });
+
+      if (onSuccess) {
+        onSuccess(response.data);
+      }
+
+    } catch (err: any) {
+      console.error('Error updating vehicle:', err.response?.data || err.message);
+      const errorMessage = err.response?.data?.error || err.response?.data?.details || err.message || 'Failed to update vehicle';
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const response = await apiClient.put(
-      `/vehicles/${vehicle.id}`,
-      formData
-    );
-
-    console.log('Response from server:', response.data);
-
-    toast({
-      title: "Success",
-      description: "Vehicle updated successfully!",
-    });
-
-    if (onSuccess) {
-      onSuccess(response.data);
-    }
-
-  } catch (err: any) {
-    console.error('Error updating vehicle:', err.response?.data || err.message);
-    const errorMessage = err.response?.data?.error || err.response?.data?.details || err.message || 'Failed to update vehicle';
-    toast({
-      title: "Error",
-      description: errorMessage,
-      variant: "destructive",
-    });
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  };
 
   const handleCancel = () => {
     if (onCancel) {
@@ -502,8 +502,8 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
   const additionalImagesExist = existingImages.filter(img => img.image_type === 'additional');
 
   return (
-     <div className="w-full bg-background">
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6">
+    <div className="w-full bg-background">
+      <div className="w-full space-y-6">
         {/* Header */}
         <div className="mb-6 md:mb-8">
           <Button
@@ -514,25 +514,25 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
             <ArrowLeft className="h-4 w-4 mr-2" />
             <span className="hidden sm:inline">Back</span>
           </Button>
-          
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground">Edit Vehicle</h1>
-          <p className="text-muted-foreground mt-2 text-sm md:text-base">
-            Update the details for {vehicle.vehicle_number}
+
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Edit Vehicle</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Update the specifications and record details for {vehicle?.vehicle_number}
           </p>
         </div>
 
         <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 md:space-y-8 p-4 md:p-6">
-              
+
               {/* Basic Information */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-foreground border-b border-border pb-2">
                   Basic Information
                 </h3>
-                
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  
+
                   {/* Brand with search suggestions */}
                   <div className="relative" ref={brandDropdownRef}>
                     <FormItem>
@@ -627,8 +627,8 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                               <div className="flex justify-between items-center">
                                 <span className="font-medium text-foreground">{modelName}</span>
                                 <span className="text-xs text-muted-foreground">
-                                  {vehicleInfoList.find(item => 
-                                    item.brand === form.getValues('brand') && 
+                                  {vehicleInfoList.find(item =>
+                                    item.brand === form.getValues('brand') &&
                                     item.model_name === modelName
                                   )?.make_year}
                                 </span>
@@ -648,8 +648,8 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       <FormItem>
                         <FormLabel className="text-sm font-medium text-foreground">Vehicle Model *</FormLabel>
                         <FormControl>
-                          <Input 
-                            placeholder="e.g., Civic, Corolla" 
+                          <Input
+                            placeholder="e.g., Civic, Corolla"
                             {...field}
                             value={field.value || ''}
                             onChange={(e) => field.onChange(e.target.value)}
@@ -660,16 +660,16 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       </FormItem>
                     )}
                   />
-                  
-                  <FormField 
+
+                  <FormField
                     control={form.control}
                     name="vehicle_number"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel className="text-sm font-medium text-foreground">Vehicle Number *</FormLabel>
                         <FormControl>
-                          <Input 
-                            placeholder="KL-10-AB-1234" 
+                          <Input
+                            placeholder="KL-10-AB-1234"
                             {...field}
                             onChange={(e) => {
                               field.onChange(e.target.value.toUpperCase());
@@ -682,7 +682,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       </FormItem>
                     )}
                   />
-                  
+
                   <FormField
                     control={form.control}
                     name="chassis_number"
@@ -690,9 +690,9 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       <FormItem>
                         <FormLabel className="text-sm font-medium text-foreground">Chassis Number</FormLabel>
                         <FormControl>
-                          <Input 
-                            placeholder="HA6G2024001 (optional)" 
-                            {...field} 
+                          <Input
+                            placeholder="HA6G2024001 (optional)"
+                            {...field}
                             className="bg-background border-input"
                           />
                         </FormControl>
@@ -708,9 +708,9 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       <FormItem>
                         <FormLabel className="text-sm font-medium text-foreground">Engine Number</FormLabel>
                         <FormControl>
-                          <Input 
-                            placeholder="Engine number (optional)" 
-                            {...field} 
+                          <Input
+                            placeholder="Engine number (optional)"
+                            {...field}
                             className="bg-background border-input"
                           />
                         </FormControl>
@@ -726,8 +726,8 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       <FormItem>
                         <FormLabel className="text-sm font-medium text-foreground">Color *</FormLabel>
                         <FormControl>
-                          <Input 
-                            placeholder="Red" 
+                          <Input
+                            placeholder="Red"
                             {...field}
                             onChange={(e) => {
                               const value = e.target.value;
@@ -745,7 +745,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                   />
                 </div>
               </div>
-              
+
               {/* Selected Vehicle Details */}
               {selectedVehicleInfo && (
                 <div className="p-4 bg-accent/10 border border-accent rounded-lg">
@@ -781,13 +781,13 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                   </div>
                 </div>
               )}
-              
+
               {/* Ownership and Pricing Section */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-foreground border-b border-border pb-2">
                   Ownership & Pricing
                 </h3>
-                
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <FormField
                     control={form.control}
@@ -846,9 +846,9 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       <FormItem>
                         <FormLabel className="text-sm font-medium text-foreground">Variant</FormLabel>
                         <FormControl>
-                          <Input 
-                            placeholder="e.g., EX, LX, Sport" 
-                            {...field} 
+                          <Input
+                            placeholder="e.g., EX, LX, Sport"
+                            {...field}
                             className="bg-background border-input"
                           />
                         </FormControl>
@@ -944,7 +944,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                 <h3 className="text-lg font-semibold text-foreground border-b border-border pb-2">
                   Vehicle Status & Documents
                 </h3>
-                
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <FormField
                     control={form.control}
@@ -1116,9 +1116,9 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       <FormItem className="sm:col-span-2 lg:col-span-3">
                         <FormLabel className="text-sm font-medium text-foreground">Remarks</FormLabel>
                         <FormControl>
-                          <Input 
-                            placeholder="Additional notes..." 
-                            {...field} 
+                          <Input
+                            placeholder="Additional notes..."
+                            {...field}
                             className="bg-background border-input"
                           />
                         </FormControl>
@@ -1134,7 +1134,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                 <h3 className="text-lg font-semibold text-foreground border-b border-border pb-2">
                   Vehicle Images
                 </h3>
-                
+
                 <div className="space-y-6">
                   {/* Existing Images */}
                   {existingImages.length > 0 && (
@@ -1143,9 +1143,9 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                         {existingImages.map((image) => {
                           const imageUrl = getFullImageUrl(image.signed_url || image.image_url);
-                          
+
                           const hasValidImage = imageUrl !== null;
-                    
+
                           return (
                             <div key={image.id} className="relative group">
                               {hasValidImage ? (
@@ -1154,25 +1154,25 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                                     src={imageUrl}
                                     alt={`${image.image_type} image`}
                                     className="w-full h-32 object-cover rounded-lg border border-border"
-                                    // onError={(e) => {
-                                    //   // Fallback if image fails to load
-                                    //   e.currentTarget.style.display = 'none';
-                                    //   const parent = e.currentTarget.parentElement;
-                                    //   if (parent) {
-                                    //     const fallbackDiv = document.createElement('div');
-                                    //     fallbackDiv.className = 'w-full h-32 bg-gradient-to-br from-gray-800 to-gray-900 dark:from-gray-900 dark:to-black rounded-lg border border-border flex flex-col items-center justify-center p-2';
-                                    //     fallbackDiv.innerHTML = `
-                                    //       <div class="text-gray-400 dark:text-gray-500 mb-1">
-                                    //         <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    //           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                    //         </svg>
-                                    //       </div>
-                                    //       <span class="text-xs text-gray-300 dark:text-gray-400 text-center capitalize">${image.image_type}</span>
-                                    //       <span class="text-xs text-gray-400 dark:text-gray-500 mt-1">Image not available</span>
-                                    //     `;
-                                    //     parent.appendChild(fallbackDiv);
-                                    //   }
-                                    // }}
+                                  // onError={(e) => {
+                                  //   // Fallback if image fails to load
+                                  //   e.currentTarget.style.display = 'none';
+                                  //   const parent = e.currentTarget.parentElement;
+                                  //   if (parent) {
+                                  //     const fallbackDiv = document.createElement('div');
+                                  //     fallbackDiv.className = 'w-full h-32 bg-gradient-to-br from-gray-800 to-gray-900 dark:from-gray-900 dark:to-black rounded-lg border border-border flex flex-col items-center justify-center p-2';
+                                  //     fallbackDiv.innerHTML = `
+                                  //       <div class="text-gray-400 dark:text-gray-500 mb-1">
+                                  //         <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  //           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  //         </svg>
+                                  //       </div>
+                                  //       <span class="text-xs text-gray-300 dark:text-gray-400 text-center capitalize">${image.image_type}</span>
+                                  //       <span class="text-xs text-gray-400 dark:text-gray-500 mt-1">Image not available</span>
+                                  //     `;
+                                  //     parent.appendChild(fallbackDiv);
+                                  //   }
+                                  // }}
                                   />
                                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
                                     <div className="text-center p-2">
@@ -1222,7 +1222,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                             onChange={(file) => setFrontImage(file as File)}
                             className="h-48"
                           />
-                          
+
                           <ImageUpload
                             label="Side Image"
                             value={sideImage}
@@ -1236,7 +1236,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                             onChange={(file) => setBackImage(file as File)}
                             className="h-48"
                           />
-                          
+
                           <ImageUpload
                             label="Interior Image"
                             value={interiorImage}
@@ -1275,7 +1275,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                     Cancel
                   </Button>
                 </div>
-                
+
                 <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
                   <Button
                     type="button"
@@ -1294,7 +1294,7 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                       setShowModelDropdown(false);
                       setImagesToDelete([]);
                       setExistingImages(vehicle.images || []);
-                      
+
                       toast({
                         title: "Form Reset",
                         description: "Changes have been cleared.",
@@ -1305,8 +1305,8 @@ export function EditVehicleForm({vehicle, onSuccess, onCancel }: EditVehicleForm
                   >
                     Reset Changes
                   </Button>
-                  
-                  <Button 
+
+                  <Button
                     type="submit"
                     disabled={isSubmitting}
                     className="w-full sm:w-auto bg-primary hover:bg-primary-dark text-primary-foreground"

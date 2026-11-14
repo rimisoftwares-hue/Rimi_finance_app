@@ -17,7 +17,7 @@ import {
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { DatePicker } from "../ui/date-picker";
-import { AppSelect, TablePagination, TableSkeletonRows } from "../common";
+import { AppSelect, TablePagination, TableSkeletonRows, AutoSuggestInput } from "../common";
 import {
   PendingCollectionRecord,
   PendingCollectionsFilterParams,
@@ -112,11 +112,6 @@ export default function PendingCollections() {
     cities: [],
   });
 
-  // AutoSuggest Dropdown UI States
-  const [streetSuggestions, setStreetSuggestions] = useState<string[]>([]);
-  const [villageSuggestions, setVillageSuggestions] = useState<string[]>([]);
-  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
-
   // Search Debouncing
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -182,38 +177,12 @@ export default function PendingCollections() {
   const handleFilterChange = (key: keyof PendingCollectionsFilterParams, value: string) => {
     setFilters(prev => ({ ...prev, [key]: value }));
     setPagination(prev => ({ ...prev, page: 1 }));
-
-    // Update AutoSuggest suggestions dynamically
-    if (key === "street") {
-      setStreetSuggestions(
-        value
-          ? filterOptions.streets.filter(s => s.toLowerCase().includes(value.toLowerCase()))
-          : []
-      );
-    }
-    if (key === "village") {
-      setVillageSuggestions(
-        value
-          ? filterOptions.villages.filter(s => s.toLowerCase().includes(value.toLowerCase()))
-          : []
-      );
-    }
-    if (key === "city") {
-      setCitySuggestions(
-        value
-          ? filterOptions.cities.filter(s => s.toLowerCase().includes(value.toLowerCase()))
-          : []
-      );
-    }
   };
 
   const clearFilters = () => {
     setFilters(initialFilters);
     setSearchTerm("");
     setDebouncedSearch("");
-    setStreetSuggestions([]);
-    setVillageSuggestions([]);
-    setCitySuggestions([]);
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
@@ -298,59 +267,6 @@ export default function PendingCollections() {
     window.print();
   };
 
-  // AutoSuggest Input Component
-  const AutoSuggestInput = ({
-    label,
-    value,
-    suggestions,
-    filterKey,
-  }: {
-    label: string;
-    value: string;
-    suggestions: string[];
-    filterKey: keyof PendingCollectionsFilterParams;
-  }) => (
-    <div className="relative">
-      <div className="flex items-center justify-between mb-1">
-        <label className="text-xs font-medium text-muted-foreground">{label}</label>
-        {value && (
-          <button
-            type="button"
-            onClick={() => handleFilterChange(filterKey, "")}
-            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5"
-          >
-            <X className="h-2.5 w-2.5" /> clear
-          </button>
-        )}
-      </div>
-      <Input
-        value={value}
-        onChange={e => handleFilterChange(filterKey, e.target.value)}
-        placeholder={`Search ${label.toLowerCase()}...`}
-        className="text-sm h-9"
-      />
-      {suggestions.length > 0 && (
-        <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-lg shadow-xl max-h-36 overflow-y-auto py-1">
-          {suggestions.map(s => (
-            <button
-              key={s}
-              type="button"
-              className="w-full text-left px-3 py-1.5 text-xs hover:bg-secondary/70 transition-colors text-foreground"
-              onClick={() => {
-                handleFilterChange(filterKey, s);
-                if (filterKey === "street") setStreetSuggestions([]);
-                if (filterKey === "village") setVillageSuggestions([]);
-                if (filterKey === "city") setCitySuggestions([]);
-              }}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -426,7 +342,7 @@ export default function PendingCollections() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="dashboard-card border border-border shadow-sm p-4"
+        className="dashboard-card border border-border shadow-sm p-4 relative z-20"
       >
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           <div className="flex items-center gap-3 flex-1">
@@ -481,10 +397,18 @@ export default function PendingCollections() {
           {filtersOpen && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
+              animate={{
+                height: "auto",
+                opacity: 1,
+                transitionEnd: { overflow: "visible" },
+              }}
+              exit={{
+                height: 0,
+                opacity: 0,
+                overflow: "hidden",
+              }}
               transition={{ duration: 0.2 }}
-              className="overflow-hidden"
+              className={filtersOpen ? "overflow-visible" : "overflow-hidden"}
             >
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5 mt-4 pt-4 border-t border-border">
                 {/* HP Date Filters */}
@@ -565,20 +489,26 @@ export default function PendingCollections() {
                 <AutoSuggestInput
                   label="Street"
                   value={String(filters.street ?? "")}
-                  suggestions={streetSuggestions}
-                  filterKey="street"
+                  onChange={(val) => handleFilterChange("street", val)}
+                  suggestions={filterOptions.streets}
+                  placeholder="Search street..."
+                  inputClassName="text-sm h-9"
                 />
                 <AutoSuggestInput
                   label="Village"
                   value={String(filters.village ?? "")}
-                  suggestions={villageSuggestions}
-                  filterKey="village"
+                  onChange={(val) => handleFilterChange("village", val)}
+                  suggestions={filterOptions.villages}
+                  placeholder="Search village..."
+                  inputClassName="text-sm h-9"
                 />
                 <AutoSuggestInput
                   label="City"
                   value={String(filters.city ?? "")}
-                  suggestions={citySuggestions}
-                  filterKey="city"
+                  onChange={(val) => handleFilterChange("city", val)}
+                  suggestions={filterOptions.cities}
+                  placeholder="Search city..."
+                  inputClassName="text-sm h-9"
                 />
 
                 {/* Status Filter */}
@@ -664,7 +594,7 @@ export default function PendingCollections() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="dashboard-card p-0 overflow-hidden border border-border shadow-sm"
+        className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0"
       >
         {/* Error State */}
         {!loading && error && (
@@ -703,7 +633,7 @@ export default function PendingCollections() {
         {/* Data Table */}
         {(loading || (!error && loans.length > 0)) && (
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-border bg-secondary/50">
                   <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
@@ -824,7 +754,7 @@ export default function PendingCollections() {
         )}
 
         {/* Footer with Pagination */}
-        {!loading && !error && pagination.total > 0 && (
+        {!loading && !error && (
           <TablePagination
             page={pagination.page}
             totalPages={pagination.totalPages}
@@ -834,7 +764,6 @@ export default function PendingCollections() {
             endIndex={Math.min(pagination.page * pagination.limit, pagination.total)}
             onPageChange={(p) => setPagination(prev => ({ ...prev, page: p }))}
             onPageSizeChange={(limit) => setPagination(prev => ({ ...prev, limit, page: 1 }))}
-            pageSizeOptions={[15, 25, 50]}
             disabled={loading}
           />
         )}

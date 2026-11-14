@@ -95,7 +95,7 @@ export default function VehiclesPage() {
 
   if (id && !isLoading && !activeVehicle && !targetHostVehicle) {
     return (
-      <div className="p-6 max-w-[1600px] mx-auto text-center py-24 border-2 border-dashed rounded-lg space-y-3">
+      <div className="dashboard-card !p-6 max-w-[1600px] mx-auto text-center !py-24 border-dashed hover:translate-y-0 space-y-3">
         <Car className="h-10 w-10 mx-auto text-muted-foreground/60" />
         <p className="text-base font-semibold">Vehicle Not Found</p>
         <p className="text-xs text-muted-foreground">The requested vehicle could not be found.</p>
@@ -131,7 +131,7 @@ export default function VehiclesPage() {
   // Render Vehicle Details as a full page
   if (activeVehicle) {
     return (
-      <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
+      <div className="space-y-6 w-full">
         <VehicleDetails
           vehicle={activeVehicle}
           onBack={() => {
@@ -150,11 +150,11 @@ export default function VehiclesPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="space-y-6 w-full">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Vehicles</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Vehicles</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
             Inventory, consulting and finance-hosted vehicles
           </p>
         </div>
@@ -193,7 +193,7 @@ export default function VehiclesPage() {
         </div>
       </div>
 
-      <div className="bg-card border rounded-lg p-4 shadow-card space-y-4">
+      <div className="dashboard-card !p-4 hover:translate-y-0 space-y-4">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 min-w-[240px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -228,7 +228,7 @@ export default function VehiclesPage() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
-          <div className="flex items-center gap-1 border rounded-md p-0.5">
+          <div className="flex items-center gap-1 border border-border rounded-xl p-0.5">
             <Button variant={view === "grid" ? "secondary" : "ghost"} size="sm" onClick={() => setView("grid")}>
               <Grid className="h-4 w-4" />
             </Button>
@@ -251,11 +251,11 @@ export default function VehiclesPage() {
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {[...Array(8)].map((_, i) => (
-            <div key={i} className="h-64 bg-muted rounded-lg animate-pulse" />
+            <div key={i} className="h-64 bg-muted rounded-2xl animate-pulse" />
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="py-24 text-center border-2 border-dashed rounded-lg">
+        <div className="dashboard-card !py-24 text-center border-dashed hover:translate-y-0">
           <Car className="h-10 w-10 mx-auto text-muted-foreground/60" />
           <p className="mt-3 text-sm font-medium">No vehicles found</p>
           <p className="text-xs text-muted-foreground mt-1">Try adjusting your search or filters.</p>

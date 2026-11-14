@@ -1,11 +1,13 @@
 
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Warehouse, Plus, Search, Calendar, Truck, MapPin, Power, PowerOff, Edit, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { CapitalizedInput } from "../common/CapitalizedInput";
+import { TablePagination } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
 import { Textarea } from "../ui/textarea";
 import { useOwnerAuth } from "../../contexts/OwnerAuthContext";
@@ -35,6 +37,7 @@ interface Vehicle {
   loanNo: string;
   vehicleName: string;
   godownId: number;
+  godownName?: string;
 }
 
 export default function GodownVehicle() {
@@ -223,10 +226,27 @@ export default function GodownVehicle() {
     return vehicles.filter(v => v.godownId === godownId && v.status !== "Released").length;
   };
 
-  const filteredVehicles = vehicles.filter(v =>
-    v.vehicleNo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    v.customerName?.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredVehicles = useMemo(
+    () =>
+      vehicles.filter(
+        (v) =>
+          v.vehicleNo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          v.customerName?.toLowerCase().includes(searchTerm.toLowerCase())
+      ),
+    [vehicles, searchTerm]
   );
+
+  const {
+    paginatedItems,
+    page,
+    setPage,
+    pageSize,
+    setPageSize,
+    totalItems,
+    totalPages,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filteredVehicles, { initialPageSize: 15, resetKey: searchTerm });
 
   const totalSeized = vehicles.filter(v => v.status !== "Released").length;
   const pendingRelease = vehicles.filter(v => v.status === "Pending Release").length;
@@ -234,10 +254,10 @@ export default function GodownVehicle() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Godown Vehicles</h1>
-          <p className="text-muted-foreground mt-1">Seized and stored vehicles management</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Godown Vehicles</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Seized and stored vehicles management</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" className="gap-2" onClick={() => {
@@ -364,7 +384,7 @@ export default function GodownVehicle() {
       </div>
 
       {/* Search */}
-      <div className="dashboard-card">
+      <div className="dashboard-card !p-4 hover:translate-y-0">
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -377,50 +397,68 @@ export default function GodownVehicle() {
       </div>
 
       {/* Table */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
               <tr className="border-b border-border bg-secondary/50">
                 {["Customer", "Vehicle", "Vehicle No", "Loan No", "Godown", "Seizing Date", "Charges", "Seized By", "Action"].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
-              {filteredVehicles.map((v, i) => (
-                <motion.tr
-                  key={v.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.03 * i }}
-                  className="border-b border-border/50 hover:bg-secondary/30 transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <p className="text-base font-semibold text-foreground mt-0.5">{v.customerName}</p>
-                    <p className="text-xs font-semibold text-primary">{v.loanNo}</p>
+            <tbody className="divide-y divide-border/50">
+              {paginatedItems.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    No vehicles found
                   </td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">{v.vehicleName}</td>
-                  <td className="px-4 py-3 text-sm font-medium text-foreground">{v.vehicleNo}</td>
-                  <td className="px-4 py-3 text-sm text-primary font-medium">{v.loanNo}</td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">{v.godownName || 'test name'}</td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">{v.seizingDate}</td>
-                  <td className="px-4 py-3 text-sm font-semibold text-foreground">₹{v.charges.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-sm font-semibold text-foreground">{v.customerName}</td>
-                  <td className="px-4 py-3">
-                    {v.status !== "Released" && (
-                      <Button size="sm" variant="outline" className="text-xs">
-                        Release
-                      </Button>
-                    )}
-                  </td>
-                </motion.tr>
-              ))}
+                </tr>
+              ) : (
+                paginatedItems.map((v, i) => (
+                  <motion.tr
+                    key={v.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.03 * i }}
+                    className="hover:bg-secondary/40 transition-colors"
+                  >
+                    <td className="px-4 py-3 text-sm">
+                      <p className="text-sm font-semibold text-foreground">{v.customerName}</p>
+                      <p className="text-xs font-semibold text-primary">{v.loanNo}</p>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{v.vehicleName}</td>
+                    <td className="px-4 py-3 text-sm font-medium text-foreground">{v.vehicleNo}</td>
+                    <td className="px-4 py-3 text-sm text-primary font-medium">{v.loanNo}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{v.godownName || 'test name'}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{v.seizingDate}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-foreground">₹{v.charges.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-foreground">{v.customerName}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {v.status !== "Released" && (
+                        <Button size="sm" variant="outline" className="text-xs">
+                          Release
+                        </Button>
+                      )}
+                    </td>
+                  </motion.tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       </motion.div>
 
       {/* Create/Edit Godown Modal */}

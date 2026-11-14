@@ -4,5 +4,6 @@ export * from './CapitalizedInput';
 export * from './print';
 export * from './AppSelect';
 export * from './table';
+export * from './AutoSuggestInput';
 
 

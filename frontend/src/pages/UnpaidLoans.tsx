@@ -532,13 +532,27 @@ const UnpaidLoans = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {currentFilter === 'all' ? 'All Unpaid Loans' :
-            currentFilter === 'today' ? "Today's Unpaid Loans" :
-              currentFilter === 'seized' ? 'Seized Vehicles Unpaid Loans' : // Added
-                'Pending Unpaid Loans'}
-        </h2>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+            {currentFilter === 'all'
+              ? 'All Unpaid Loans'
+              : currentFilter === 'today'
+                ? "Today's Unpaid Loans"
+                : currentFilter === 'seized'
+                  ? 'Seized Vehicles Unpaid Loans'
+                  : 'Pending Unpaid Loans'}
+          </h1>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {currentFilter === 'all'
+              ? 'Comprehensive list of all unpaid and overdue loan installments'
+              : currentFilter === 'today'
+                ? 'Installments and dues scheduled for collection today'
+                : currentFilter === 'seized'
+                  ? 'Unpaid balances for seized and confiscated vehicles'
+                  : 'Overdue loan installments pending recovery and customer follow-up'}
+          </p>
+        </div>
         <div className="flex flex-col sm:flex-row gap-2">
           <button
             onClick={handlePrint}
@@ -613,7 +627,7 @@ const UnpaidLoans = () => {
       {/* Customer List */}
       <div
         ref={printRef}
-        className="card-elevated overflow-hidden"
+        className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0"
       >
         {filteredCustomers.length === 0 ? (
           <div className="p-8 text-center">
@@ -626,30 +640,30 @@ const UnpaidLoans = () => {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-border">
-                <thead className="bg-secondary/50 border-b border-border text-muted-foreground uppercase text-xs tracking-wider font-semibold">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b border-border bg-secondary/50">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Customer
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Contact
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Vehicle Number
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Payment Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Vehicle Name
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Pending Amount
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-card divide-y divide-border">
+                <tbody className="divide-y divide-border/50">
                   {pagedCustomers.map((customer) => {
                     const effectiveDueDates = (customer.dueDates && customer.dueDates.length > 0)
                       ? customer.dueDates
@@ -665,9 +679,9 @@ const UnpaidLoans = () => {
                       <tr
                         key={customer.hplno}
                         onClick={() => handleRowClick(customer.id)}
-                        className="cursor-pointer hover:bg-muted/30 transition-colors duration-150"
+                        className="cursor-pointer hover:bg-secondary/40 transition-colors"
                       >
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-4 py-3 text-sm whitespace-nowrap">
                           <div className="flex items-center">
                             <div className="h-10 w-10 rounded-full bg-muted overflow-hidden flex-shrink-0">
                               {customer.cphoto ? (
@@ -694,7 +708,7 @@ const UnpaidLoans = () => {
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap max-w-[200px]">
+                        <td className="px-4 py-3 text-sm whitespace-nowrap max-w-[200px]">
                           <div className="text-sm text-foreground">
                             {customer.contactNumbers && customer.contactNumbers.length > 0
                               ? customer.contactNumbers[0]
@@ -704,12 +718,12 @@ const UnpaidLoans = () => {
                             {customer.caddress || 'N/A'}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-4 py-3 text-sm whitespace-nowrap">
                           <div className="text-sm font-medium text-foreground">
                             {customer.vehicleNumber || 'N/A'}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-4 py-3 text-sm whitespace-nowrap">
                           {customer.daysUntilDue !== null ?
                             getStatusBadge(customer.daysUntilDue, customer.loanStatus) :
                             <span className="px-2 py-1 text-xs rounded-full bg-warning/10 text-warning dark:bg-warning/20">
@@ -717,13 +731,13 @@ const UnpaidLoans = () => {
                             </span>
                           }
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap max-w-[220px]">
+                        <td className="px-4 py-3 text-sm whitespace-nowrap max-w-[220px]">
                           <span className="text-sm text-foreground">
                             {customer.vehicleName || 'N/A'}
                             {customer.modelName && ` - ${customer.modelName}`}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-4 py-3 text-sm whitespace-nowrap">
                           <div className="text-sm font-medium text-foreground">
                             ₹{pendingAmount.toLocaleString()}
                           </div>
@@ -746,7 +760,6 @@ const UnpaidLoans = () => {
               endIndex={endIndex}
               onPageChange={setPage}
               onPageSizeChange={setPageSize}
-              pageSizeOptions={[15, 25, 50]}
             />
           </>
         )}

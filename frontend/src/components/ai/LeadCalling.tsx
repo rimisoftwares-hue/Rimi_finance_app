@@ -78,7 +78,7 @@ const EMPTY_SUMMARY: LeadsSummary = {
 
 const DEFAULT_PAGINATION: LeadsPagination = {
   page: 1,
-  limit: 25,
+  limit: 15,
   totalItems: 0,
   totalPages: 1,
   hasNextPage: false,
@@ -266,7 +266,7 @@ export default function LeadCalling() {
   const [overdueBucket, setOverdueBucket] = useState<string>("all");
   const [sortOption, setSortOption] = useState<string>("daysOverdue:desc");
   const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(25);
+  const [pageSize, setPageSize] = useState<number>(15);
 
   // Single-Customer Manual Call Modal & Lifecycle State
   const [activeLead, setActiveLead] = useState<LeadItem | null>(null);
@@ -1235,7 +1235,7 @@ export default function LeadCalling() {
 
       {/* Offline Banner when Voice AI System is unreachable */}
       {voiceHealth && !voiceHealth.online && (
-        <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 flex items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-200">
+        <div className="p-3.5 rounded-2xl border border-border bg-amber-500/10 flex items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-200 shadow-sm">
           <div className="flex items-center gap-2.5">
             <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
             <span>
@@ -1259,10 +1259,10 @@ export default function LeadCalling() {
       {activeQueueBatch &&
         activeQueueBatch.totalItems > 0 &&
         activeQueueBatch.batchId !== dismissedBatchId && (
-          <div className="p-4 rounded-xl border border-primary/30 bg-primary/5 space-y-3 shadow-sm">
+          <div className="p-4 rounded-2xl border border-border bg-primary/5 space-y-3 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-primary/15 text-primary shrink-0">
+                <div className="p-2 rounded-xl bg-primary/15 text-primary shrink-0">
                   <ListOrdered className="h-4 w-4" />
                 </div>
                 <div>
@@ -1652,13 +1652,13 @@ export default function LeadCalling() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="dashboard-card p-0 overflow-hidden hidden md:block"
+        className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0 hidden md:block"
       >
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
               <tr className="border-b border-border bg-secondary/50">
-                <th className="w-10 px-4 py-3 text-left">
+                <th className="w-10 px-4 py-3.5 text-left">
                   <input
                     type="checkbox"
                     checked={isAllSelected}
@@ -1666,36 +1666,36 @@ export default function LeadCalling() {
                     className="h-4 w-4 rounded border-border text-primary focus:ring-primary cursor-pointer accent-primary"
                   />
                 </th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   Customer / HPL
                 </th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   Vehicle
                 </th>
-                <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   Overdue / Balance
                 </th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   Overdue Age
                 </th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   Risk Score
                 </th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   Phone
                 </th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   Last Call &amp; Outcome
                 </th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   Call Status
                 </th>
-                <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   Action
                 </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-border/50">
               {isLoadingLeads && leads.length === 0 ? (
                 <TableSkeletonRows columns={10} rows={6} />
               ) : leads.length === 0 ? (
@@ -1724,12 +1724,12 @@ export default function LeadCalling() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: Math.min(0.25, 0.012 * i) }}
-                      className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${
+                      className={`hover:bg-secondary/40 transition-colors ${
                         isSelected ? "bg-primary/5 hover:bg-primary/10" : ""
                       }`}
                     >
                       {/* Checkbox */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3 text-sm">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -1739,7 +1739,7 @@ export default function LeadCalling() {
                       </td>
 
                       {/* Customer + KYC Avatar + HPL */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3 text-sm">
                         <div className="flex items-center gap-2.5">
                           <CustomerAvatar lead={lead} />
                           <div>
@@ -1769,7 +1769,7 @@ export default function LeadCalling() {
                       </td>
 
                       {/* Vehicle */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3 text-sm">
                         <p className="text-sm font-medium text-foreground truncate max-w-[170px]">
                           {lead.vehicleModel}
                         </p>
@@ -1779,7 +1779,7 @@ export default function LeadCalling() {
                       </td>
 
                       {/* Overdue / Total Balance */}
-                      <td className="px-4 py-3.5 text-right">
+                      <td className="px-4 py-3 text-sm text-right">
                         <span className="font-bold text-sm text-foreground block">
                           {formatINR(lead.dueAmount)}
                         </span>
@@ -1789,7 +1789,7 @@ export default function LeadCalling() {
                       </td>
 
                       {/* Overdue Age & Earliest Unpaid Date */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3 text-sm">
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
                             lead.daysOverdue > 60
@@ -1807,7 +1807,7 @@ export default function LeadCalling() {
                       </td>
 
                       {/* Authoritative Risk Score Badge (1:1 parity with Alerts.tsx) */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3 text-sm">
                         <span
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-semibold capitalize ${getRiskBadgeStyle(
                             lead.riskLevel
@@ -1818,7 +1818,7 @@ export default function LeadCalling() {
                       </td>
 
                       {/* Phone */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3 text-sm">
                         {lead.phone ? (
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs font-mono text-foreground">
@@ -1839,7 +1839,7 @@ export default function LeadCalling() {
                       </td>
 
                       {/* Last Call & Outcome */}
-                      <td className="px-4 py-3.5 max-w-[200px]">
+                      <td className="px-4 py-3 text-sm max-w-[200px]">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs font-medium text-foreground">
                             {lead.lastCall}
@@ -1869,10 +1869,10 @@ export default function LeadCalling() {
                       </td>
 
                       {/* Call Session Status Badge */}
-                      <td className="px-4 py-3.5">{renderSessionBadge(lead)}</td>
+                      <td className="px-4 py-3 text-sm">{renderSessionBadge(lead)}</td>
 
                       {/* Action Buttons */}
-                      <td className="px-4 py-3.5 text-right">
+                      <td className="px-4 py-3 text-sm text-right">
                         <div className="inline-flex items-center justify-end gap-1.5">
                           {hasRec && lead.lastCallDetails?.callId && (
                             <Button
@@ -1915,23 +1915,20 @@ export default function LeadCalling() {
         </div>
 
         {/* Pagination Footer */}
-        {pagination.totalItems > 0 && (
-          <TablePagination
-            page={pagination.page}
-            totalPages={pagination.totalPages}
-            pageSize={pageSize}
-            totalItems={pagination.totalItems}
-            startIndex={(pagination.page - 1) * pageSize + 1}
-            endIndex={Math.min(pagination.page * pageSize, pagination.totalItems)}
-            onPageChange={(p) => setPage(p)}
-            onPageSizeChange={(sz) => {
-              setPageSize(sz);
-              setPage(1);
-            }}
-            pageSizeOptions={[15, 25, 50]}
-            disabled={isLoadingLeads}
-          />
-        )}
+        <TablePagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          pageSize={pageSize}
+          totalItems={pagination.totalItems}
+          startIndex={(pagination.page - 1) * pageSize + 1}
+          endIndex={Math.min(pagination.page * pageSize, pagination.totalItems)}
+          onPageChange={(p) => setPage(p)}
+          onPageSizeChange={(sz) => {
+            setPageSize(sz);
+            setPage(1);
+          }}
+          disabled={isLoadingLeads}
+        />
       </motion.div>
 
       {/* 5. Mobile Cards View */}
@@ -1981,7 +1978,7 @@ export default function LeadCalling() {
                   {renderSessionBadge(lead)}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs bg-secondary/40 p-2.5 rounded-lg">
+                <div className="grid grid-cols-2 gap-2 text-xs bg-secondary/40 p-2.5 rounded-xl border border-border/60">
                   <div>
                     <span className="text-muted-foreground block">Overdue EMI:</span>
                     <span className="font-bold text-foreground">{formatINR(lead.dueAmount)}</span>
@@ -1994,7 +1991,7 @@ export default function LeadCalling() {
                   </div>
                   <div>
                     <span className="text-muted-foreground block">Days Overdue:</span>
-                    <span className="font-semibold text-rose-600">{lead.daysOverdue} days</span>
+                    <span className="font-semibold text-rose-600 dark:text-rose-400">{lead.daysOverdue} days</span>
                   </div>
                   <div>
                     <span className="text-muted-foreground block">Risk Score:</span>
@@ -2031,7 +2028,7 @@ export default function LeadCalling() {
           })
         )}
 
-        {pagination.totalItems > 0 && (
+        {pagination.totalItems > 15 && (
           <div className="flex items-center justify-between pt-2 text-xs">
             <Button
               variant="outline"

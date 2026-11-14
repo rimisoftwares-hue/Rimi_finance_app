@@ -49,9 +49,11 @@ export default function DueAnalysis() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold text-foreground">Due Analysis</h1>
-        <p className="text-muted-foreground mt-1">Portfolio risk distribution and NPA tracking</p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Due Analysis</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Portfolio risk distribution and NPA tracking</p>
+        </div>
       </motion.div>
 
       {loading ? (
@@ -77,7 +79,7 @@ export default function DueAnalysis() {
         </>
       ) : error || !data ? (
         <div className="dashboard-card text-center py-12 space-y-3">
-          <p className="text-sm text-red-600">{error ?? "No data available"}</p>
+          <p className="text-sm text-red-600 dark:text-red-400">{error ?? "No data available"}</p>
           <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => setReloadKey((k) => k + 1)}>
             <RefreshCw className="h-3.5 w-3.5" />Retry
           </Button>
@@ -134,7 +136,10 @@ export default function DueAnalysis() {
                       <Pie data={riskData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={3} dataKey="value">
                         {riskData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                       </Pie>
-                      <Tooltip formatter={(v) => [v, "Loans"]} />
+                      <Tooltip
+                        formatter={(v) => [v, "Loans"]}
+                        contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "0.75rem" }}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
@@ -149,10 +154,10 @@ export default function DueAnalysis() {
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={trendData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(240, 6%, 90%)" vertical={false} />
-                    <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(240, 3%, 46%)" }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(240, 3%, 46%)" }} />
-                    <Tooltip contentStyle={{ background: "hsl(0,0%,100%)", border: "1px solid hsl(240,6%,90%)", borderRadius: "0.75rem" }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                    <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "0.75rem" }} />
                     <Line type="monotone" dataKey="npa" stroke="hsl(0, 84%, 60%)" strokeWidth={2} dot={{ r: 4 }} name="NPA %" />
                     <Line type="monotone" dataKey="overdue" stroke="hsl(38, 92%, 50%)" strokeWidth={2} dot={{ r: 4 }} name="Overdue Count" />
                   </LineChart>

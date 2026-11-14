@@ -1,18 +1,58 @@
-//import React from 'react';
 import { Plus, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { TablePagination } from '../components/common';
+import { useClientPagination } from '../hooks/useClientPagination';
+
+interface LoanApplicationRow {
+  id: string;
+  customer: string;
+  amount: string;
+  status: 'pending' | 'approved' | 'rejected';
+  statusLabel: string;
+  date: string;
+}
+
+const INITIAL_APPLICATIONS: LoanApplicationRow[] = [
+  {
+    id: 'LOAN001',
+    customer: 'John Doe',
+    amount: '₹1,50,000',
+    status: 'pending',
+    statusLabel: 'Pending',
+    date: '2024-02-20',
+  },
+];
 
 const LoanApplications = () => {
   const statusColors = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    approved: 'bg-green-100 text-green-800',
-    rejected: 'bg-red-100 text-red-800',
+    pending: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30',
+    approved: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30',
+    rejected: 'bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30',
   };
 
+  const {
+    paginatedItems,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(INITIAL_APPLICATIONS, { initialPageSize: 15 });
+
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Loan Applications</h2>
-        <button className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+            Loan Applications
+          </h1>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Review, approve, and track incoming loan applications
+          </p>
+        </div>
+        <button className="inline-flex items-center px-4 py-2 bg-primary text-primary-foreground font-medium text-sm rounded-md hover:bg-primary/90 transition-colors">
           <Plus className="h-4 w-4 mr-2" />
           New Application
         </button>
@@ -20,90 +60,102 @@ const LoanApplications = () => {
 
       {/* Status Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+        <div className="dashboard-card">
           <div className="flex items-center">
-            <Clock className="h-5 w-5 text-yellow-500 mr-2" />
-            <h3 className="text-lg font-semibold text-gray-900">Pending</h3>
+            <Clock className="h-5 w-5 text-amber-500 mr-2" />
+            <h3 className="text-lg font-semibold text-foreground">Pending</h3>
           </div>
-          <p className="mt-2 text-3xl font-bold text-gray-900">23</p>
+          <p className="mt-2 text-3xl font-bold text-foreground">23</p>
         </div>
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+        <div className="dashboard-card">
           <div className="flex items-center">
-            <CheckCircle className="h-5 w-5 text-green-500 mr-2" />
-            <h3 className="text-lg font-semibold text-gray-900">Approved</h3>
+            <CheckCircle className="h-5 w-5 text-emerald-500 mr-2" />
+            <h3 className="text-lg font-semibold text-foreground">Approved</h3>
           </div>
-          <p className="mt-2 text-3xl font-bold text-gray-900">45</p>
+          <p className="mt-2 text-3xl font-bold text-foreground">45</p>
         </div>
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+        <div className="dashboard-card">
           <div className="flex items-center">
             <XCircle className="h-5 w-5 text-red-500 mr-2" />
-            <h3 className="text-lg font-semibold text-gray-900">Rejected</h3>
+            <h3 className="text-lg font-semibold text-foreground">Rejected</h3>
           </div>
-          <p className="mt-2 text-3xl font-bold text-gray-900">12</p>
+          <p className="mt-2 text-3xl font-bold text-foreground">12</p>
         </div>
       </div>
 
       {/* Applications List */}
-      <div className="bg-white shadow-sm rounded-lg border border-gray-200">
+      <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-border bg-secondary/50">
+                <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Application ID
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Customer
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Loan Amount
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Status
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Date
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3.5 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Actions
                 </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              <tr>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  LOAN001
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <div className="h-8 w-8 rounded-full bg-gray-200"></div>
-                    <div className="ml-3">
-                      <div className="text-sm font-medium text-gray-900">
-                        John Doe
+            <tbody className="divide-y divide-border/50">
+              {paginatedItems.map((app) => (
+                <tr key={app.id} className="hover:bg-secondary/40 transition-colors">
+                  <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-primary">
+                    {app.id}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-full bg-secondary flex items-center justify-center text-xs font-semibold text-muted-foreground">
+                        {app.customer.charAt(0)}
                       </div>
+                      <span className="text-sm font-medium text-foreground">
+                        {app.customer}
+                      </span>
                     </div>
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  ₹1,50,000
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusColors.pending}`}>
-                    Pending
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  2024-02-20
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <a href="#" className="text-blue-600 hover:text-blue-900">
-                    Review
-                  </a>
-                </td>
-              </tr>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-foreground">
+                    {app.amount}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm">
+                    <span className={`px-2 py-0.5 inline-flex text-xs font-semibold rounded-full ${statusColors[app.status]}`}>
+                      {app.statusLabel}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-muted-foreground">
+                    {app.date}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
+                    <a href="#" className="text-primary hover:underline">
+                      Review
+                    </a>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       </div>
     </div>
   );

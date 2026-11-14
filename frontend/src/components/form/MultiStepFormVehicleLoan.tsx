@@ -195,7 +195,7 @@ export const MultiStepForm: React.FC = () => {
   };
 
   return (
-    <div className="w-full mx-auto">
+    <div className="w-full flex flex-col flex-1 min-h-0">
       <StepperNavigation
         onStepClick={handleStepClick}
         canNavigateToStep={canNavigateToStep}

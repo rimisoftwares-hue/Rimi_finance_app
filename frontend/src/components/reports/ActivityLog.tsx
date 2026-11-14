@@ -1,8 +1,10 @@
 import { motion } from "framer-motion";
-import { Activity, Clock, Monitor, Smartphone, LogIn, LogOut } from "lucide-react";
+import { Activity, Monitor, Smartphone, LogIn, LogOut } from "lucide-react";
 import { Input } from "../ui/input";
 import { DatePicker } from "../ui/date-picker";
-import { useState } from "react";
+import { TablePagination } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
+import { useMemo, useState } from "react";
 
 const activityLogs = [
   { id: 1, user: "Admin", action: "Login", time: "09:00 AM", date: "2025-02-26", duration: "Active", device: "Desktop", ip: "192.168.1.10", icon: LogIn },
@@ -30,49 +32,88 @@ const actionColors: Record<string, string> = {
 export default function ActivityLog() {
   const [userFilter, setUserFilter] = useState("");
 
-  const filtered = activityLogs.filter(log =>
-    log.user.toLowerCase().includes(userFilter.toLowerCase())
+  const filtered = useMemo(
+    () =>
+      activityLogs.filter((log) =>
+        log.user.toLowerCase().includes(userFilter.toLowerCase())
+      ),
+    [userFilter]
   );
+
+  const {
+    paginatedItems,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, { initialPageSize: 15, resetKey: userFilter });
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold text-foreground">Activity Log</h1>
-        <p className="text-muted-foreground mt-1">User activity and session tracking</p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Activity Log</h1>
+          <p className="text-muted-foreground mt-1 text-sm">User activity and session tracking</p>
+        </div>
       </motion.div>
 
-      <div className="dashboard-card">
+      <div className="dashboard-card !p-4 hover:translate-y-0">
         <div className="flex items-center gap-4">
           <Input placeholder="Filter by user..." value={userFilter} onChange={e => setUserFilter(e.target.value)} className="max-w-xs" />
           <DatePicker className="max-w-xs" defaultValue="2025-02-26" />
         </div>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="dashboard-card p-0 overflow-hidden">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
               <tr className="border-b border-border bg-secondary/50">
                 {["User", "Action", "Date", "Time", "Duration", "Device", "IP Address"].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">{h}</th>
+                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody>
-              {filtered.map((log, i) => (
-                <motion.tr key={log.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.02 * i }} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
-                  <td className="px-4 py-3 text-sm font-medium text-foreground">{log.user}</td>
-                  <td className="px-4 py-3"><span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${actionColors[log.action] || "badge-default"}`}><log.icon className="h-3 w-3" /> {log.action}</span></td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">{log.date}</td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">{log.time}</td>
-                  <td className="px-4 py-3 text-sm text-foreground">{log.duration}</td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground flex items-center gap-1">{log.device === "Desktop" ? <Monitor className="h-3 w-3" /> : <Smartphone className="h-3 w-3" />} {log.device}</td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground font-mono">{log.ip}</td>
-                </motion.tr>
-              ))}
+            <tbody className="divide-y divide-border/50">
+              {paginatedItems.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">No activity logs found</td>
+                </tr>
+              ) : (
+                paginatedItems.map((log, i) => (
+                  <motion.tr key={log.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.02 * i }} className="hover:bg-secondary/40 transition-colors">
+                    <td className="px-4 py-3 text-sm font-medium text-foreground">{log.user}</td>
+                    <td className="px-4 py-3 text-sm"><span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${actionColors[log.action] || "badge-default"}`}><log.icon className="h-3 w-3" /> {log.action}</span></td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{log.date}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{log.time}</td>
+                    <td className="px-4 py-3 text-sm text-foreground">{log.duration}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        {log.device === "Desktop" ? <Monitor className="h-3 w-3" /> : <Smartphone className="h-3 w-3" />}
+                        {log.device}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground font-mono">{log.ip}</td>
+                  </motion.tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       </motion.div>
     </div>
   );

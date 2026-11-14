@@ -1240,10 +1240,10 @@ function LedgerInner() {
   return (
     <div className="space-y-4">
         {/* Header */}
-        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Ledger Master</h1>
-            <p className="text-sm text-muted-foreground">Tally-style ledger management</p>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Ledger Master</h1>
+            <p className="text-muted-foreground mt-1 text-sm">Tally-style ledger management</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <div className="dashboard-card !p-2 !rounded-lg flex items-center gap-3 text-xs">

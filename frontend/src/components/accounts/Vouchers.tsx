@@ -532,12 +532,12 @@ export default function Vouchers() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center gap-2">
             <FileText className="h-6 w-6 text-primary" /> Voucher Entry
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground mt-1 text-sm">
             Tally-style double-entry · {mergedVoucherTypes.length} voucher types · auto-posting enabled
           </p>
         </div>

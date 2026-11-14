@@ -10,6 +10,7 @@ import {
   Loader2, AlertCircle, RefreshCw, Lock, ShieldAlert, ExternalLink
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Skeleton } from "../ui/skeleton";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -134,6 +135,255 @@ const colorMap: Record<string, string> = {
   expense: "bg-expense/10 text-expense",
   pending: "bg-pending/10 text-pending",
 };
+
+/* ── Company Profile Loading Skeleton ── */
+export function CompanyProfileSkeleton() {
+  return (
+    <div className="space-y-6 pb-8 animate-pulse">
+      {/* ─── Header Skeleton ─── */}
+      <div className="rounded-2xl overflow-hidden shadow-lg border border-border/40 bg-card">
+        <div className="px-6 py-8 flex flex-col lg:flex-row items-center justify-between gap-6">
+          <div className="flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-5">
+            {/* Logo Avatar */}
+            <Skeleton className="w-24 h-24 rounded-2xl" />
+
+            {/* Info */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3">
+                <Skeleton className="h-8 w-60 rounded-md" />
+                <Skeleton className="h-5 w-20 rounded-full" />
+                <Skeleton className="h-5 w-28 rounded-full" />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 pt-1">
+                <Skeleton className="h-4 w-32 rounded" />
+                <Skeleton className="h-4 w-44 rounded" />
+                <Skeleton className="h-4 w-28 rounded" />
+              </div>
+
+              <Skeleton className="h-3.5 w-72 rounded pt-1" />
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Skeleton className="h-9 w-28 rounded-md" />
+            <Skeleton className="h-9 w-28 rounded-md" />
+            <Skeleton className="h-9 w-24 rounded-md" />
+            <Skeleton className="h-9 w-20 rounded-md" />
+            <Skeleton className="h-9 w-24 rounded-md" />
+          </div>
+        </div>
+
+        {/* Profile Completion Bar */}
+        <div className="px-6 pb-4">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-3 w-28 rounded" />
+            <Skeleton className="h-2 flex-1 rounded-full" />
+            <Skeleton className="h-3 w-8 rounded" />
+          </div>
+        </div>
+      </div>
+
+      {/* ─── 8 KPI Cards Skeleton ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Card key={i} className="overflow-hidden border-t-2 border-t-primary/30">
+            <CardContent className="p-4 flex items-start justify-between">
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-24 rounded" />
+                <Skeleton className="h-7 w-20 rounded" />
+              </div>
+              <Skeleton className="w-10 h-10 rounded-xl" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* ─── Main Content Grid: Company Details + Logos & Actions ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Company Details (Span 2) */}
+        <Card className="lg:col-span-2 shadow-sm border-border">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <Skeleton className="h-5 w-44 rounded" />
+            <Skeleton className="h-5 w-24 rounded-full" />
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Skeleton className="h-3.5 w-36 rounded" />
+                <Skeleton className="h-8 w-full rounded-md" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-3.5 w-32 rounded" />
+                <Skeleton className="h-8 w-full rounded-md" />
+              </div>
+            </div>
+
+            {/* Address */}
+            <div className="space-y-2">
+              <Skeleton className="h-3.5 w-40 rounded" />
+              <Skeleton className="h-4 w-3/4 rounded" />
+              <Skeleton className="h-3.5 w-1/2 rounded" />
+            </div>
+
+            {/* Phone & Email */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Skeleton className="h-3.5 w-36 rounded" />
+                <Skeleton className="h-4 w-36 rounded" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-3.5 w-36 rounded" />
+                <Skeleton className="h-4 w-44 rounded" />
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Status & Established */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-3.5 w-32 rounded" />
+                <Skeleton className="h-5 w-28 rounded-full" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-3.5 w-28 rounded" />
+                <Skeleton className="h-4 w-24 rounded" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Logos & Quick Actions Column */}
+        <div className="space-y-6">
+          <Card className="shadow-sm border-border">
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <Skeleton className="h-5 w-32 rounded" />
+              <Skeleton className="h-4 w-24 rounded-full" />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-3.5 w-36 rounded" />
+                  <Skeleton className="h-3.5 w-20 rounded" />
+                </div>
+                <Skeleton className="w-full aspect-video rounded-xl" />
+              </div>
+              <Separator />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-3.5 w-44 rounded" />
+                  <Skeleton className="h-3.5 w-20 rounded" />
+                </div>
+                <Skeleton className="w-full aspect-video rounded-xl" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm border-border">
+            <CardHeader className="pb-3">
+              <Skeleton className="h-5 w-28 rounded" />
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-11 w-full rounded-md" />
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* ─── Bank Accounts Table Skeleton ─── */}
+      <Card className="shadow-sm border-border">
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <div className="space-y-1">
+            <Skeleton className="h-5 w-60 rounded" />
+            <Skeleton className="h-3.5 w-80 rounded" />
+          </div>
+          <Skeleton className="h-9 w-36 rounded-md" />
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">Bank Name</TableHead>
+                <TableHead className="text-xs">Branch</TableHead>
+                <TableHead className="text-xs">IFSC Code</TableHead>
+                <TableHead className="text-xs">Account Number</TableHead>
+                <TableHead className="text-xs">UPI ID</TableHead>
+                <TableHead className="text-xs text-center">Primary</TableHead>
+                <TableHead className="text-xs text-center">Status</TableHead>
+                <TableHead className="text-xs text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <TableRow key={i}>
+                  <TableCell><Skeleton className="h-4 w-32 rounded" /></TableCell>
+                  <TableCell><Skeleton className="h-3.5 w-24 rounded" /></TableCell>
+                  <TableCell><Skeleton className="h-3.5 w-28 rounded" /></TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <Skeleton className="h-3 w-24 rounded" />
+                      <Skeleton className="h-4 w-36 rounded" />
+                    </div>
+                  </TableCell>
+                  <TableCell><Skeleton className="h-3.5 w-28 rounded" /></TableCell>
+                  <TableCell className="text-center"><Skeleton className="h-6 w-6 rounded mx-auto" /></TableCell>
+                  <TableCell className="text-center"><Skeleton className="h-5 w-8 rounded-full mx-auto" /></TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Skeleton className="h-8 w-8 rounded" />
+                      <Skeleton className="h-8 w-8 rounded" />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* ─── Stats & Real-Time Charts Grid Skeleton ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="shadow-sm border-border">
+          <CardHeader>
+            <Skeleton className="h-5 w-44 rounded" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                <Skeleton className="h-4 w-36 rounded" />
+                <Skeleton className="h-4 w-12 rounded" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm border-border">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <Skeleton className="h-5 w-40 rounded" />
+            <Skeleton className="h-3.5 w-20 rounded" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-[210px] w-full rounded-lg" />
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm border-border">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <Skeleton className="h-5 w-44 rounded" />
+            <Skeleton className="h-3.5 w-20 rounded" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-[210px] w-full rounded-lg" />
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
 
 /* ══════════════════════════════════════════════════ */
 export default function CompanyProfile() {
@@ -688,12 +938,7 @@ export default function CompanyProfile() {
 
   // ─── LOADING STATE ───
   if (isLoading) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">Loading company profile and bank records...</p>
-      </div>
-    );
+    return <CompanyProfileSkeleton />;
   }
 
   return (

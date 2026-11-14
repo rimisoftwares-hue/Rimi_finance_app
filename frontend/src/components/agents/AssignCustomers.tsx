@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { CapitalizedInput } from "../common/CapitalizedInput";
-import { TableSkeletonRows } from "../common";
+import { TableSkeletonRows, AutoSuggestInput } from "../common";
 import { DatePicker } from "../ui/date-picker";
 import { Badge } from "../ui/badge";
 import { Checkbox } from "../ui/checkbox";
@@ -380,11 +380,6 @@ export default function AssignCustomers() {
     assignment: "all" as "all" | "assigned" | "unassigned",
   });
 
-  // Dynamic suggestions for city, village, street
-  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
-  const [villageSuggestions, setVillageSuggestions] = useState<string[]>([]);
-  const [streetSuggestions, setStreetSuggestions] = useState<string[]>([]);
-
   // Selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -504,27 +499,6 @@ export default function AssignCustomers() {
     };
   }, [currentFinance?.id, loadCustomers, loadAgents]);
 
-  // Fetch address suggestions dynamically
-  const fetchAddressSuggestions = useCallback(async (field: "street_name" | "village" | "city", query: string) => {
-    if (!query || query.trim().length < 2) {
-      if (field === "city") setCitySuggestions([]);
-      if (field === "village") setVillageSuggestions([]);
-      if (field === "street_name") setStreetSuggestions([]);
-      return;
-    }
-    try {
-      const res = await apiClient.get<{ success: boolean; suggestions: Array<{ value: string; label: string }> }>(
-        `/address/suggestions/${field}?q=${encodeURIComponent(query.trim())}`
-      );
-      const values = (res.data?.suggestions || []).map((s) => s.value).filter(Boolean);
-      if (field === "city") setCitySuggestions(values);
-      if (field === "village") setVillageSuggestions(values);
-      if (field === "street_name") setStreetSuggestions(values);
-    } catch {
-      // Ignore suggestion errors
-    }
-  }, []);
-
   // Filter validation and change handler
   const handleFilterChange = (key: string, value: string) => {
     // Validate range min <= max
@@ -554,11 +528,6 @@ export default function AssignCustomers() {
     }
 
     setFilters((prev) => ({ ...prev, [key]: value }));
-
-    // Trigger suggestions
-    if (key === "city") fetchAddressSuggestions("city", value);
-    if (key === "village") fetchAddressSuggestions("village", value);
-    if (key === "street") fetchAddressSuggestions("street_name", value);
   };
 
   const clearAllFilters = () => {
@@ -581,9 +550,6 @@ export default function AssignCustomers() {
     });
     setSearchTerm("");
     setDebouncedSearch("");
-    setCitySuggestions([]);
-    setVillageSuggestions([]);
-    setStreetSuggestions([]);
   };
 
   // Selection handlers
@@ -761,11 +727,11 @@ export default function AssignCustomers() {
   }, [customers]);
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 w-full">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Assign Customers</h1>
-          <p className="text-sm text-muted-foreground">Select customers and assign to collection agents</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Assign Customers</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Allocate customer accounts and due follow-ups to collection agents</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => { loadCustomers(); loadAgents(); }} disabled={loading}>
@@ -775,7 +741,7 @@ export default function AssignCustomers() {
       </div>
 
       {/* Search + Filter */}
-      <Card>
+      <Card className="relative z-20">
         <CardContent className="p-4 space-y-3">
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -797,91 +763,43 @@ export default function AssignCustomers() {
             {filtersOpen && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden"
+                animate={{
+                  height: "auto",
+                  opacity: 1,
+                  transitionEnd: { overflow: "visible" },
+                }}
+                exit={{
+                  height: 0,
+                  opacity: 0,
+                  overflow: "hidden",
+                }}
+                transition={{ duration: 0.2 }}
+                className={filtersOpen ? "overflow-visible" : "overflow-hidden"}
               >
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-border">
                   {/* City with suggestions */}
-                  <div className="relative">
-                    <CapitalizedInput
-                      casing="words"
-                      placeholder="City"
-                      value={filters.city}
-                      onChange={(e) => handleFilterChange("city", e.target.value)}
-                    />
-                    {citySuggestions.length > 0 && (
-                      <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-lg shadow-xl max-h-36 overflow-y-auto py-1">
-                        {citySuggestions.map((c) => (
-                          <button
-                            key={c}
-                            type="button"
-                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-secondary/70 transition-colors text-foreground"
-                            onClick={() => {
-                              handleFilterChange("city", c);
-                              setCitySuggestions([]);
-                            }}
-                          >
-                            {c}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <AutoSuggestInput
+                    placeholder="City"
+                    value={filters.city}
+                    onChange={(val) => handleFilterChange("city", val)}
+                    field="city"
+                  />
 
                   {/* Street with suggestions */}
-                  <div className="relative">
-                    <CapitalizedInput
-                      casing="words"
-                      placeholder="Street"
-                      value={filters.street}
-                      onChange={(e) => handleFilterChange("street", e.target.value)}
-                    />
-                    {streetSuggestions.length > 0 && (
-                      <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-lg shadow-xl max-h-36 overflow-y-auto py-1">
-                        {streetSuggestions.map((s) => (
-                          <button
-                            key={s}
-                            type="button"
-                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-secondary/70 transition-colors text-foreground"
-                            onClick={() => {
-                              handleFilterChange("street", s);
-                              setStreetSuggestions([]);
-                            }}
-                          >
-                            {s}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <AutoSuggestInput
+                    placeholder="Street"
+                    value={filters.street}
+                    onChange={(val) => handleFilterChange("street", val)}
+                    field="street_name"
+                  />
 
                   {/* Village with suggestions */}
-                  <div className="relative">
-                    <CapitalizedInput
-                      casing="words"
-                      placeholder="Village"
-                      value={filters.village}
-                      onChange={(e) => handleFilterChange("village", e.target.value)}
-                    />
-                    {villageSuggestions.length > 0 && (
-                      <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-lg shadow-xl max-h-36 overflow-y-auto py-1">
-                        {villageSuggestions.map((v) => (
-                          <button
-                            key={v}
-                            type="button"
-                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-secondary/70 transition-colors text-foreground"
-                            onClick={() => {
-                              handleFilterChange("village", v);
-                              setVillageSuggestions([]);
-                            }}
-                          >
-                            {v}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <AutoSuggestInput
+                    placeholder="Village"
+                    value={filters.village}
+                    onChange={(val) => handleFilterChange("village", val)}
+                    field="village"
+                  />
 
                   {/* Broker select */}
                   <Select value={filters.broker || "all"} onValueChange={(v) => handleFilterChange("broker", v === "all" ? "" : v)}>

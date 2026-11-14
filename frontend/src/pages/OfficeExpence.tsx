@@ -437,10 +437,8 @@ import {
   Popover, PopoverContent, PopoverTrigger,
 } from "../components/ui/popover";
 import { Calendar } from "../components/ui/calendar";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "../components/ui/table";
-import { TableSkeletonRows } from "../components/common";
+import { TablePagination, TableSkeletonRows } from "../components/common";
+import { useClientPagination } from "../hooks/useClientPagination";
 import { useCountUp } from "../hooks/useCountUp";
 import { toast } from "../hooks/use-toast";
 import {
@@ -656,6 +654,21 @@ const OfficeExpencePage = () => {
   const totalExpense = transactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const netProfit = totalIncome - totalExpense;
 
+  const {
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    paginatedItems: paginatedTransactions,
+    startIndex,
+    endIndex,
+  } = useClientPagination(transactions, {
+    initialPageSize: 15,
+    resetKey: `${activeTab}|${search}|${staffFilter}|${paymentModeFilter}|${dateFrom?.toISOString() ?? ""}|${dateTo?.toISOString() ?? ""}`,
+  });
+
   const clearFilters = () => {
     setStaffFilter("");
     setPaymentModeFilter("");
@@ -668,23 +681,23 @@ const OfficeExpencePage = () => {
   const hasFilters = staffFilter || paymentModeFilter || dateFrom || dateTo || search || activeTab !== "all";
 
   return (
-    <div className="min-h-screen bg-background p-6 lg:p-8 overflow-auto">
-      <div className="max-w-[1400px] mx-auto space-y-6">
+    <div className="min-h-screen bg-background text-foreground space-y-6 overflow-auto">
+      <div className="w-full space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">Office Income &amp; Expense</h1>
-            <p className="text-sm text-muted-foreground mt-1">Manage and track all office transactions</p>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Office Income &amp; Expense</h1>
+            <p className="text-muted-foreground mt-1 text-sm">Manage and track all office transactions</p>
           </div>
           <div className="flex items-center gap-3">
             {/* Toggle Buttons */}
-            <div className="flex bg-secondary rounded-lg p-1">
+            <div className="flex bg-secondary rounded-xl p-1">
               {(["all", "income", "expense"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   className={cn(
-                    "px-4 py-2 text-sm font-medium rounded-md transition-all duration-200 capitalize",
+                    "px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 capitalize",
                     activeTab === tab
                       ? "bg-primary text-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
@@ -708,7 +721,7 @@ const OfficeExpencePage = () => {
         </div>
 
         {/* Filters Row */}
-        <div className="dashboard-card !p-4">
+        <div className="dashboard-card !p-4 hover:translate-y-0">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Filter className="w-4 h-4" />
@@ -779,63 +792,76 @@ const OfficeExpencePage = () => {
         </div>
 
         {/* Data Table */}
-        <div className="dashboard-card !p-0 overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-secondary/50 hover:bg-secondary/50">
-                <TableHead className="font-semibold">Date</TableHead>
-                <TableHead className="font-semibold">Category</TableHead>
-                <TableHead className="font-semibold">Description</TableHead>
-                <TableHead className="font-semibold text-right">Amount</TableHead>
-                <TableHead className="font-semibold">Payment Mode</TableHead>
-                <TableHead className="font-semibold">Entered By</TableHead>
-                <TableHead className="font-semibold text-center">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableSkeletonRows columns={7} rows={6} />
-              ) : transactions.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
-                    No transactions found
-                  </TableCell>
-                </TableRow>
-              ) : (
-                transactions.map((t) => (
-                  <TableRow key={t.id} className="group hover:bg-secondary/30 transition-colors">
-                    <TableCell className="text-sm">{format(new Date(t.date), "dd MMM yyyy")}</TableCell>
-                    <TableCell>
-                      <span className={cn(
-                        "text-xs font-medium px-2.5 py-1 rounded-full",
-                        t.type === "income" ? "bg-income/10 text-income" : "bg-expense/10 text-expense"
-                      )}>
-                        {t.category}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground max-w-[250px] truncate">{t.description}</TableCell>
-                    <TableCell className={cn("text-right font-semibold", t.type === "income" ? "text-income" : "text-expense")}>
-                      {t.type === "income" ? "+" : "-"}₹{t.amount.toLocaleString("en-IN")}
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs bg-secondary px-2.5 py-1 rounded-full font-medium">{t.paymentMode}</span>
-                    </TableCell>
-                    <TableCell className="text-sm">{t.enteredBy}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={() => handleEdit(t)}>
-                          <Edit2 className="w-4 h-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => setDeleteId(t.id)}>
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+        <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-border bg-secondary/50">
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Date</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Category</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Description</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Amount</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Payment Mode</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Entered By</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {loading ? (
+                  <TableSkeletonRows columns={7} rows={6} />
+                ) : transactions.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                      No transactions found
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedTransactions.map((t) => (
+                    <tr key={t.id} className="group hover:bg-secondary/40 transition-colors">
+                      <td className="px-4 py-3 text-sm whitespace-nowrap">{format(new Date(t.date), "dd MMM yyyy")}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className={cn(
+                          "text-xs font-medium px-2.5 py-1 rounded-full",
+                          t.type === "income" ? "bg-income/10 text-income" : "bg-expense/10 text-expense"
+                        )}>
+                          {t.category}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground max-w-[250px] truncate">{t.description}</td>
+                      <td className={cn("px-4 py-3 text-sm text-right font-semibold whitespace-nowrap", t.type === "income" ? "text-income" : "text-expense")}>
+                        {t.type === "income" ? "+" : "-"}₹{t.amount.toLocaleString("en-IN")}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="text-xs bg-secondary px-2.5 py-1 rounded-full font-medium">{t.paymentMode}</span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">{t.enteredBy}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={() => handleEdit(t)}>
+                            <Edit2 className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => setDeleteId(t.id)}>
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalItems}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            disabled={loading}
+          />
         </div>
       </div>
 

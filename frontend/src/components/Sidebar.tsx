@@ -47,11 +47,16 @@ import {
   LogIn,
   UserCircle,
   Clock,
-  PhoneCall
+  PhoneCall,
+  Mail,
+  Phone,
+  ExternalLink
 } from "lucide-react";
 import { useAuth } from '../contexts/AuthContext';
 import { useOwnerAuth } from '../contexts/OwnerAuthContext';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "./ui/hover-card";
+import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover";
+import { fetchUserProfileOverview } from '../api/userProfileApi';
 import { cn } from "./lib/utils";
 
 const isMacOS = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
@@ -172,21 +177,138 @@ const navigation: NavigationItem[] = [
       { name: "Bad Debts", href: "/master/bad-debts", icon: Skull },
     ],
   },
-  { name: "user Profile", href: "/UserProfile", icon: UserCircle },
-
 ];
 
 export function Sidebar() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
   const [activeFlyout, setActiveFlyout] = useState<string | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [fetchedPhoto, setFetchedPhoto] = useState<string | null>(null);
+  const [imgError, setImgError] = useState(false);
   const sidebarRef = useRef<HTMLElement | null>(null);
 
+  const navigate = useNavigate();
   const { owner, ownerLogout } = useOwnerAuth();
-  const { user } = useAuth();
+  const { user, userLogout, currentFinance } = useAuth();
   const location = useLocation();
 
   const isOwner = Boolean(owner && (!user || user.role === 'owner'));
+
+  // User display & profile computations
+  const displayName =
+    (user as any)?.name?.trim() ||
+    user?.username?.trim() ||
+    user?.email?.split('@')[0] ||
+    owner?.username?.trim() ||
+    'User';
+
+  const userInitial = displayName.charAt(0).toUpperCase() || 'U';
+
+  const rawRole = user?.role || (owner ? 'owner' : 'user');
+  const userRole =
+    rawRole === 'owner' ? 'Owner' :
+      rawRole === 'admin' ? 'Admin' :
+        rawRole === 'agent' ? 'Agent' :
+          rawRole === 'staff' ? 'Staff' :
+            rawRole.charAt(0).toUpperCase() + rawRole.slice(1);
+
+  const username = user?.username || owner?.username || '';
+  const email = user?.email || (owner as any)?.email || '';
+  const phone = user?.phone_no || (user as any)?.phone || (owner as any)?.phone || '';
+  const financeName = currentFinance?.name || currentFinance?.finance_name || '';
+
+  const directPhoto =
+    (user as any)?.photo ||
+    (user as any)?.photo_url ||
+    (user as any)?.profile_photo ||
+    (user as any)?.avatar ||
+    (owner as any)?.photo ||
+    (owner as any)?.photo_url ||
+    null;
+
+  const photoUrl = directPhoto || fetchedPhoto;
+
+  // Asynchronously fetch profile overview if no photo is on the user object
+  useEffect(() => {
+    if (!directPhoto && user) {
+      let isSubscribed = true;
+      fetchUserProfileOverview()
+        .then((data) => {
+          if (isSubscribed && data?.profile?.photo) {
+            setFetchedPhoto(data.profile.photo);
+          }
+        })
+        .catch(() => {
+          // Silently ignore
+        });
+      return () => {
+        isSubscribed = false;
+      };
+    }
+  }, [directPhoto, user]);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [photoUrl]);
+
+  const getRoleBadgeClasses = (role: string) => {
+    const r = role.toLowerCase();
+    switch (r) {
+      case 'owner':
+        return 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800';
+      case 'admin':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800';
+      case 'agent':
+        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+      case 'staff':
+        return 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+      default:
+        return 'bg-secondary text-secondary-foreground border-border';
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      if (user) {
+        await userLogout('manual');
+      }
+    } catch (e) {
+      console.error('Logout error:', e);
+    }
+    if (owner) {
+      ownerLogout();
+    }
+    navigate('/user-login');
+  };
+
+  const handleFinanceLogout = handleLogout;
+
+  const renderAvatar = (sizeClasses = "h-8 w-8 text-xs") => {
+    if (photoUrl && !imgError) {
+      return (
+        <img
+          src={photoUrl}
+          alt={displayName}
+          onError={() => setImgError(true)}
+          className={cn(
+            sizeClasses,
+            "rounded-full object-cover shrink-0 border border-border/60 shadow-xs"
+          )}
+        />
+      );
+    }
+    return (
+      <div
+        className={cn(
+          sizeClasses,
+          "rounded-full bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold flex items-center justify-center shrink-0 shadow-xs select-none"
+        )}
+      >
+        {userInitial}
+      </div>
+    );
+  };
 
   // Filter navigation items and submenus based on role restrictions
   const filteredNavigation = useMemo(() => {
@@ -200,10 +322,6 @@ export function Sidebar() {
         };
       });
   }, [isOwner]);
-
-  const handleFinanceLogout = () => {
-    ownerLogout();
-  };
 
   const toggleSubmenu = (menuName: string) => {
     setOpenSubmenu((prev) => (prev === menuName ? null : menuName));
@@ -221,9 +339,16 @@ export function Sidebar() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isExpanded]);
 
-  // Close overlay on outside click
+  // Close overlay on outside click (ignoring clicks inside radix popover portals)
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest?.('[data-radix-popper-content-wrapper]') ||
+        target?.closest?.('[role="dialog"]')
+      ) {
+        return;
+      }
       if (
         isExpanded &&
         sidebarRef.current &&
@@ -606,34 +731,194 @@ export function Sidebar() {
         </nav>
 
         {/* User / Finance Info & Logout Section */}
-        {owner && (
-          <div className="flex-shrink-0 border-t border-border p-3">
-            {isExpanded ? (
-              <div className="flex items-center justify-between min-w-0 overflow-hidden animate-in fade-in duration-200">
-                <div className="flex items-center space-x-2.5 min-w-0 flex-1 overflow-hidden">
-                  <div className="w-8 h-8 shrink-0 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-full flex items-center justify-center shadow-sm">
-                    <Building className="h-4 w-4 text-white" />
+        {(owner || user) && (
+          <div className="flex-shrink-0 border-t border-border p-2.5 bg-card/60 backdrop-blur-sm">
+            <Popover open={profileOpen} onOpenChange={setProfileOpen}>
+              <PopoverTrigger asChild>
+                {isExpanded ? (
+                  <button
+                    type="button"
+                    className={cn(
+                      "w-full flex items-center gap-2.5 p-2 rounded-xl text-left transition-colors cursor-pointer group select-none",
+                      profileOpen
+                        ? "bg-accent text-accent-foreground shadow-xs"
+                        : "hover:bg-accent/60 text-foreground"
+                    )}
+                    aria-label={`Open profile for ${displayName}`}
+                  >
+                    {/* Avatar: Photo or Capitalized Initial */}
+                    {renderAvatar("h-8 w-8 text-xs")}
+
+                    {/* Display Name & Role */}
+                    <div className="min-w-0 flex-1 overflow-hidden">
+                      <p className="text-xs font-semibold text-foreground truncate leading-tight">
+                        {displayName}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded font-medium border leading-tight truncate",
+                            getRoleBadgeClasses(rawRole)
+                          )}
+                        >
+                          {userRole}
+                        </span>
+                        {username && username !== displayName && (
+                          <span className="text-[10px] text-muted-foreground truncate">
+                            @{username}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Indicator */}
+                    <ChevronUp
+                      className={cn(
+                        "h-4 w-4 text-muted-foreground group-hover:text-foreground shrink-0 transition-transform duration-200",
+                        profileOpen ? "rotate-180 text-foreground" : ""
+                      )}
+                    />
+                  </button>
+                ) : (
+                  <div className="w-full flex justify-center mb-1.5">
+                    <button
+                      type="button"
+                      className={cn(
+                        "w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer select-none",
+                        profileOpen
+                          ? "ring-2 ring-primary ring-offset-2 ring-offset-background"
+                          : "hover:ring-2 hover:ring-primary/40 hover:scale-105"
+                      )}
+                      aria-label={`Open profile for ${displayName}`}
+                      title={displayName}
+                    >
+                      {renderAvatar("h-8 w-8 text-xs")}
+                    </button>
                   </div>
-                  <div className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">
-                    <p className="text-xs font-semibold text-foreground truncate">
-                      {owner.username}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      Finance
-                    </p>
+                )}
+              </PopoverTrigger>
+
+              <PopoverContent
+                side={isExpanded ? "top" : "right"}
+                align={isExpanded ? "start" : "end"}
+                sideOffset={isExpanded ? 10 : 14}
+                className="w-80 p-0 rounded-2xl border border-border/80 bg-popover/98 dark:bg-card/98 backdrop-blur-md shadow-2xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-150 z-[100]"
+              >
+                {/* Popover Header */}
+                <div className="p-4 bg-muted/40 border-b border-border/60">
+                  <div className="flex items-center gap-3">
+                    {renderAvatar("h-12 w-12 text-lg")}
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-sm font-semibold text-foreground truncate">
+                        {displayName}
+                      </h4>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border",
+                            getRoleBadgeClasses(rawRole)
+                          )}
+                        >
+                          {userRole}
+                        </span>
+                        {username && (
+                          <span className="text-xs text-muted-foreground truncate">
+                            @{username}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleFinanceLogout}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 transition-colors shrink-0 text-xs font-medium cursor-pointer"
-                  title="Finance Logout"
-                >
-                  <LogOut className="h-4 w-4 shrink-0" />
-                  <span className="whitespace-nowrap">Logout</span>
-                </button>
-              </div>
+                {/* Popover Details List */}
+                <div className="p-4 space-y-3 text-xs">
+                  {username && (
+                    <div className="flex items-start gap-2.5 text-muted-foreground">
+                      <User className="h-4 w-4 shrink-0 text-muted-foreground/80 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] uppercase font-semibold tracking-wider text-muted-foreground/70">
+                          Username
+                        </p>
+                        <p className="text-foreground font-medium truncate">
+                          {username}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {email && (
+                    <div className="flex items-start gap-2.5 text-muted-foreground">
+                      <Mail className="h-4 w-4 shrink-0 text-muted-foreground/80 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] uppercase font-semibold tracking-wider text-muted-foreground/70">
+                          Email
+                        </p>
+                        <p className="text-foreground font-medium truncate" title={email}>
+                          {email}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {phone && (
+                    <div className="flex items-start gap-2.5 text-muted-foreground">
+                      <Phone className="h-4 w-4 shrink-0 text-muted-foreground/80 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] uppercase font-semibold tracking-wider text-muted-foreground/70">
+                          Phone
+                        </p>
+                        <p className="text-foreground font-medium truncate">
+                          {phone}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {financeName && (
+                    <div className="flex items-start gap-2.5 text-muted-foreground">
+                      <Building className="h-4 w-4 shrink-0 text-muted-foreground/80 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] uppercase font-semibold tracking-wider text-muted-foreground/70">
+                          Finance Company
+                        </p>
+                        <p className="text-foreground font-medium truncate" title={financeName}>
+                          {financeName}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Popover Action: View Full Profile */}
+                <div className="p-3 bg-muted/20 border-t border-border/60">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      navigate('/UserProfile');
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 dark:bg-primary/20 dark:hover:bg-primary/30 transition-colors cursor-pointer"
+                  >
+                    <span>View Full Profile</span>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            {/* Logout Section: Immediately Below User Profile in both modes */}
+            {isExpanded ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="w-full mt-1.5 flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 transition-colors shrink-0 text-xs font-medium cursor-pointer"
+                title="Logout"
+                aria-label="Logout"
+              >
+                <LogOut className="h-4 w-4 shrink-0" />
+                <span className="truncate">Logoutr</span>
+              </button>
             ) : (
               <div className="w-full flex justify-center">
                 <HoverCard
@@ -651,23 +936,23 @@ export function Sidebar() {
                   <HoverCardTrigger asChild>
                     <button
                       type="button"
-                      onClick={handleFinanceLogout}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl text-muted-foreground hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
-                      title="Finance Logout"
-                      aria-label="Finance Logout"
+                      onClick={handleLogout}
+                      className="w-9 h-9 flex items-center justify-center rounded-xl text-muted-foreground hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
+                      title="Logout"
+                      aria-label="Logout"
                     >
-                      <LogOut className="h-5 w-5" />
+                      <LogOut className="h-4.5 w-4.5" />
                     </button>
                   </HoverCardTrigger>
                   <HoverCardContent
                     side="right"
                     align="center"
-                    sideOffset={10}
+                    sideOffset={14}
                     className="w-auto min-w-[120px] p-2.5 rounded-xl border border-border/80 bg-popover/95 dark:bg-gray-900/95 backdrop-blur-md shadow-2xl before:content-[''] before:absolute before:-left-3.5 before:top-0 before:bottom-0 before:w-4 before:bg-transparent"
                   >
                     <div className="flex flex-col gap-0.5">
                       <span className="text-xs font-semibold text-foreground truncate">
-                        {owner.username}
+                        {displayName}
                       </span>
                       <span className="text-[11px] text-red-500 font-medium flex items-center gap-1">
                         <LogOut className="h-3 w-3" /> Click to Logout

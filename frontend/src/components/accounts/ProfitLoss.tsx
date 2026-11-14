@@ -61,11 +61,13 @@ export default function ProfitLoss() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold text-foreground">Profit & Loss Statement</h1>
-        <p className="text-muted-foreground mt-1">
-          {data ? `For the period ${dateFrom} to ${dateTo}` : "Profit & Loss statement"} · Click any ledger / amount to drill down
-        </p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Profit & Loss Statement</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {data ? `For the period ${dateFrom} to ${dateTo}` : "Profit & Loss statement"} · Click any ledger / amount to drill down
+          </p>
+        </div>
       </motion.div>
 
       {/* Date filter bar */}

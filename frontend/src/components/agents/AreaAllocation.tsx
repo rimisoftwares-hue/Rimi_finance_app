@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Card, CardContent } from "../ui/card";
 import { Button } from "../ui/button";
 import { CapitalizedInput } from "../common/CapitalizedInput";
-import { TableSkeletonRows } from "../common";
+import { TableSkeletonRows, TablePagination } from "../common";
 import { Badge } from "../ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "../ui/dialog";
+import { useClientPagination } from "../../hooks/useClientPagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Checkbox } from "../ui/checkbox";
 import { MapPin, Plus, Edit2, Trash2, Users, AlertTriangle, X, Loader2 } from "lucide-react";
@@ -257,12 +257,27 @@ export default function AreaAllocation() {
   const totalAreasCount = availableAreas.length;
   const unallocatedCount = Math.max(0, totalAreasCount - allocatedCount);
 
+  const {
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    paginatedItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filteredAgents, {
+    initialPageSize: 15,
+    resetKey: searchTerm,
+  });
+
   return (
-    <div className="p-4 md:p-6 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 w-full">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Area Allocation</h1>
-          <p className="text-sm text-muted-foreground">Assign collection areas to agents</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Area Allocation</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Assign geographical collection areas and streets to field staff</p>
         </div>
         {isOwner && (
           <Button onClick={openAdd}>
@@ -281,62 +296,64 @@ export default function AreaAllocation() {
         ].map((kpi) => (
           <Card key={kpi.label}>
             <CardContent className="p-4 flex items-center gap-3">
-              <div className={`p-2 rounded-lg bg-muted ${kpi.color}`}><kpi.icon className="h-5 w-5" /></div>
+              <div className={`p-2 rounded-xl bg-muted ${kpi.color}`}><kpi.icon className="h-5 w-5" /></div>
               <div><p className="text-2xl font-bold text-foreground">{kpi.value}</p><p className="text-xs text-muted-foreground">{kpi.label}</p></div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Agent Area Mapping</CardTitle>
-            <CapitalizedInput
-              casing="words"
-              placeholder="Search agent or area..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-64"
-            />
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur">
-              <TableRow>
-                <TableHead>Agent</TableHead>
-                <TableHead>Areas</TableHead>
-                <TableHead className="text-center">Customers</TableHead>
-                <TableHead className="text-center">Unpaid</TableHead>
-                {isOwner && <TableHead className="text-center">Actions</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+      <div className="dashboard-card !p-4 hover:translate-y-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold text-foreground">Agent Area Mapping</h2>
+          <Badge variant="secondary" className="text-xs">{filteredAgents.length}</Badge>
+        </div>
+        <CapitalizedInput
+          casing="words"
+          placeholder="Search agent or area..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full sm:w-64"
+        />
+      </div>
+
+      <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-border bg-secondary/50">
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Agent</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Areas</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Customers</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Unpaid</th>
+                {isOwner && <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Actions</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
               {isLoading ? (
                 <TableSkeletonRows columns={isOwner ? 5 : 4} rows={6} />
               ) : filteredAgents.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={isOwner ? 5 : 4} className="h-32 text-center text-muted-foreground">
+                <tr>
+                  <td colSpan={isOwner ? 5 : 4} className="px-4 py-12 text-sm text-center text-muted-foreground">
                     {searchTerm
                       ? "No agents or areas match your search."
                       : "No area allocations found. Click \"Add Allocation\" to assign areas."}
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               ) : (
-                filteredAgents.map((agent, i) => (
+                paginatedItems.map((agent, i) => (
                   <motion.tr
                     key={agent.id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
-                    className="border-b transition-colors hover:bg-muted/50"
+                    className="hover:bg-secondary/40 transition-colors"
                   >
-                    <TableCell>
+                    <td className="px-4 py-3 text-sm">
                       <div className="font-semibold text-sm text-foreground">{agent.name}</div>
                       <div className="text-xs text-muted-foreground">{agent.phone || "No phone"}</div>
-                    </TableCell>
-                    <TableCell>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
                       <div className="flex flex-wrap gap-1">
                         {agent.areas.length === 0 ? (
                           <span className="text-xs text-muted-foreground italic">No areas assigned</span>
@@ -349,15 +366,15 @@ export default function AreaAllocation() {
                           ))
                         )}
                       </div>
-                    </TableCell>
-                    <TableCell className="text-center font-semibold">{agent.totalCustomers}</TableCell>
-                    <TableCell className="text-center">
+                    </td>
+                    <td className="px-4 py-3 text-sm text-center font-semibold">{agent.totalCustomers}</td>
+                    <td className="px-4 py-3 text-sm text-center">
                       <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
                         {agent.unpaidCustomers ?? agent.activeAssignments}
                       </Badge>
-                    </TableCell>
+                    </td>
                     {isOwner && (
-                      <TableCell className="text-center">
+                      <td className="px-4 py-3 text-sm text-center">
                         <div className="flex justify-center gap-1">
                           <Button
                             variant="ghost"
@@ -378,15 +395,26 @@ export default function AreaAllocation() {
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
-                      </TableCell>
+                      </td>
                     )}
                   </motion.tr>
                 ))
               )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </tbody>
+          </table>
+        </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          disabled={isLoading}
+        />
+      </div>
 
       {/* Allocation Edit / Add Dialog */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>

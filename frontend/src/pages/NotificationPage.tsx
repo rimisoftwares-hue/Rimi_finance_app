@@ -1,12 +1,9 @@
 // src/pages/NotificationPage.tsx
 import { useState, useMemo } from 'react';
-import { 
-  CheckCheck, 
-  RotateCw, 
+import {
   Archive,
   CheckCircle2,
-  CalendarDays,
-  KeyRound
+  CalendarDays
 } from 'lucide-react';
 import { useNotifications } from '../hooks/useNotifications';
 import { NotificationCategory, NotificationItemData } from '../types/notification';
@@ -144,65 +141,27 @@ export default function NotificationPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+    <div className="space-y-6 w-full pb-12">
       {/* ─── Row 1: Page Header ─────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-5 border-b border-border/80">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-              Notifications
-            </h1>
-            {unreadCount > 0 ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-                {unreadCount} unread
-              </span>
-            ) : (
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary text-muted-foreground border border-border/60">
-                All caught up
-              </span>
-            )}
-          </div>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Stay updated on important activity across your finance operations.
-          </p>
-        </div>
-
-        {/* Global Header Actions: Join with Code, Refresh & Mark All as Read */}
-        <div className="flex items-center gap-2.5 self-stretch sm:self-auto flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setJoinCodeOpen(true)}
-            className="h-9 px-3.5 rounded-xl border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary text-xs font-semibold transition-all shadow-2xs"
-          >
-            <KeyRound className="h-3.5 w-3.5 mr-2 text-primary" />
-            <span>Join with Code</span>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isRefreshing || isLoading}
-            className="h-9 px-3.5 rounded-xl border-border/80 hover:bg-secondary text-xs font-medium transition-all shadow-2xs"
-          >
-            <RotateCw className={`h-3.5 w-3.5 mr-2 ${isRefreshing ? 'animate-spin text-primary' : 'text-muted-foreground'}`} />
-            <span>Refresh</span>
-          </Button>
-
-          {unreadCount > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={markAllAsRead}
-              className="h-9 px-3.5 rounded-xl border-border/80 hover:bg-primary/5 hover:border-primary/40 text-xs font-medium text-foreground hover:text-primary transition-all shadow-2xs"
-            >
-              <CheckCheck className="h-4 w-4 mr-2 text-primary" />
-              <span>Mark all as read</span>
-            </Button>
+      <div>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+            Notifications
+          </h1>
+          {unreadCount > 0 ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+              {unreadCount} unread
+            </span>
+          ) : (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary text-muted-foreground border border-border/60">
+              All caught up
+            </span>
           )}
         </div>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+          Stay updated on important activity across your finance operations.
+        </p>
       </div>
 
       {/* ─── Row 2 & Row 3: Search Toolbar & Category Filters ────────────────── */}
@@ -216,6 +175,12 @@ export default function NotificationPage() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         filteredCount={filteredNotifications.length}
+        onJoinCodeClick={() => setJoinCodeOpen(true)}
+        onRefresh={handleRefresh}
+        isRefreshing={isRefreshing}
+        isLoading={isLoading}
+        onMarkAllAsRead={markAllAsRead}
+        unreadCount={unreadCount}
       />
 
       {/* ─── Bulk Action Toolbar (when items are selected) ───────────────────── */}

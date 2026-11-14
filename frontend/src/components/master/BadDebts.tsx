@@ -1,16 +1,14 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Search, AlertTriangle, FileWarning } from "lucide-react";
 import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "../ui/table";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../ui/select";
+import { TablePagination } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
 
 interface BadDebtEntry {
   id: number;
@@ -38,92 +36,137 @@ export default function BadDebts() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
-  const filtered = data.filter((d) => {
-    if (statusFilter && statusFilter !== "all" && d.status !== statusFilter) return false;
-    if (searchTerm) {
-      const s = searchTerm.toLowerCase();
-      return d.hplNo.toLowerCase().includes(s) || d.customerName.toLowerCase().includes(s) || d.phone.includes(s) || d.vehicleNumber.toLowerCase().includes(s);
-    }
-    return true;
+  const filtered = useMemo(
+    () =>
+      data.filter((d) => {
+        if (statusFilter && statusFilter !== "all" && d.status !== statusFilter) return false;
+        if (searchTerm) {
+          const s = searchTerm.toLowerCase();
+          return (
+            d.hplNo.toLowerCase().includes(s) ||
+            d.customerName.toLowerCase().includes(s) ||
+            d.phone.includes(s) ||
+            d.vehicleNumber.toLowerCase().includes(s)
+          );
+        }
+        return true;
+      }),
+    [data, searchTerm, statusFilter]
+  );
+
+  const {
+    paginatedItems,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, {
+    initialPageSize: 15,
+    resetKey: `${searchTerm}|${statusFilter}`,
   });
 
   const totalOutstanding = data.reduce((sum, d) => sum + d.outstandingAmount, 0);
 
   const statusColor = (s: string) => {
-    if (s === "Write-off") return "bg-red-500/10 text-red-600 border-red-500/20";
-    if (s === "Legal") return "bg-yellow-500/10 text-yellow-600 border-yellow-500/20";
-    return "bg-purple-500/10 text-purple-600 border-purple-500/20";
+    if (s === "Write-off") return "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20";
+    if (s === "Legal") return "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20";
+    return "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20";
   };
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><FileWarning className="h-6 w-6 text-destructive" />Bad Debts</h1>
-        <p className="text-sm text-muted-foreground">Customer default reporting and tracking</p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center gap-2">
+            <FileWarning className="h-6 w-6 text-destructive" />Bad Debts
+          </h1>
+          <p className="text-muted-foreground mt-1 text-sm">Track written-off accounts, defaulting loans, and debt recovery</p>
+        </div>
       </motion.div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="pt-4 pb-4"><p className="text-xs text-muted-foreground">Total Cases</p><p className="text-xl font-bold text-foreground">{data.length}</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-4"><p className="text-xs text-muted-foreground">Outstanding</p><p className="text-xl font-bold text-destructive">₹{totalOutstanding.toLocaleString()}</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-4"><p className="text-xs text-muted-foreground">Write-off</p><p className="text-xl font-bold text-red-600">{data.filter((d) => d.status === "Write-off").length}</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-4"><p className="text-xs text-muted-foreground">Legal Cases</p><p className="text-xl font-bold text-yellow-600">{data.filter((d) => d.status === "Legal").length}</p></CardContent></Card>
+        <Card><CardContent className="pt-4 pb-4"><p className="text-xs text-muted-foreground">Write-off</p><p className="text-xl font-bold text-red-600 dark:text-red-400">{data.filter((d) => d.status === "Write-off").length}</p></CardContent></Card>
+        <Card><CardContent className="pt-4 pb-4"><p className="text-xs text-muted-foreground">Legal Cases</p><p className="text-xl font-bold text-yellow-600 dark:text-yellow-400">{data.filter((d) => d.status === "Legal").length}</p></CardContent></Card>
       </div>
 
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex gap-3 mb-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search HPL, Customer, Phone, Vehicle..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40"><SelectValue placeholder="Status" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="Write-off">Write-off</SelectItem>
-                <SelectItem value="Legal">Legal</SelectItem>
-                <SelectItem value="Police Case">Police Case</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur">
-                <TableRow>
-                  <TableHead className="text-xs">HPL No</TableHead>
-                  <TableHead className="text-xs">Customer</TableHead>
-                  <TableHead className="text-xs">Phone</TableHead>
-                  <TableHead className="text-xs">Vehicle</TableHead>
-                  <TableHead className="text-xs text-right">Loan Amt</TableHead>
-                  <TableHead className="text-xs text-right">Outstanding</TableHead>
-                  <TableHead className="text-xs">Last Payment</TableHead>
-                  <TableHead className="text-xs text-right">Default Days</TableHead>
-                  <TableHead className="text-xs">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((item) => (
-                  <TableRow key={item.id} className="hover:bg-muted/50">
-                    <TableCell className="text-xs font-mono text-primary">{item.hplNo}</TableCell>
-                    <TableCell className="text-sm font-semibold text-foreground">{item.customerName}</TableCell>
-                    <TableCell className="text-xs font-mono text-muted-foreground">{item.phone}</TableCell>
-                    <TableCell className="text-xs font-mono text-foreground">{item.vehicleNumber}</TableCell>
-                    <TableCell className="text-sm text-right font-mono">₹{item.loanAmount.toLocaleString()}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-medium text-destructive">₹{item.outstandingAmount.toLocaleString()}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{item.lastPaymentDate}</TableCell>
-                    <TableCell className="text-right">
+      <div className="dashboard-card !p-4 hover:translate-y-0 flex flex-wrap gap-3 items-center">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search HPL, Customer, Phone, Vehicle..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-40"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="Write-off">Write-off</SelectItem>
+            <SelectItem value="Legal">Legal</SelectItem>
+            <SelectItem value="Police Case">Police Case</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-border bg-secondary/50">
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">HPL No</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Customer</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Phone</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Vehicle</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Loan Amt</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Outstanding</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Last Payment</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Default Days</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {paginatedItems.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    No bad debt entries found
+                  </td>
+                </tr>
+              ) : (
+                paginatedItems.map((item) => (
+                  <tr key={item.id} className="hover:bg-secondary/40 transition-colors">
+                    <td className="px-4 py-3 text-xs font-mono text-primary">{item.hplNo}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-foreground">{item.customerName}</td>
+                    <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{item.phone}</td>
+                    <td className="px-4 py-3 text-xs font-mono text-foreground">{item.vehicleNumber}</td>
+                    <td className="px-4 py-3 text-sm text-right font-mono text-foreground">₹{item.loanAmount.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-right font-mono font-medium text-destructive">₹{item.outstandingAmount.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">{item.lastPaymentDate}</td>
+                    <td className="px-4 py-3 text-sm text-right">
                       <Badge variant={item.defaultDays > 120 ? "destructive" : "secondary"} className="text-xs">
                         {item.defaultDays > 120 && <AlertTriangle className="h-3 w-3 mr-1" />}{item.defaultDays}d
                       </Badge>
-                    </TableCell>
-                    <TableCell><Badge variant="outline" className={`text-xs ${statusColor(item.status)}`}>{item.status}</Badge></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+                    </td>
+                    <td className="px-4 py-3 text-sm"><Badge variant="outline" className={`text-xs ${statusColor(item.status)}`}>{item.status}</Badge></td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
+      </div>
     </div>
   );
 }

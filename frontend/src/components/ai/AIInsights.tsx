@@ -1,24 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Brain, TrendingUp, AlertTriangle, Users, BarChart3, ShieldAlert, Award, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Progress } from "../ui/progress";
-import { TableSkeletonRows } from "../common";
+import { TablePagination, TableSkeletonRows } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
 import { aiApi, RiskLevel } from "../../api/aiApi";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from "recharts";
 
-const riskColor = (score: number) => (score >= 80 ? "text-red-600" : score >= 50 ? "text-amber-600" : "text-green-600");
+const riskColor = (score: number) => (score >= 80 ? "text-red-600 dark:text-red-400" : score >= 50 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400");
 
 const riskBadge = (level?: RiskLevel, score = 0) => {
   const effective = level || (score >= 80 ? "critical" : score >= 60 ? "high" : score >= 35 ? "warning" : "safe");
-  if (effective === "critical") return <Badge className="bg-red-600/15 text-red-700 border-red-600/30">Critical</Badge>;
-  if (effective === "high") return <Badge className="bg-orange-500/15 text-orange-700 border-orange-500/30">High</Badge>;
-  if (effective === "warning") return <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30">Warning</Badge>;
-  return <Badge className="bg-green-500/15 text-green-700 border-green-500/30">Safe</Badge>;
+  if (effective === "critical") return <Badge className="bg-red-600/15 text-red-700 dark:text-red-400 border-red-600/30">Critical</Badge>;
+  if (effective === "high") return <Badge className="bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30">High</Badge>;
+  if (effective === "warning") return <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30">Warning</Badge>;
+  return <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30">Safe</Badge>;
 };
 
 export default function AIInsights() {
@@ -63,11 +64,23 @@ export default function AIInsights() {
   const sentimentVsRecovery = insights?.sentimentVsRecovery ?? [];
   const topOutcomes = insights?.topOutcomes ?? [];
   const activeCustomers = insights?.activeCustomers ?? [];
-  const watchList = insights?.highRiskCustomers ?? [];
+  const watchList = useMemo(() => insights?.highRiskCustomers ?? [], [insights]);
   const maxOutcomeCount = Math.max(1, ...topOutcomes.map((o) => o.count));
 
+  const {
+    paginatedItems: paginatedWatchList,
+    page,
+    setPage,
+    pageSize,
+    setPageSize,
+    totalItems,
+    totalPages,
+    startIndex,
+    endIndex,
+  } = useClientPagination(watchList, { initialPageSize: 15 });
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 w-full">
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
@@ -81,18 +94,18 @@ export default function AIInsights() {
       </motion.div>
 
       {error && (
-        <Card className="border-red-300 bg-red-50/50 dark:bg-red-950/20">
-          <CardContent className="p-4 text-sm text-red-600">{error}</CardContent>
+        <Card className="border-destructive/30 bg-destructive/10">
+          <CardContent className="p-4 text-sm text-destructive">{error}</CardContent>
         </Card>
       )}
 
       {/* Top Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {[
-          { label: "Call Connection Rate", value: loading && !insights ? "—" : `${topStats.connectionRatePct}%`, icon: Award, color: "text-green-600" },
-          { label: "PTP Conversion Rate", value: loading && !insights ? "—" : `${topStats.ptpConversionPct}%`, icon: TrendingUp, color: "text-blue-600" },
-          { label: "High / Critical Risk Share", value: loading && !insights ? "—" : `${topStats.highRiskPct}%`, icon: AlertTriangle, color: "text-red-600" },
-          { label: "Calls in Last 24h", value: loading && !insights ? "—" : String(topStats.activeConversations), icon: Users, color: "text-purple-600" },
+          { label: "Call Connection Rate", value: loading && !insights ? "—" : `${topStats.connectionRatePct}%`, icon: Award, color: "text-green-600 dark:text-green-400" },
+          { label: "PTP Conversion Rate", value: loading && !insights ? "—" : `${topStats.ptpConversionPct}%`, icon: TrendingUp, color: "text-blue-600 dark:text-blue-400" },
+          { label: "High / Critical Risk Share", value: loading && !insights ? "—" : `${topStats.highRiskPct}%`, icon: AlertTriangle, color: "text-red-600 dark:text-red-400" },
+          { label: "Calls in Last 24h", value: loading && !insights ? "—" : String(topStats.activeConversations), icon: Users, color: "text-purple-600 dark:text-purple-400" },
         ].map((stat, i) => (
           <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }}>
             <Card className="hover:shadow-lg transition-all">
@@ -204,7 +217,7 @@ export default function AIInsights() {
                 <p className="text-sm text-muted-foreground py-6 text-center">No customer AI calls recorded yet</p>
               ) : (
                 activeCustomers.map((c) => (
-                  <div key={c.customerId || c.name} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                  <div key={c.customerId || c.name} className="flex items-center justify-between p-2 rounded-xl border border-border/60 bg-muted/30 hover:bg-muted/50 transition-colors">
                     <div className="flex items-center gap-2">
                       <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
                         {c.name.charAt(0)}
@@ -230,7 +243,7 @@ export default function AIInsights() {
                 { metric: "Promise-to-Pay Captured", val: String(topStats.ptpCalls) },
                 { metric: "Avg Connected Duration", val: topStats.avgDurationSec > 0 ? `${topStats.avgDurationSec}s` : "—" },
               ].map((row) => (
-                <div key={row.metric} className="p-2.5 rounded-lg bg-muted/30 flex items-center justify-between">
+                <div key={row.metric} className="p-2.5 rounded-xl border border-border/60 bg-muted/30 flex items-center justify-between">
                   <p className="text-xs text-muted-foreground">{row.metric}</p>
                   <span className="text-sm font-bold text-primary">{row.val}</span>
                 </div>
@@ -241,54 +254,64 @@ export default function AIInsights() {
       </div>
 
       {/* High Risk Table */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}>
-        <Card className="hover:shadow-lg transition-shadow">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-red-500" /> High-Risk Overdue Customer Watch
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b bg-muted/30">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="space-y-4">
+        <div className="dashboard-card !p-4 hover:translate-y-0 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-red-500" /> High-Risk Overdue Customer Watch
+          </h2>
+          <Badge variant="secondary" className="text-xs">{watchList.length}</Badge>
+        </div>
+
+        <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-border bg-secondary/50">
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Customer</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">HPL No</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Due Risk</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Credit Score</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Overdue EMI</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Overdue Days</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Level</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {loading && watchList.length === 0 ? (
+                  <TableSkeletonRows columns={7} rows={6} />
+                ) : watchList.length === 0 ? (
                   <tr>
-                    <th className="text-left p-3 font-medium text-muted-foreground">Customer</th>
-                    <th className="text-left p-3 font-medium text-muted-foreground">HPL No</th>
-                    <th className="text-left p-3 font-medium text-muted-foreground">Due Risk</th>
-                    <th className="text-left p-3 font-medium text-muted-foreground">Credit Score</th>
-                    <th className="text-left p-3 font-medium text-muted-foreground">Overdue EMI</th>
-                    <th className="text-left p-3 font-medium text-muted-foreground">Overdue Days</th>
-                    <th className="text-left p-3 font-medium text-muted-foreground">Level</th>
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                      No overdue customers found
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {loading && watchList.length === 0 ? (
-                    <TableSkeletonRows columns={7} rows={6} />
-                  ) : watchList.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-6 text-center text-muted-foreground">
-                        No overdue customers found
-                      </td>
+                ) : (
+                  paginatedWatchList.map((c) => (
+                    <tr key={c.customerId || c.hpl} className="hover:bg-secondary/40 transition-colors">
+                      <td className="px-4 py-3 text-sm font-medium text-foreground">{c.name}</td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{c.hpl}</td>
+                      <td className={`px-4 py-3 text-sm font-bold ${riskColor(c.score)}`}>{c.score}%</td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{c.creditScore != null ? `${c.creditScore}/100` : "—"}</td>
+                      <td className="px-4 py-3 text-sm text-foreground font-medium">{c.overdue}</td>
+                      <td className="px-4 py-3 text-sm text-foreground">{c.days}d</td>
+                      <td className="px-4 py-3 text-sm">{riskBadge(c.riskLevel, c.score)}</td>
                     </tr>
-                  ) : (
-                    watchList.map((c) => (
-                      <tr key={c.customerId || c.hpl} className="border-b hover:bg-muted/50 transition-colors">
-                        <td className="p-3 font-medium text-foreground">{c.name}</td>
-                        <td className="p-3 text-muted-foreground">{c.hpl}</td>
-                        <td className={`p-3 font-bold ${riskColor(c.score)}`}>{c.score}%</td>
-                        <td className="p-3 text-muted-foreground">{c.creditScore != null ? `${c.creditScore}/100` : "—"}</td>
-                        <td className="p-3 text-foreground font-medium">{c.overdue}</td>
-                        <td className="p-3 text-foreground">{c.days}d</td>
-                        <td className="p-3">{riskBadge(c.riskLevel, c.score)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalItems}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </div>
       </motion.div>
     </div>
   );

@@ -1,14 +1,14 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Card, CardContent } from "../ui/card";
 import { Button } from "../ui/button";
 import { CapitalizedInput } from "../common/CapitalizedInput";
-import { TableSkeletonRows } from "../common";
+import { TableSkeletonRows, TablePagination } from "../common";
 import { DatePicker } from "../ui/date-picker";
 import { Badge } from "../ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
+import { useClientPagination } from "../../hooks/useClientPagination";
 import {
   Search,
   Calendar,
@@ -47,12 +47,12 @@ function formatCurrency(num: number): string {
 }
 
 const statusConfig: Record<string, { label: string; icon: any; color: string }> = {
-  pending: { label: "Pending", icon: Clock, color: "bg-yellow-500/10 text-yellow-600 border-yellow-500/20" },
-  visited: { label: "Visited", icon: CheckCircle2, color: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
-  collected: { label: "Collected", icon: CheckCircle2, color: "bg-green-500/10 text-green-600 border-green-500/20" },
-  partial: { label: "Partial", icon: Clock, color: "bg-orange-500/10 text-orange-600 border-orange-500/20" },
+  pending: { label: "Pending", icon: Clock, color: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20" },
+  visited: { label: "Visited", icon: CheckCircle2, color: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20" },
+  collected: { label: "Collected", icon: CheckCircle2, color: "bg-green-500/10 text-green-600 dark:text-emerald-400 border-green-500/20" },
+  partial: { label: "Partial", icon: Clock, color: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20" },
   failed: { label: "Failed", icon: XCircle, color: "bg-destructive/10 text-destructive border-destructive/20" },
-  reassigned: { label: "Reassigned", icon: RefreshCw, color: "bg-purple-500/10 text-purple-600 border-purple-500/20" },
+  reassigned: { label: "Reassigned", icon: RefreshCw, color: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20" },
   seized: { label: "Bike Seized", icon: AlertTriangle, color: "bg-destructive/10 text-destructive border-destructive/20" },
 };
 
@@ -204,6 +204,18 @@ export default function AssignmentHistory() {
       return true;
     });
   }, [batches, searchTerm, statusFilter, agentFilter]);
+
+  const batchCustomers = useMemo(() => batchDetails?.customers ?? [], [batchDetails]);
+
+  const mainPagination = useClientPagination(filteredBatches, {
+    initialPageSize: 15,
+    resetKey: `${searchTerm}|${statusFilter}|${agentFilter}|${dateFrom}|${dateTo}`,
+  });
+
+  const detailPagination = useClientPagination(batchCustomers, {
+    initialPageSize: 15,
+    resetKey: `${selectedBatch?.agentId ?? ""}|${selectedBatch?.assignedDate ?? ""}`,
+  });
 
   // CSV Export for current filtered batches
   const handleExportCsv = () => {
@@ -398,7 +410,7 @@ export default function AssignmentHistory() {
   ];
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
+    <div className="space-y-4 w-full">
       {/* ─── Detail View (when a batch row is clicked) ───────────────────────── */}
       {selectedBatch ? (
         <div className="space-y-4">
@@ -431,30 +443,28 @@ export default function AssignmentHistory() {
           </div>
 
           {isLoadingDetails || !batchDetails ? (
-            <Card>
-              <CardContent className="p-0">
-                <div className="overflow-auto max-h-[60vh]">
-                  <Table>
-                    <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur z-10">
-                      <TableRow>
-                        <TableHead>Customer</TableHead>
-                        <TableHead>Phone</TableHead>
-                        <TableHead>Area</TableHead>
-                        <TableHead>Vehicle</TableHead>
-                        <TableHead className="text-right">Target Due</TableHead>
-                        <TableHead className="text-right">Collected Due</TableHead>
-                        <TableHead className="text-right">Penalty</TableHead>
-                        <TableHead className="text-center">Status</TableHead>
-                        <TableHead>Notes</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      <TableSkeletonRows columns={9} rows={6} />
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="border-b border-border bg-secondary/50">
+                      <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Customer</th>
+                      <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Phone</th>
+                      <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Area</th>
+                      <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Vehicle</th>
+                      <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Target Due</th>
+                      <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Collected Due</th>
+                      <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Penalty</th>
+                      <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Status</th>
+                      <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    <TableSkeletonRows columns={9} rows={6} />
+                  </tbody>
+                </table>
+              </div>
+            </div>
           ) : (
             <>
               {/* Agent & Batch Header Card */}
@@ -495,7 +505,7 @@ export default function AssignmentHistory() {
                     </div>
 
                     {/* Mini Totals */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-muted/40 p-3 rounded-lg border">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-secondary/30 p-3 rounded-xl border border-border/60">
                       <div>
                         <div className="text-[11px] text-muted-foreground">Target Due</div>
                         <div className="text-sm font-bold text-foreground">
@@ -504,7 +514,7 @@ export default function AssignmentHistory() {
                       </div>
                       <div>
                         <div className="text-[11px] text-muted-foreground">Collected</div>
-                        <div className="text-sm font-bold text-green-600">
+                        <div className="text-sm font-bold text-green-600 dark:text-emerald-400">
                           ₹{formatCurrency(batchDetails.totals.collectedAmount)}
                         </div>
                       </div>
@@ -525,119 +535,129 @@ export default function AssignmentHistory() {
                 </CardContent>
               </Card>
 
-              {/* Customers in this Batch Table */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base flex items-center justify-between">
-                    <span>Customers in this Batch ({batchDetails.customers.length})</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-auto max-h-[60vh]">
-                    <Table>
-                      <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur z-10">
-                        <TableRow>
-                          <TableHead>Customer</TableHead>
-                          <TableHead>Phone</TableHead>
-                          <TableHead>Area</TableHead>
-                          <TableHead>Vehicle</TableHead>
-                          <TableHead className="text-right">Target Due</TableHead>
-                          <TableHead className="text-right">Collected Due</TableHead>
-                          <TableHead className="text-right">Penalty</TableHead>
-                          <TableHead className="text-center">Status</TableHead>
-                          <TableHead>Notes</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {batchDetails.customers.map((c, i) => {
-                          const sc = statusConfig[c.effectiveStatus] || statusConfig.pending;
-                          return (
-                            <motion.tr
-                              key={c.assignmentId}
-                              initial={{ opacity: 0, y: 5 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{ delay: i * 0.02 }}
-                              className="border-b transition-colors hover:bg-muted/50"
-                            >
-                              <TableCell>
-                                <Link
-                                  to={`/customers/${c.customerId}`}
-                                  className="font-semibold text-sm text-primary hover:underline block"
+              {/* Customers in this Batch Toolbar + Table */}
+              <div className="dashboard-card !p-4 hover:translate-y-0 flex items-center justify-between">
+                <h2 className="text-base font-semibold text-foreground">
+                  Customers in this Batch ({batchDetails.customers.length})
+                </h2>
+              </div>
+
+              <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="border-b border-border bg-secondary/50">
+                        <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Customer</th>
+                        <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Phone</th>
+                        <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Area</th>
+                        <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Vehicle</th>
+                        <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Target Due</th>
+                        <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Collected Due</th>
+                        <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Penalty</th>
+                        <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Status</th>
+                        <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/50">
+                      {detailPagination.paginatedItems.map((c, i) => {
+                        const sc = statusConfig[c.effectiveStatus] || statusConfig.pending;
+                        return (
+                          <motion.tr
+                            key={c.assignmentId}
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.02 }}
+                            className="hover:bg-secondary/40 transition-colors"
+                          >
+                            <td className="px-4 py-3 text-sm">
+                              <Link
+                                to={`/customers/${c.customerId}`}
+                                className="font-semibold text-sm text-primary hover:underline block"
+                              >
+                                {c.customerName}
+                              </Link>
+                              <Badge variant="outline" className="text-[10px] mt-0.5">
+                                HPL {c.hplno}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-sm font-mono text-muted-foreground">
+                              {c.phone}
+                            </td>
+                            <td className="px-4 py-3 text-sm max-w-[180px] truncate" title={c.customerAddress}>
+                              {c.customerAddress}
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              <div className="text-xs font-medium font-mono text-foreground">
+                                {c.vehicleNumber}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate max-w-[140px]">
+                                {c.vehicleModel}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right font-semibold">
+                              ₹{formatCurrency(c.targetDue)}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right font-semibold">
+                              {c.isSeized && c.collectedAmount === 0 ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                <span className="text-green-600 dark:text-emerald-400">₹{formatCurrency(c.collectedAmount)}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-right">
+                              {c.penaltyAmount > 0 ? (
+                                <span className="text-foreground">₹{formatCurrency(c.penaltyAmount)}</span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-center">
+                              {c.isSeized ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] bg-destructive/10 text-destructive border-destructive/20 font-semibold"
                                 >
-                                  {c.customerName}
-                                </Link>
-                                <Badge variant="outline" className="text-[10px] mt-0.5">
-                                  HPL {c.hplno}
+                                  <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+                                  Bike Seized
                                 </Badge>
-                              </TableCell>
-                              <TableCell className="text-xs font-mono text-muted-foreground">
-                                {c.phone}
-                              </TableCell>
-                              <TableCell className="text-xs max-w-[180px] truncate" title={c.customerAddress}>
-                                {c.customerAddress}
-                              </TableCell>
-                              <TableCell>
-                                <div className="text-xs font-medium font-mono text-foreground">
-                                  {c.vehicleNumber}
-                                </div>
-                                <div className="text-[10px] text-muted-foreground truncate max-w-[140px]">
-                                  {c.vehicleModel}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-right font-semibold text-sm">
-                                ₹{formatCurrency(c.targetDue)}
-                              </TableCell>
-                              <TableCell className="text-right font-semibold text-sm">
-                                {c.isSeized && c.collectedAmount === 0 ? (
-                                  <span className="text-muted-foreground">—</span>
-                                ) : (
-                                  <span className="text-green-600">₹{formatCurrency(c.collectedAmount)}</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right text-xs">
-                                {c.penaltyAmount > 0 ? (
-                                  <span className="text-foreground">₹{formatCurrency(c.penaltyAmount)}</span>
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                {c.isSeized ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px] bg-destructive/10 text-destructive border-destructive/20 font-semibold"
-                                  >
-                                    <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
-                                    Bike Seized
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="outline" className={`text-[10px] ${sc.color}`}>
-                                    <sc.icon className="h-2.5 w-2.5 mr-0.5" />
-                                    {sc.label}
-                                  </Badge>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-xs text-muted-foreground max-w-[160px] truncate" title={c.notes}>
-                                {c.notes || "—"}
-                              </TableCell>
-                            </motion.tr>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
+                              ) : (
+                                <Badge variant="outline" className={`text-[10px] ${sc.color}`}>
+                                  <sc.icon className="h-2.5 w-2.5 mr-0.5" />
+                                  {sc.label}
+                                </Badge>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-muted-foreground max-w-[160px] truncate" title={c.notes}>
+                              {c.notes || "—"}
+                            </td>
+                          </motion.tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <TablePagination
+                  page={detailPagination.page}
+                  totalPages={detailPagination.totalPages}
+                  pageSize={detailPagination.pageSize}
+                  onPageChange={detailPagination.setPage}
+                  onPageSizeChange={detailPagination.setPageSize}
+                  totalItems={detailPagination.totalItems}
+                  startIndex={detailPagination.startIndex}
+                  endIndex={detailPagination.endIndex}
+                  disabled={isLoadingDetails}
+                />
+              </div>
             </>
           )}
         </div>
       ) : (
         /* ─── Batch Table View ─────────────────────────────────────────────────── */
         <>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">Assignment History</h1>
-              <p className="text-sm text-muted-foreground">Track all customer-agent assignments</p>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Assignment History</h1>
+              <p className="text-muted-foreground mt-1 text-sm">Track all customer-agent assignments</p>
             </div>
             <Button variant="outline" size="sm" onClick={handleExportCsv}>
               <Download className="h-4 w-4 mr-1" />
@@ -650,7 +670,7 @@ export default function AssignmentHistory() {
             {kpiCards.map((kpi) => (
               <Card key={kpi.label}>
                 <CardContent className="p-4 flex items-center gap-3">
-                  <div className={`p-2 rounded-lg bg-muted ${kpi.color}`}>
+                  <div className={`p-2 rounded-xl bg-muted ${kpi.color}`}>
                     <kpi.icon className="h-5 w-5" />
                   </div>
                   <div>
@@ -725,105 +745,114 @@ export default function AssignmentHistory() {
           </Card>
 
           {/* Main Batch Table */}
-          <Card>
-            <CardContent className="p-0">
-              <div className="overflow-auto max-h-[55vh]">
-                <Table>
-                  <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur z-10">
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Target Date</TableHead>
-                      <TableHead>Agent</TableHead>
-                      <TableHead className="text-center">Customers</TableHead>
-                      <TableHead className="text-center">Seized</TableHead>
-                      <TableHead>Assigned By</TableHead>
-                      <TableHead className="text-right">Target Due</TableHead>
-                      <TableHead className="text-right">Collected Due</TableHead>
-                      <TableHead className="text-center">Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {isLoading ? (
-                      <TableSkeletonRows columns={9} rows={6} />
-                    ) : filteredBatches.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
-                          {searchTerm || statusFilter !== "all" || agentFilter !== "all"
-                            ? "No assignment batches match your filter."
-                            : "No assignment batches found for the selected date range."}
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredBatches.map((b, i) => {
-                        const sc = statusConfig[b.batchStatus] || statusConfig.pending;
-                        return (
-                          <motion.tr
-                            key={`${b.agentId}-${b.assignedDate}-${b.targetDate || "none"}-${b.assignedBy || "none"}`}
-                            initial={{ opacity: 0, y: 5 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: i * 0.03 }}
-                            onClick={() => openBatchDetails(b)}
-                            className="border-b transition-colors hover:bg-muted/50 cursor-pointer"
-                          >
-                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-mono">
-                              {b.assignedDate}
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-mono">
-                              {b.targetDate || "—"}
-                            </TableCell>
-                            <TableCell>
-                              <div className="font-semibold text-sm text-foreground">{b.agentName}</div>
-                              <div className="text-xs text-muted-foreground">{b.agentPhone || "—"}</div>
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {b.allocatedAreas.map((area) => (
-                                  <Badge key={area} variant="secondary" className="text-[10px]">
-                                    <MapPin className="h-2.5 w-2.5 mr-0.5" />
-                                    {area}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <span className="font-semibold text-sm text-foreground">
-                                {b.customerCount} {b.customerCount === 1 ? "Customer" : "Customers"}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-center">
-                              {b.seizedCount > 0 ? (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px] bg-destructive/10 text-destructive border-destructive/20 font-semibold"
-                                >
-                                  {b.seizedCount} Seized
+          <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b border-border bg-secondary/50">
+                    <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Date</th>
+                    <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Target Date</th>
+                    <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Agent</th>
+                    <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Customers</th>
+                    <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Seized</th>
+                    <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Assigned By</th>
+                    <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Target Due</th>
+                    <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Collected Due</th>
+                    <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {isLoading ? (
+                    <TableSkeletonRows columns={9} rows={6} />
+                  ) : filteredBatches.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-4 py-12 text-sm text-center text-muted-foreground">
+                        {searchTerm || statusFilter !== "all" || agentFilter !== "all"
+                          ? "No assignment batches match your filter."
+                          : "No assignment batches found for the selected date range."}
+                      </td>
+                    </tr>
+                  ) : (
+                    mainPagination.paginatedItems.map((b, i) => {
+                      const sc = statusConfig[b.batchStatus] || statusConfig.pending;
+                      return (
+                        <motion.tr
+                          key={`${b.agentId}-${b.assignedDate}-${b.targetDate || "none"}-${b.assignedBy || "none"}`}
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: i * 0.03 }}
+                          onClick={() => openBatchDetails(b)}
+                          className="hover:bg-secondary/40 transition-colors cursor-pointer"
+                        >
+                          <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap font-mono">
+                            {b.assignedDate}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap font-mono">
+                            {b.targetDate || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <div className="font-semibold text-sm text-foreground">{b.agentName}</div>
+                            <div className="text-xs text-muted-foreground">{b.agentPhone || "—"}</div>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {b.allocatedAreas.map((area) => (
+                                <Badge key={area} variant="secondary" className="text-[10px]">
+                                  <MapPin className="h-2.5 w-2.5 mr-0.5" />
+                                  {area}
                                 </Badge>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">0</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              {b.assignedByName}
-                            </TableCell>
-                            <TableCell className="text-right font-semibold text-sm">
-                              ₹{formatCurrency(b.targetDueAmount)}
-                            </TableCell>
-                            <TableCell className="text-right font-semibold text-sm text-green-600">
-                              ₹{formatCurrency(b.collectedDueAmount)}
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <Badge variant="outline" className={`text-[10px] ${sc.color}`}>
-                                <sc.icon className="h-2.5 w-2.5 mr-0.5" />
-                                {sc.label}
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-center">
+                            <span className="font-semibold text-sm text-foreground">
+                              {b.customerCount} {b.customerCount === 1 ? "Customer" : "Customers"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-center">
+                            {b.seizedCount > 0 ? (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] bg-destructive/10 text-destructive border-destructive/20 font-semibold"
+                              >
+                                {b.seizedCount} Seized
                               </Badge>
-                            </TableCell>
-                          </motion.tr>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">0</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">
+                            {b.assignedByName}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-semibold">
+                            ₹{formatCurrency(b.targetDueAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-semibold text-green-600 dark:text-emerald-400">
+                            ₹{formatCurrency(b.collectedDueAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-center">
+                            <Badge variant="outline" className={`text-[10px] ${sc.color}`}>
+                              <sc.icon className="h-2.5 w-2.5 mr-0.5" />
+                              {sc.label}
+                            </Badge>
+                          </td>
+                        </motion.tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <TablePagination
+              page={mainPagination.page}
+              totalPages={mainPagination.totalPages}
+              pageSize={mainPagination.pageSize}
+              onPageChange={mainPagination.setPage}
+              onPageSizeChange={mainPagination.setPageSize}
+              totalItems={mainPagination.totalItems}
+              startIndex={mainPagination.startIndex}
+              endIndex={mainPagination.endIndex}
+              disabled={isLoading}
+            />
+          </div>
         </>
       )}
     </div>

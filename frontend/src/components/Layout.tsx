@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
-import { Moon, Sun, Bell, ChevronDown, Check, Loader2, Building2 } from "lucide-react";
+import { Moon, Sun, Bell, ChevronDown, Check, Loader2, Building2, KeyRound } from "lucide-react";
 import { Button } from "./ui/button";
 import { Sidebar } from "./Sidebar";
 import { useOwnerAuth } from "../contexts/OwnerAuthContext";
 import { useAuth } from "../contexts/AuthContext";
-import { UserProfile } from './UserProfile';
+import { JoinWithCodeDialog } from "./invitations/JoinWithCodeDialog";
 import { useNotifications } from '../hooks/useNotifications';
 import { toast } from "sonner";
 import { cn } from "./lib/utils";
@@ -22,6 +22,7 @@ export function Layout() {
   const [isDark, setIsDark] = useState(false);
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [joinCodeOpen, setJoinCodeOpen] = useState(false);
   const { owner, isLoading } = useOwnerAuth();
   const { currentFinance, financeList, switchFinance, refreshFinanceList } = useAuth();
   const { unreadCount } = useNotifications();
@@ -79,15 +80,15 @@ export function Layout() {
     <div className={`min-h-screen bg-background transition-colors duration-300 ${isDark ? "dark" : ""}`}>
       <div className="flex h-screen overflow-hidden">
         <Sidebar />
-        
+
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Header */}
-          <header 
+          <header
             className="h-10 border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-40 flex items-center justify-between"
             data-tauri-drag-region
           >
             {/* Left side with draggable area */}
-            <div 
+            <div
               className="flex items-center h-full px-6 flex-1 cursor-default"
               data-tauri-drag-region
             >
@@ -206,43 +207,58 @@ export function Layout() {
                 </DropdownMenu>
               </div>
             </div>
-            
             {/* Right side with controls - spaced for window controls (minimize/maximize/close) */}
-            <div className="flex items-center h-full space-x-2 pl-4 pr-36" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            <div className="flex items-center h-full space-x-2 pl-4 pr-[12rem]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+              {/* Join with Code */}
+              <button
+                type="button"
+                onClick={() => setJoinCodeOpen(true)}
+                className="relative h-8 w-8 flex items-center justify-center rounded-lg text-foreground/80 hover:text-primary transition-all duration-200 hover:scale-110 cursor-pointer bg-transparent border-0 shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                title="Join with Code"
+                aria-label="Join with Invitation Code"
+              >
+                <KeyRound className="h-4 w-4" />
+              </button>
+
               {/* Notification Bell */}
-              <Button
-                variant="outline"
-                size="sm"
+              <button
+                type="button"
                 onClick={() => navigate('/notification')}
-                className="relative hover:bg-secondary transition-colors"
+                className="relative h-8 w-8 flex items-center justify-center rounded-lg text-foreground/80 hover:text-primary transition-all duration-200 cursor-pointer bg-transparent border-0 shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 group"
                 title="Notifications"
                 aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
               >
-                <Bell className="h-4 w-4 text-foreground/80 hover:text-foreground transition-colors" />
+                <Bell className="h-4 w-4 hover-bell-ring transition-transform" />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground shadow-sm">
+                  <span className="absolute top-0.5 right-0.5 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground shadow-sm">
                     {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
                 <span className="sr-only">Notifications</span>
-              </Button>
+              </button>
 
               {/* Theme Toggle Button */}
-              <Button
-                variant="outline"
-                size="sm"
+              <button
+                type="button"
                 onClick={toggleTheme}
-                className="relative"
+                className="relative h-8 w-8 flex items-center justify-center rounded-lg text-foreground/80 hover:text-amber-500 dark:hover:text-blue-400 transition-colors duration-200 cursor-pointer bg-transparent border-0 shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 group"
+                title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+                aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
               >
-                <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-                <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+                {isDark ? (
+                  <Moon className="h-4 w-4 theme-toggle-moon" />
+                ) : (
+                  <Sun className="h-4 w-4 theme-toggle-sun" />
+                )}
                 <span className="sr-only">Toggle theme</span>
-              </Button>
-              
-              {/* User Profile Dropdown */}
-              <UserProfile />
+              </button>
             </div>
           </header>
+
+          <JoinWithCodeDialog
+            open={joinCodeOpen}
+            onOpenChange={setJoinCodeOpen}
+          />
 
           {/* Main Content */}
           <main className="flex-1 overflow-auto bg-background">

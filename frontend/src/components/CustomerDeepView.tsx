@@ -39,12 +39,24 @@ interface Props {
 
 const formatINR = (value: number | null | undefined) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 
+// Matches Layout.tsx <header className="h-10 ... z-40"> (2.5rem) and
+// Sidebar.tsx permanent w-16 (4rem) rail across all viewport widths.
+const DRAWER_OVERLAY_CLASSES = "inset-auto top-10 right-0 bottom-0 left-16 z-[45]";
+const DRAWER_CONTENT_CLASSES = [
+  "inset-y-auto top-10 bottom-0 right-0 z-[48]",
+  "flex flex-col gap-0 p-0",
+  "h-[calc(100dvh-2.5rem)] w-[calc(100vw-4rem)] sm:max-w-2xl",
+  "rounded-l-2xl rounded-r-none border-l border-t border-b border-border",
+  "bg-card [background:var(--gradient-card)] shadow-2xl overflow-hidden",
+  "[&>[data-sheet-close]]:top-4 [&>[data-sheet-close]]:right-4 [&>[data-sheet-close]]:rounded-lg [&>[data-sheet-close]]:p-1.5 [&>[data-sheet-close]]:hover:bg-secondary [&>[data-sheet-close]]:transition-colors",
+].join(" ");
+
 const creditBandClass = (band: CreditBand) => {
   switch (band) {
-    case "Excellent": return "bg-green-500/15 text-green-700 border-green-300";
-    case "Good": return "bg-emerald-500/15 text-emerald-700 border-emerald-300";
-    case "Fair": return "bg-yellow-500/15 text-yellow-700 border-yellow-300";
-    case "Poor": return "bg-red-500/15 text-red-700 border-red-300";
+    case "Excellent": return "bg-green-500/15 text-green-700 dark:text-green-400 border-green-300 dark:border-green-500/30";
+    case "Good": return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-500/30";
+    case "Fair": return "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-500/30";
+    case "Poor": return "bg-red-500/15 text-red-700 dark:text-red-400 border-red-300 dark:border-red-500/30";
   }
 };
 
@@ -97,6 +109,21 @@ export function CustomerDeepView({ customer, open, onClose }: Props) {
     return () => controller.abort();
   }, [open, customerId, reloadKey]);
 
+  // Radix modal Dialog/Sheet sets `pointer-events: none` on <body> while open.
+  // Re-enable pointer-events on the uncovered Layout <header data-tauri-drag-region>
+  // so Tauri window dragging and header controls remain usable without making the
+  // drawer non-modal.
+  useEffect(() => {
+    if (!open || !customer) return;
+    const headerEl = document.querySelector<HTMLElement>("header[data-tauri-drag-region]");
+    if (!headerEl) return;
+    const prevPointerEvents = headerEl.style.pointerEvents;
+    headerEl.style.pointerEvents = "auto";
+    return () => {
+      headerEl.style.pointerEvents = prevPointerEvents;
+    };
+  }, [open, customer]);
+
   if (!customer) return null;
 
   const c = data?.customer;
@@ -118,16 +145,29 @@ export function CustomerDeepView({ customer, open, onClose }: Props) {
   const vehicleLabel = c ? (c.vehicleNumber ?? "—") : (customer.vehicleNumber ?? "—");
 
   return (
-    <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto p-0">
-        <SheetHeader className="p-6 pb-3 border-b border-border">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <SheetTitle className="text-xl">{c?.name ?? customer.name}</SheetTitle>
+    <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+      <SheetContent
+        overlayClassName={DRAWER_OVERLAY_CLASSES}
+        className={DRAWER_CONTENT_CLASSES}
+        onInteractOutside={(event) => {
+          const target = event.target as HTMLElement | null;
+          if (
+            target?.closest?.(
+              "header[data-tauri-drag-region], [data-radix-popper-content-wrapper]"
+            )
+          ) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <SheetHeader className="shrink-0 p-6 pb-4 border-b border-border bg-card/95 backdrop-blur-sm text-left space-y-0">
+          <div className="flex items-start justify-between gap-4 pr-10">
+            <div className="min-w-0">
+              <SheetTitle className="text-xl truncate">{c?.name ?? customer.name}</SheetTitle>
               <p className="text-sm text-muted-foreground mt-1">{hplLabel} · {vehicleLabel}</p>
             </div>
             {riskLevel && (
-              <span className={`px-3 py-1 rounded-full text-xs font-bold border capitalize ${riskBadgeCls}`}>
+              <span className={`shrink-0 px-3 py-1 rounded-full text-xs font-bold border capitalize ${riskBadgeCls}`}>
                 {riskLevel}{risk ? ` · Due Risk ${risk.dueRiskScore}` : ""}
               </span>
             )}
@@ -143,27 +183,28 @@ export function CustomerDeepView({ customer, open, onClose }: Props) {
           </div>
         </SheetHeader>
 
-        {!isLive ? (
-          <div className="px-6 py-12 text-center text-sm text-muted-foreground">
-            Live risk profile is not available for this customer yet.
-          </div>
-        ) : loading ? (
-          <div className="px-6 pt-4 pb-6 space-y-4">
-            <Skeleton className="h-9 w-full rounded-lg" />
-            <div className="grid grid-cols-2 gap-3">
-              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {!isLive ? (
+            <div className="px-6 py-12 text-center text-sm text-muted-foreground">
+              Live risk profile is not available for this customer yet.
             </div>
-            <Skeleton className="h-28 w-full rounded-xl" />
-            <Skeleton className="h-20 w-full rounded-xl" />
-          </div>
-        ) : error ? (
-          <div className="px-6 py-12 text-center space-y-3">
-            <p className="text-sm text-red-600">{error}</p>
-            <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => setReloadKey((k) => k + 1)}>
-              <RefreshCw className="h-3.5 w-3.5" />Retry
-            </Button>
-          </div>
-        ) : c && risk ? (
+          ) : loading ? (
+            <div className="px-6 pt-4 pb-6 space-y-4">
+              <Skeleton className="h-9 w-full rounded-lg" />
+              <div className="grid grid-cols-2 gap-3">
+                {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}
+              </div>
+              <Skeleton className="h-28 w-full rounded-xl" />
+              <Skeleton className="h-20 w-full rounded-xl" />
+            </div>
+          ) : error ? (
+            <div className="px-6 py-12 text-center space-y-3">
+              <p className="text-sm text-destructive">{error}</p>
+              <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => setReloadKey((k) => k + 1)}>
+                <RefreshCw className="h-3.5 w-3.5" />Retry
+              </Button>
+            </div>
+          ) : c && risk ? (
           <Tabs value={tab} onValueChange={setTab} className="px-6 pt-4 pb-6">
             <TabsList className="grid grid-cols-5 w-full mb-4">
               <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
@@ -389,7 +430,8 @@ export function CustomerDeepView({ customer, open, onClose }: Props) {
               </div>
             </TabsContent>
           </Tabs>
-        ) : null}
+          ) : null}
+        </div>
       </SheetContent>
     </Sheet>
   );

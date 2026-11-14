@@ -21,7 +21,7 @@ const VehicleLoanEdit = () => {
         setLoading(true);
         setInitialData(null);
         const response = await apiClient.get(`/customers/${hplno}`);
-        
+
         if (!isCurrent) return;
 
         if (!response.data || !response.data.customer) {
@@ -186,9 +186,9 @@ const VehicleLoanEdit = () => {
           title: 'Success',
           description: 'Customer updated successfully',
         });
-        
+
         navigate(`/customers/${initialData.customer.id}`);
-        console.log('formData.customer.hplno:',initialData.customer.id)
+        console.log('formData.customer.hplno:', initialData.customer.id)
         console.log('response.data body:', response.data);
       } else {
         throw new Error(response.data.error || 'Failed to update customer');
@@ -223,7 +223,7 @@ const VehicleLoanEdit = () => {
   }
 
   return (
-    <div className="container mx-auto py-6">
+    <div className="w-full">
       <MultiStepFormEdit
         key={initialData?.customer?.id || hplno}
         initialData={initialData}

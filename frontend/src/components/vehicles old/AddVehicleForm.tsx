@@ -450,7 +450,7 @@ export function AddVehiclePage() {
 
   return (
     <div className="w-full bg-background">
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6">
+      <div className="w-full space-y-6">
         {/* Header */}
         <div className="mb-6 md:mb-8">
           <Button
@@ -462,8 +462,8 @@ export function AddVehiclePage() {
             <span className="hidden sm:inline">Back</span>
           </Button>
 
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground">Add New Vehicle</h1>
-          <p className="text-muted-foreground mt-2 text-sm md:text-base">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Add New Vehicle</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
             Fill in the details below to add a new vehicle to your inventory.
           </p>
         </div>

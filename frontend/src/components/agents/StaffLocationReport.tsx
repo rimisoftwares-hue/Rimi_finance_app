@@ -1,19 +1,18 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Search, ExternalLink, AlertTriangle } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { MapPin, ExternalLink, AlertTriangle } from "lucide-react";
+import { Card, CardContent } from "../ui/card";
 import { CapitalizedInput } from "../common/CapitalizedInput";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "../ui/table";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Calendar } from "../ui/calendar";
 import { format } from "date-fns";
+import { useClientPagination } from "../../hooks/useClientPagination";
+import { TablePagination } from "../common/table/TablePagination";
 
 interface TrackingEntry {
   id: number;
@@ -53,14 +52,31 @@ export default function StaffLocationReport() {
   const [fromDate, setFromDate] = useState<Date>();
   const [toDate, setToDate] = useState<Date>();
 
-  const filtered = mockData.filter((entry) => {
-    if (staffFilter && !entry.staffName.toLowerCase().includes(staffFilter.toLowerCase())) return false;
-    if (customerFilter && !entry.customerName.toLowerCase().includes(customerFilter.toLowerCase())) return false;
-    if (hplFilter && !entry.hplNo.toLowerCase().includes(hplFilter.toLowerCase())) return false;
-    if (vehicleFilter && !entry.vehicleNumber.toLowerCase().includes(vehicleFilter.toLowerCase())) return false;
-    if (fromDate && new Date(entry.dateTime) < fromDate) return false;
-    if (toDate && new Date(entry.dateTime) > toDate) return false;
-    return true;
+  const filtered = useMemo(() => {
+    return mockData.filter((entry) => {
+      if (staffFilter && staffFilter !== "all" && !entry.staffName.toLowerCase().includes(staffFilter.toLowerCase())) return false;
+      if (customerFilter && !entry.customerName.toLowerCase().includes(customerFilter.toLowerCase())) return false;
+      if (hplFilter && !entry.hplNo.toLowerCase().includes(hplFilter.toLowerCase())) return false;
+      if (vehicleFilter && !entry.vehicleNumber.toLowerCase().includes(vehicleFilter.toLowerCase())) return false;
+      if (fromDate && new Date(entry.dateTime) < fromDate) return false;
+      if (toDate && new Date(entry.dateTime) > toDate) return false;
+      return true;
+    });
+  }, [staffFilter, customerFilter, hplFilter, vehicleFilter, fromDate, toDate]);
+
+  const {
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    paginatedItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, {
+    initialPageSize: 15,
+    resetKey: `${staffFilter}|${customerFilter}|${hplFilter}|${vehicleFilter}|${fromDate?.toISOString()}|${toDate?.toISOString()}`,
   });
 
   const staffDistances = filtered.reduce((acc, e) => {
@@ -74,9 +90,11 @@ export default function StaffLocationReport() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-bold text-foreground">Staff Location Report</h1>
-        <p className="text-sm text-muted-foreground">Track staff visits and meeting locations</p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Staff Location Report</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Track staff visits and meeting locations</p>
+        </div>
       </motion.div>
 
       {/* Filters */}
@@ -127,65 +145,81 @@ export default function StaffLocationReport() {
       </div>
 
       {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-auto max-h-[60vh]">
-            <Table>
-              <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur z-10">
-                <TableRow>
-                  <TableHead className="text-xs">Date & Time</TableHead>
-                  <TableHead className="text-xs">Staff</TableHead>
-                  <TableHead className="text-xs">Code</TableHead>
-                  <TableHead className="text-xs">Customer</TableHead>
-                  <TableHead className="text-xs">Vehicle</TableHead>
-                  <TableHead className="text-xs">Finance</TableHead>
-                  <TableHead className="text-xs">Distance</TableHead>
-                  <TableHead className="text-xs">Customer Location</TableHead>
-                  <TableHead className="text-xs">Meeting Location</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((entry) => (
-                  <TableRow key={entry.id} className="hover:bg-muted/50">
-                    <TableCell className="text-xs whitespace-nowrap">{entry.dateTime}</TableCell>
-                    <TableCell>
+      <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-border bg-secondary/50">
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Date & Time</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Staff</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Code</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Customer</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Vehicle</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Finance</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Distance</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Customer Location</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Meeting Location</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-12 text-sm text-center text-muted-foreground">
+                    No location entries match the selected filters.
+                  </td>
+                </tr>
+              ) : (
+                paginatedItems.map((entry) => (
+                  <tr key={entry.id} className="hover:bg-secondary/40 transition-colors">
+                    <td className="px-4 py-3 text-sm whitespace-nowrap text-muted-foreground">{entry.dateTime}</td>
+                    <td className="px-4 py-3 text-sm">
                       <div>
                         <p className="text-sm font-medium text-foreground">{entry.staffName}</p>
                         <Badge variant="outline" className="text-[10px] mt-0.5">{entry.role}</Badge>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-xs font-mono text-muted-foreground">{entry.staffCode}</TableCell>
-                    <TableCell>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-mono text-muted-foreground">{entry.staffCode}</td>
+                    <td className="px-4 py-3 text-sm">
                       <div>
                         <p className="text-xs font-mono text-primary">{entry.hplNo}</p>
                         <p className="text-sm font-semibold text-foreground">{entry.customerName}</p>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-xs font-mono text-foreground">{entry.vehicleNumber}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{entry.financeName}</TableCell>
-                    <TableCell>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-mono text-foreground">{entry.vehicleNumber}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{entry.financeName}</td>
+                    <td className="px-4 py-3 text-sm">
                       <Badge variant={entry.meetDistance > 15 ? "destructive" : entry.meetDistance > 8 ? "secondary" : "outline"} className="text-xs">
                         {entry.meetDistance > 15 && <AlertTriangle className="h-3 w-3 mr-1" />}
                         {entry.meetDistance.toFixed(1)} KM
                       </Badge>
-                    </TableCell>
-                    <TableCell>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
                       <button onClick={() => openMaps(entry.customerLat, entry.customerLng)} className="flex items-center gap-1 text-xs text-primary hover:underline">
                         <MapPin className="h-3 w-3" />{entry.customerLocation}<ExternalLink className="h-3 w-3" />
                       </button>
-                    </TableCell>
-                    <TableCell>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
                       <button onClick={() => openMaps(entry.meetingLat, entry.meetingLng)} className="flex items-center gap-1 text-xs text-primary hover:underline">
                         <MapPin className="h-3 w-3" />{entry.meetingLocation}<ExternalLink className="h-3 w-3" />
                       </button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+        />
+      </div>
     </div>
   );
 }

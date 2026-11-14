@@ -25,24 +25,24 @@ const EditCustomer = () => {
         setError(null);
         setCustomerData(null);
         const response = await apiClient.get(`/customers/${hplno}`);
-        
+
         if (!isCurrent) return;
 
         if (!response.data || !response.data.customer) {
           throw new Error('Customer not found');
         }
-        
+
         setCustomerData(response.data);
       } catch (err) {
         if (!isCurrent) return;
         let errorMessage = 'Failed to load customer data';
-        
+
         if (axios.isAxiosError(err)) {
           errorMessage = err.response?.data?.error || err.message;
         } else if (err instanceof Error) {
           errorMessage = err.message;
         }
-        
+
         setError(errorMessage);
         console.error('Error fetching customer:', errorMessage);
       } finally {
@@ -51,7 +51,7 @@ const EditCustomer = () => {
         }
       }
     };
-    
+
     if (hplno) {
       fetchCustomerData();
     }
@@ -74,16 +74,16 @@ const EditCustomer = () => {
     setIsSubmitting(true);
     try {
       const token = localStorage.getItem('financeToken');
-      
+
       // Prepare form data with files
       const submitData = new FormData();
-      
+
       // Add all customer data
       submitData.append('customer', JSON.stringify(formData.customer));
       submitData.append('guardian', JSON.stringify(formData.guardian));
       submitData.append('loan', JSON.stringify(formData.loan));
       submitData.append('vehicle', JSON.stringify(formData.vehicle));
-      
+
       // Append files if they exist (only if they're new files, not URLs)
       if (formData.customer.cphoto instanceof File) {
         submitData.append('customerPhoto', formData.customer.cphoto);
@@ -173,20 +173,20 @@ const EditCustomer = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="w-full space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center gap-2">
               <User className="w-6 h-6" />
               Edit Customer: {customerData.customer.cname}
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-muted-foreground mt-1 text-sm">
               HPL No: {hplno} • Last updated: {new Date(customerData.customer.created_at).toLocaleDateString()}
             </p>
           </div>
-          
+
           <div className="flex gap-3">
             <Button
               variant="outline"

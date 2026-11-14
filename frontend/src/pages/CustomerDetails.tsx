@@ -523,13 +523,13 @@ const CustomerDetails = () => {
   };
 
   // ─── Render guards ────────────────────────────────────────────────────────
-  if (loading) return <div className="p-6 text-center">Loading customer details...</div>;
-  if (error) return <div className="p-6 text-center text-red-500">{error}</div>;
-  if (!customerData || !customer) return <div className="p-6 text-center">Customer not found</div>;
+  if (loading) return <div className="py-12 text-center text-muted-foreground">Loading customer details...</div>;
+  if (error) return <div className="py-12 text-center text-destructive">{error}</div>;
+  if (!customerData || !customer) return <div className="py-12 text-center text-muted-foreground">Customer not found</div>;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-full mx-auto px-2 sm:px-4 lg:px-6 py-4 lg:py-8 space-y-6">
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="w-full space-y-6">
 
         <CustomerHeader
           customer={customer}

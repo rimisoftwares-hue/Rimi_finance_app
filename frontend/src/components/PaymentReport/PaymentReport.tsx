@@ -81,11 +81,11 @@ const PaymentReport: React.FC = () => {
   };
 
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+    <div className="w-full space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">{getReportTitle()}</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">{getReportTitle()}</h1>
+          <p className="text-muted-foreground mt-1 text-sm">
             View and analyze payment transactions
           </p>
         </div>

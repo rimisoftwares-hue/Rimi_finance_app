@@ -210,7 +210,7 @@ const ConsultingEdit = () => {
   }
 
   return (
-    <div className="container mx-auto py-6">
+    <div className="w-full">
       <MultiStepFormEdit
         key={initialData?.customer?.id || hplno}
         initialData={initialData}

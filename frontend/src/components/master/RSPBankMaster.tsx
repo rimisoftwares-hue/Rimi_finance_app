@@ -1,15 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Plus, Edit, Trash2, Search } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "../ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Label } from "../ui/label";
+import { TablePagination } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
 
 interface RSPEntry {
   id: number;
@@ -43,7 +40,23 @@ export default function RSPBankMaster() {
   const [bankSearch, setBankSearch] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const filtered = data.filter((d) => d.bankName.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filtered = useMemo(
+    () => data.filter((d) => d.bankName.toLowerCase().includes(searchTerm.toLowerCase())),
+    [data, searchTerm]
+  );
+
+  const {
+    paginatedItems,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, { initialPageSize: 15, resetKey: searchTerm });
+
   const suggestions = bankSuggestions.filter((b) => b.toLowerCase().includes(bankSearch.toLowerCase()));
 
   const openAdd = () => { setEditItem(null); setForm({}); setBankSearch(""); setShowDialog(true); };
@@ -63,57 +76,74 @@ export default function RSPBankMaster() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">RSP - Bank Master</h1>
-          <p className="text-sm text-muted-foreground">Manage bank/NBFC interest rates and charges</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">RSP - Bank Master</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Manage company bank accounts, branches, and IFSC records</p>
         </div>
         <Button size="sm" onClick={openAdd}><Plus className="h-4 w-4 mr-1" />Add Entry</Button>
       </motion.div>
 
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex gap-3 mb-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search bank / NBFC..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
-            </div>
-          </div>
-          <div className="overflow-auto">
-            <Table>
-              <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur">
-                <TableRow>
-                  <TableHead className="text-xs">Bank / NBFC</TableHead>
-                  <TableHead className="text-xs text-right">Interest %</TableHead>
-                  <TableHead className="text-xs text-right">Validity (Months)</TableHead>
-                  <TableHead className="text-xs text-right">Interest After</TableHead>
-                  <TableHead className="text-xs text-right">Processing (₹)</TableHead>
-                  <TableHead className="text-xs text-right">Commission %</TableHead>
-                  <TableHead className="text-xs text-center">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((item) => (
-                  <TableRow key={item.id} className="hover:bg-muted/50">
-                    <TableCell className="text-sm font-medium text-foreground">{item.bankName}</TableCell>
-                    <TableCell className="text-sm text-right font-mono">{item.interestPercent}%</TableCell>
-                    <TableCell className="text-sm text-right">{item.validityMonths}</TableCell>
-                    <TableCell className="text-sm text-right font-mono">{item.interestAfterValidity}%</TableCell>
-                    <TableCell className="text-sm text-right font-mono">₹{item.processingCharges.toLocaleString()}</TableCell>
-                    <TableCell className="text-sm text-right font-mono">{item.appraiserCommission}%</TableCell>
-                    <TableCell className="text-center">
+      <div className="dashboard-card !p-4 hover:translate-y-0">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search bank / NBFC..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
+        </div>
+      </div>
+
+      <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-border bg-secondary/50">
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Bank / NBFC</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Interest %</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Validity (Months)</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Interest After</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Processing (₹)</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Commission %</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {paginatedItems.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    No bank / NBFC entries found
+                  </td>
+                </tr>
+              ) : (
+                paginatedItems.map((item) => (
+                  <tr key={item.id} className="hover:bg-secondary/40 transition-colors">
+                    <td className="px-4 py-3 text-sm font-medium text-foreground">{item.bankName}</td>
+                    <td className="px-4 py-3 text-sm text-right font-mono text-foreground">{item.interestPercent}%</td>
+                    <td className="px-4 py-3 text-sm text-right text-foreground">{item.validityMonths}</td>
+                    <td className="px-4 py-3 text-sm text-right font-mono text-foreground">{item.interestAfterValidity}%</td>
+                    <td className="px-4 py-3 text-sm text-right font-mono text-foreground">₹{item.processingCharges.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-right font-mono text-foreground">{item.appraiserCommission}%</td>
+                    <td className="px-4 py-3 text-sm text-center">
                       <div className="flex justify-center gap-1">
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(item)}><Edit className="h-3 w-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => deleteItem(item.id)}><Trash2 className="h-3 w-3" /></Button>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
+      </div>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent>

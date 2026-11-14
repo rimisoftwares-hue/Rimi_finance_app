@@ -25,8 +25,9 @@ import AddUserForm from './AddUserForm';
 import type { UserData, FinanceCompany } from './UserDetailModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { CapitalizedInput } from '../common/CapitalizedInput';
-import { TableSkeletonRows } from '../common';
+import { TableSkeletonRows, TablePagination } from '../common';
 import { Button } from '../ui/button';
+import { useClientPagination } from '../../hooks/useClientPagination';
 
 const getRoleBadgeClass = (role: string) => {
   switch (role) {
@@ -158,6 +159,21 @@ const AgentManagement = () => {
     });
   }, [users, searchQuery, filterRole]);
 
+  const {
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    paginatedItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filteredUsers, {
+    initialPageSize: 15,
+    resetKey: `${searchQuery}|${filterRole}`,
+  });
+
   const stats = [
     { label: 'Total Users', value: users.length, icon: Users, accent: 'text-primary' },
     {
@@ -181,29 +197,31 @@ const AgentManagement = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10 space-y-8">
-        {/* Gradient Header */}
-        <div className="gradient-header flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="w-full space-y-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight">User Management</h1>
-            <p className="mt-2 opacity-80 text-sm md:text-base">
-              Manage all users across your finance companies
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">User Management</h1>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Manage platform users, roles, active statuses, and account invitations
             </p>
           </div>
-          <div className="flex items-center gap-2.5 self-start md:self-auto">
-            <button
+          <div className="flex items-center gap-2.5 self-start sm:self-auto">
+            <Button
+              variant="outline"
               onClick={() => navigate('/invite')}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm text-emerald-950 dark:text-emerald-100 bg-emerald-500/20 hover:bg-emerald-500/30 active:bg-emerald-500/40 border border-emerald-500/30 hover:border-emerald-500/50 backdrop-blur-sm transition-all duration-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              className="bg-card hover:bg-muted text-foreground border border-border shadow-xs gap-2"
             >
               <UserPlus className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> Invite
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => setShowAddForm(true)}
-              className="btn-primary inline-flex items-center gap-2 bg-card/20 hover:bg-card/30 backdrop-blur-sm border border-primary-foreground/20 text-sm"
+              className="bg-card hover:bg-muted text-foreground border border-border shadow-xs gap-2"
             >
               <Plus className="h-4 w-4" /> Add User
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -263,34 +281,36 @@ const AgentManagement = () => {
           </div>
 
           {/* User Table */}
-          <div className="dashboard-card !p-0 overflow-hidden">
+          <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
             <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead>
-                  <tr className="bg-secondary/50">
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b border-border bg-secondary/50">
                     {['User Details', 'Role & Status', 'Login Times', 'Actions'].map(h => (
                       <th
                         key={h}
-                        className="px-6 py-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider"
+                        className={`text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 ${
+                          h === 'Actions' ? 'text-right' : ''
+                        }`}
                       >
                         {h}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="divide-y divide-border/50">
                   {isLoading && users.length === 0 ? (
                     <TableSkeletonRows columns={4} rows={6} />
                   ) : (
-                  filteredUsers.map(user => (
+                  paginatedItems.map(user => (
                     <React.Fragment key={user.id}>
                       <tr
-                        className={`transition-colors hover:bg-secondary/30 ${
+                        className={`hover:bg-secondary/40 transition-colors ${
                           expandedUser === user.id ? 'bg-primary/5' : ''
                         }`}
                       >
                         {/* User Details */}
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-3 text-sm">
                           <div
                             className="flex items-center gap-3 cursor-pointer"
                             onClick={() => setSelectedUser(user)}
@@ -327,7 +347,7 @@ const AgentManagement = () => {
                         </td>
 
                         {/* Role & Status */}
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-3 text-sm">
                           <div className="space-y-2">
                             <span className={getRoleBadgeClass(user.role)}>
                               {user.role.toUpperCase()}
@@ -345,7 +365,7 @@ const AgentManagement = () => {
                         </td>
 
                         {/* Login Times */}
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-3 text-sm">
                           <div className="flex items-center gap-2 text-sm text-card-foreground">
                             <Clock className="h-4 w-4 text-muted-foreground" />
                             <span>
@@ -361,7 +381,7 @@ const AgentManagement = () => {
                         </td>
 
                         {/* Actions */}
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-3 text-sm">
                           <div className="flex items-center justify-end gap-1">
                             {[
                               {
@@ -407,7 +427,7 @@ const AgentManagement = () => {
                         <tr>
                           <td
                             colSpan={4}
-                            className="px-6 py-5 bg-secondary/20 border-t border-border/50"
+                            className="px-4 py-4 bg-secondary/20 border-t border-border/50"
                           >
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                               <div>
@@ -512,6 +532,17 @@ const AgentManagement = () => {
                 </div>
               )}
             </div>
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              totalItems={totalItems}
+              startIndex={startIndex}
+              endIndex={endIndex}
+              disabled={isLoading}
+            />
           </div>
         </div>
 

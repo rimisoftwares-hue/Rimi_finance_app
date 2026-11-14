@@ -26,19 +26,12 @@ import {
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { DatePicker } from "../ui/date-picker";
-import { AppSelect, TableSkeletonRows, CardGridSkeleton } from "../common";
+import { AppSelect, TablePagination, TableSkeletonRows, CardGridSkeleton } from "../common";
 
 const TERMINATED_DATE_TYPE_OPTIONS = [
   { value: "any", label: "Any Date (Final Due or Termination)" },
   { value: "contractual", label: "Contractual Final Due Date" },
   { value: "actual", label: "Actual Termination Date" },
-];
-
-const TERMINATED_LIMIT_OPTIONS = [
-  { value: "10", label: "10" },
-  { value: "12", label: "12" },
-  { value: "25", label: "25" },
-  { value: "50", label: "50" },
 ];
 import {
   TerminatedAccountItem,
@@ -92,7 +85,7 @@ export default function Terminated() {
   const [records, setRecords] = useState<TerminatedAccountItem[]>([]);
   const [pagination, setPagination] = useState<TerminatedAccountsPagination>({
     page: 1,
-    limit: 12,
+    limit: 15,
     totalCount: 0,
     totalPages: 1,
     hasNextPage: false,
@@ -131,7 +124,7 @@ export default function Terminated() {
     dateTo: "",
     dateType: "any",
     page: 1,
-    limit: 12,
+    limit: 15,
   });
 
   // Debounce search input
@@ -347,17 +340,17 @@ export default function Terminated() {
   return (
     <div className="space-y-6 max-w-full">
       {/* ─── Header & Top Actions ────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
               Terminated Accounts
             </h1>
             <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-destructive/10 text-destructive border border-destructive/20">
               Live Ledger
             </span>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">
+          <p className="text-muted-foreground mt-1 text-sm">
             Contractually matured, closed, and seized loan accounts from verified database records
           </p>
         </motion.div>
@@ -531,7 +524,7 @@ export default function Terminated() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="dashboard-card border border-border/80 shadow-sm p-4 space-y-4"
+        className="dashboard-card !p-4 hover:translate-y-0 space-y-4"
       >
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
           {/* Global Search Input */}
@@ -792,7 +785,7 @@ export default function Terminated() {
 
       {/* ─── Main Content Area: Loading, Error, Empty, and Data ───────────────── */}
       {!loading && error ? (
-        <div className="p-8 bg-destructive/10 border border-destructive/20 rounded-xl text-center shadow-sm">
+        <div className="p-8 bg-destructive/10 border border-destructive/30 rounded-2xl text-center shadow-sm">
           <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-3" />
           <h3 className="text-lg font-bold text-foreground">
             Failed to Load Terminated Accounts
@@ -806,7 +799,7 @@ export default function Terminated() {
           </Button>
         </div>
       ) : !loading && records.length === 0 ? (
-        <div className="py-16 px-4 text-center bg-card rounded-xl border border-border shadow-sm">
+        <div className="dashboard-card hover:translate-y-0 py-16 px-4 text-center">
           <div className="w-16 h-16 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center mx-auto mb-4 border border-border">
             {hasActiveFilters ? <Search className="h-8 w-8" /> : <Clock className="h-8 w-8" />}
           </div>
@@ -829,22 +822,22 @@ export default function Terminated() {
         </div>
       ) : viewMode === "table" ? (
         /* ─── Table View (Standard Accounting Ledger) ────────────────────────── */
-        <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  <th className="py-3 px-4">Customer & Account</th>
-                  <th className="py-3 px-4">Phone</th>
-                  <th className="py-3 px-4">Vehicle & Broker</th>
-                  <th className="py-3 px-4">Dates</th>
-                  <th className="py-3 px-4">Overdue</th>
-                  <th className="py-3 px-4 text-right">Outstanding & Penalty</th>
-                  <th className="py-3 px-4">Status & Reason</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-border bg-secondary/50">
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Customer & Account</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Phone</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Vehicle & Broker</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Dates</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Overdue</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Outstanding & Penalty</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Status & Reason</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border text-sm">
+              <tbody className="divide-y divide-border/50">
                 {loading ? (
                   <TableSkeletonRows columns={8} rows={6} />
                 ) : (
@@ -856,11 +849,11 @@ export default function Terminated() {
                   return (
                     <tr
                       key={customer.id}
-                      className="hover:bg-muted/30 transition-colors cursor-pointer group"
+                      className="hover:bg-secondary/40 transition-colors cursor-pointer group"
                       onClick={() => handleViewCustomer(customer.customerId)}
                     >
                       {/* Customer Photo, Name, and HPL Number */}
-                      <td className="py-3 px-4">
+                      <td className="px-4 py-3 text-sm">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0 overflow-hidden border border-border">
                             {customer.photoUrl ? (
@@ -889,7 +882,7 @@ export default function Terminated() {
                       </td>
 
                       {/* Phone */}
-                      <td className="py-3 px-4">
+                      <td className="px-4 py-3 text-sm">
                         <div className="flex items-center gap-1.5 text-muted-foreground text-xs sm:text-sm">
                           <Phone className="h-3.5 w-3.5 text-muted-foreground/80 shrink-0" />
                           <span>{customer.phone}</span>
@@ -897,7 +890,7 @@ export default function Terminated() {
                       </td>
 
                       {/* Vehicle & Broker */}
-                      <td className="py-3 px-4">
+                      <td className="px-4 py-3 text-sm">
                         <div className="text-foreground font-medium text-xs sm:text-sm">
                           {customer.vehicleModel}
                         </div>
@@ -914,7 +907,7 @@ export default function Terminated() {
                       </td>
 
                       {/* Final Due / Actual Termination Dates */}
-                      <td className="py-3 px-4 text-xs space-y-1">
+                      <td className="px-4 py-3 text-xs space-y-1">
                         <div>
                           <span className="text-muted-foreground">Final Due: </span>
                           <span className="font-medium text-foreground">
@@ -932,7 +925,7 @@ export default function Terminated() {
                       </td>
 
                       {/* Days Overdue */}
-                      <td className="py-3 px-4">
+                      <td className="px-4 py-3 text-sm">
                         {customer.daysOverdue > 0 ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-destructive/10 text-destructive border border-destructive/20">
                             {customer.daysOverdue} days
@@ -945,7 +938,7 @@ export default function Terminated() {
                       </td>
 
                       {/* Outstanding Amount & Penalty Displayed Directly Underneath */}
-                      <td className="py-3 px-4 text-right">
+                      <td className="px-4 py-3 text-sm text-right">
                         <div className="font-bold text-expense text-sm sm:text-base">
                           ₹{formatCurrency(customer.outstandingAmount)}
                         </div>
@@ -958,7 +951,7 @@ export default function Terminated() {
                       </td>
 
                       {/* Status & Reason */}
-                      <td className="py-3 px-4">
+                      <td className="px-4 py-3 text-sm">
                         <span
                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${badge.bg} ${badge.text} ${badge.border}`}
                         >
@@ -972,7 +965,7 @@ export default function Terminated() {
                       </td>
 
                       {/* Actions */}
-                      <td className="py-3 px-4 text-right">
+                      <td className="px-4 py-3 text-sm text-right">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -993,6 +986,24 @@ export default function Terminated() {
               </tbody>
             </table>
           </div>
+          {!loading && !error && (
+            <TablePagination
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              pageSize={filters.limit || pagination.limit || 15}
+              totalItems={pagination.totalCount}
+              startIndex={(pagination.page - 1) * (filters.limit || pagination.limit || 15) + 1}
+              endIndex={Math.min(
+                pagination.page * (filters.limit || pagination.limit || 15),
+                pagination.totalCount
+              )}
+              onPageChange={(p) => setFilters((prev) => ({ ...prev, page: p }))}
+              onPageSizeChange={(limit) =>
+                setFilters((prev) => ({ ...prev, limit, page: 1 }))
+              }
+              disabled={loading}
+            />
+          )}
         </div>
       ) : loading ? (
         <CardGridSkeleton count={6} />
@@ -1081,7 +1092,7 @@ export default function Terminated() {
                     )}
 
                     {customer.terminationReason && customer.terminationReason !== "—" && (
-                      <div className="p-2 bg-muted/40 rounded-md text-xs text-muted-foreground mt-2 border border-border/60">
+                      <div className="p-2 bg-muted/40 rounded-xl text-xs text-muted-foreground mt-2 border border-border/60">
                         <span className="font-semibold text-foreground">Reason: </span>
                         {customer.terminationReason}
                       </div>
@@ -1112,70 +1123,25 @@ export default function Terminated() {
         </div>
       )}
 
-      {/* ─── Pagination Footer ───────────────────────────────────────────────── */}
-      {!loading && !error && records.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-3 px-2 border-t border-border">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>
-              Showing{" "}
-              <strong className="text-foreground">
-                {(pagination.page - 1) * pagination.limit + 1}
-              </strong>{" "}
-              to{" "}
-              <strong className="text-foreground">
-                {Math.min(pagination.page * pagination.limit, pagination.totalCount)}
-              </strong>{" "}
-              of <strong className="text-foreground">{pagination.totalCount}</strong>{" "}
-              records
-            </span>
-            <span className="mx-1">•</span>
-            <span>Items per page:</span>
-            <AppSelect
-              size="sm"
-              value={String(filters.limit || 12)}
-              onValueChange={(val) =>
-                setFilters((prev) => ({
-                  ...prev,
-                  limit: Number(val),
-                  page: 1,
-                }))
-              }
-              options={TERMINATED_LIMIT_OPTIONS}
-              className="w-[70px]"
-              triggerClassName="h-7 px-2 text-xs"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!pagination.hasPrevPage}
-              onClick={() =>
-                setFilters((prev) => ({ ...prev, page: Math.max(1, (prev.page || 1) - 1) }))
-              }
-              className="h-8 px-3 text-xs"
-            >
-              Previous
-            </Button>
-            <span className="text-xs font-medium text-foreground px-2">
-              Page {pagination.page} of {pagination.totalPages}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!pagination.hasNextPage}
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  page: Math.min(pagination.totalPages, (prev.page || 1) + 1),
-                }))
-              }
-              className="h-8 px-3 text-xs"
-            >
-              Next
-            </Button>
-          </div>
+      {/* ─── Pagination Footer (Grid View only) ─────────────────────────────── */}
+      {viewMode === "grid" && !loading && !error && pagination.totalCount > 15 && (
+        <div className="dashboard-card !p-0 overflow-hidden hover:translate-y-0">
+          <TablePagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            pageSize={filters.limit || pagination.limit || 15}
+            totalItems={pagination.totalCount}
+            startIndex={(pagination.page - 1) * (filters.limit || pagination.limit || 15) + 1}
+            endIndex={Math.min(
+              pagination.page * (filters.limit || pagination.limit || 15),
+              pagination.totalCount
+            )}
+            onPageChange={(p) => setFilters((prev) => ({ ...prev, page: p }))}
+            onPageSizeChange={(limit) =>
+              setFilters((prev) => ({ ...prev, limit, page: 1 }))
+            }
+            disabled={loading}
+          />
         </div>
       )}
     </div>

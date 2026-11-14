@@ -111,14 +111,15 @@ export function Profile() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Profile</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-2">
-            Manage your account and organization details
-          </p>
+    <div className="w-full space-y-6">
+      {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Profile</h1>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Manage your account and organization details
+            </p>
+          </div>
         </div>
 
         {error && (
@@ -366,7 +367,6 @@ export function Profile() {
           </div>
         )}
       </div>
-    </div>
   );
 }
 

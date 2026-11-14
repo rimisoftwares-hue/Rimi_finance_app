@@ -53,10 +53,10 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-          <p className="text-sm text-muted-foreground">System configuration and access control</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Settings</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Configure system preferences, loan policies, and business rules</p>
         </div>
         <Button size="sm"><Save className="h-4 w-4 mr-1" />Save All</Button>
       </motion.div>

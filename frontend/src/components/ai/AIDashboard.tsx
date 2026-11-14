@@ -20,9 +20,9 @@ const baseKpiCards = [
 ];
 
 const sentimentBadge = (s: string) => {
-  if (s === "positive") return <Badge className="bg-green-500/15 text-green-700 border-green-500/30">Positive</Badge>;
-  if (s === "negative") return <Badge className="bg-red-500/15 text-red-700 border-red-500/30">Negative</Badge>;
-  return <Badge className="bg-yellow-500/15 text-yellow-700 border-yellow-500/30">Neutral</Badge>;
+  if (s === "positive") return <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30">Positive</Badge>;
+  if (s === "negative") return <Badge className="bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30">Negative</Badge>;
+  return <Badge className="bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/30">Neutral</Badge>;
 };
 
 export default function AIDashboard() {
@@ -67,7 +67,7 @@ export default function AIDashboard() {
   const interactions = data?.recentInteractions ?? [];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 w-full">
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
@@ -81,8 +81,8 @@ export default function AIDashboard() {
       </motion.div>
 
       {error && (
-        <Card className="border-red-300 bg-red-50/50 dark:bg-red-950/20">
-          <CardContent className="p-4 text-sm text-red-600">{error}</CardContent>
+        <Card className="border-destructive/30 bg-destructive/10">
+          <CardContent className="p-4 text-sm text-destructive">{error}</CardContent>
         </Card>
       )}
 
@@ -173,7 +173,7 @@ export default function AIDashboard() {
                 {interactions.map((item) => (
                   <div
                     key={item.callId || item.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/60 transition-colors cursor-pointer"
+                    className="flex items-center justify-between p-3 rounded-xl border border-border/60 bg-muted/30 hover:bg-muted/60 transition-colors cursor-pointer"
                     onClick={() => item.callId && navigate(`/ai/calls/${encodeURIComponent(item.callId)}`)}
                   >
                     <div className="flex items-center gap-3">

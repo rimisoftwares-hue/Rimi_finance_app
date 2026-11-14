@@ -340,17 +340,17 @@ export default function KYCPending() {
   return (
     <div className="space-y-6 pb-12">
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl sm:text-3xl font-bold font-display text-foreground tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
               KYC Pending
             </h1>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
               {aggregates.totalCount} Pending
             </span>
           </div>
-          <p className="text-muted-foreground text-sm mt-1">
+          <p className="text-muted-foreground mt-1 text-sm">
             Real database records with incomplete photograph, government identity, or location compliance
           </p>
         </motion.div>
@@ -404,12 +404,12 @@ export default function KYCPending() {
       {/* Aggregate KPI Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Total Pending */}
-        <div className="card-elevated p-4 rounded-xl border border-border bg-card/60 backdrop-blur-sm relative overflow-hidden">
+        <div className="card-elevated p-4 relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Total KYC Pending
             </span>
-            <div className="p-2 rounded-lg bg-primary/10 text-primary">
+            <div className="p-2 rounded-xl bg-primary/10 text-primary">
               <ShieldAlert className="w-4 h-4" />
             </div>
           </div>
@@ -425,12 +425,12 @@ export default function KYCPending() {
         </div>
 
         {/* Card 2: Photo Pending */}
-        <div className="card-elevated p-4 rounded-xl border border-border bg-card/60 backdrop-blur-sm relative overflow-hidden">
+        <div className="card-elevated p-4 relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Photo Pending
             </span>
-            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
+            <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500">
               <Camera className="w-4 h-4" />
             </div>
           </div>
@@ -446,12 +446,12 @@ export default function KYCPending() {
         </div>
 
         {/* Card 3: Govt ID Pending */}
-        <div className="card-elevated p-4 rounded-xl border border-border bg-card/60 backdrop-blur-sm relative overflow-hidden">
+        <div className="card-elevated p-4 relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Govt ID Pending
             </span>
-            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
+            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500">
               <FileText className="w-4 h-4" />
             </div>
           </div>
@@ -467,12 +467,12 @@ export default function KYCPending() {
         </div>
 
         {/* Card 4: Location Pending */}
-        <div className="card-elevated p-4 rounded-xl border border-border bg-card/60 backdrop-blur-sm relative overflow-hidden">
+        <div className="card-elevated p-4 relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Location Pending
             </span>
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
+            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
               <MapPin className="w-4 h-4" />
             </div>
           </div>
@@ -489,7 +489,7 @@ export default function KYCPending() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="card-elevated p-4 rounded-xl border border-border bg-card">
+      <div className="card-elevated p-4">
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
           {/* Free Text Search */}
           <div className="relative flex-1">
@@ -809,22 +809,22 @@ export default function KYCPending() {
         )
       ) : (
         /* Table View */
-        <div className="card-elevated rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+        <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left border-collapse">
-              <thead className="bg-secondary/50 border-b border-border text-muted-foreground uppercase text-[11px] tracking-wider font-semibold">
-                <tr>
-                  <th className="py-3.5 px-4">Entity & Name</th>
-                  <th className="py-3.5 px-4">Account No</th>
-                  <th className="py-3.5 px-4">Phone</th>
-                  <th className="py-3.5 px-4">Vehicle / Details</th>
-                  <th className="py-3.5 px-4">Pending Items</th>
-                  <th className="py-3.5 px-4">Location</th>
-                  <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-4 text-right">Action</th>
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-border bg-secondary/50">
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Entity & Name</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Account No</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Phone</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Vehicle / Details</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Pending Items</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Location</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Status</th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/60">
+              <tbody className="divide-y divide-border/50">
                 {loading ? (
                   <TableSkeletonRows columns={8} rows={6} />
                 ) : (
@@ -835,7 +835,7 @@ export default function KYCPending() {
                     className="hover:bg-secondary/40 transition-colors cursor-pointer group"
                   >
                     {/* Entity & Name with Photo */}
-                    <td className="py-3 px-4">
+                    <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-3">
                         {item.hasPhoto && item.photoUrl ? (
                           <img
@@ -866,17 +866,17 @@ export default function KYCPending() {
                     </td>
 
                     {/* Account Number */}
-                    <td className="py-3 px-4 font-bold text-primary font-mono">
+                    <td className="px-4 py-3 text-sm font-bold text-primary font-mono">
                       {item.accountNumber}
                     </td>
 
                     {/* Phone */}
-                    <td className="py-3 px-4 text-foreground font-mono">
+                    <td className="px-4 py-3 text-sm text-foreground font-mono">
                       {item.phone}
                     </td>
 
                     {/* Vehicle & HP Amount */}
-                    <td className="py-3 px-4">
+                    <td className="px-4 py-3 text-sm">
                       {item.entityType === "Customer" ? (
                         <div>
                           <div className="font-medium text-foreground truncate max-w-[180px]">
@@ -894,7 +894,7 @@ export default function KYCPending() {
                     </td>
 
                     {/* Pending Items Badges */}
-                    <td className="py-3 px-4">
+                    <td className="px-4 py-3 text-sm">
                       <div className="flex flex-wrap gap-1">
                         {item.pendingItems.map((p) => {
                           const badge = pendingBadgeStyles[p];
@@ -913,7 +913,7 @@ export default function KYCPending() {
                     </td>
 
                     {/* Location */}
-                    <td className="py-3 px-4 text-muted-foreground max-w-[160px] truncate">
+                    <td className="px-4 py-3 text-sm text-muted-foreground max-w-[160px] truncate">
                       {item.hasLocation ? (
                         item.location && item.location.includes(",") && /\d/.test(item.location) ? (
                           <button
@@ -931,14 +931,14 @@ export default function KYCPending() {
                     </td>
 
                     {/* Verification Status */}
-                    <td className="py-3 px-4">
+                    <td className="px-4 py-3 text-sm">
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 capitalize">
                         {item.verificationStatus}
                       </span>
                     </td>
 
                     {/* Action */}
-                    <td className="py-3 px-4 text-right">
+                    <td className="px-4 py-3 text-sm text-right">
                       <Button
                         size="sm"
                         variant="ghost"
@@ -958,12 +958,30 @@ export default function KYCPending() {
               </tbody>
             </table>
           </div>
+          {!loading && !error && (
+            <TablePagination
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              pageSize={filters.limit || pagination.limit || 15}
+              totalItems={pagination.totalCount}
+              startIndex={(pagination.page - 1) * (filters.limit || pagination.limit || 15) + 1}
+              endIndex={Math.min(
+                pagination.page * (filters.limit || pagination.limit || 15),
+                pagination.totalCount
+              )}
+              onPageChange={(p) => setFilters((prev) => ({ ...prev, page: p }))}
+              onPageSizeChange={(limit) =>
+                setFilters((prev) => ({ ...prev, limit, page: 1 }))
+              }
+              disabled={loading}
+            />
+          )}
         </div>
       )}
 
-      {/* Pagination Footer */}
-      {!loading && !error && records.length > 0 && (
-        <div className="rounded-xl border border-border overflow-hidden bg-card">
+      {/* Pagination Footer (Grid View only) */}
+      {viewMode === "grid" && !loading && !error && pagination.totalCount > 15 && (
+        <div className="dashboard-card !p-0 overflow-hidden hover:translate-y-0">
           <TablePagination
             page={pagination.page}
             totalPages={pagination.totalPages}
@@ -978,7 +996,6 @@ export default function KYCPending() {
             onPageSizeChange={(limit) =>
               setFilters((prev) => ({ ...prev, limit, page: 1 }))
             }
-            pageSizeOptions={[15, 25, 50]}
             disabled={loading}
           />
         </div>

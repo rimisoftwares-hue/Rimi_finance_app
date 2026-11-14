@@ -4,7 +4,8 @@ import { AlertTriangle, CheckCircle, Clock, Download, Printer, Copy, Search } fr
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { DatePicker } from "../ui/date-picker";
-import { TableSkeletonRows } from "../common";
+import { TablePagination, TableSkeletonRows } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
 import apiClient from "../../api/apiClient";
 import { useToast } from "../../hooks/use-toast";
 
@@ -83,6 +84,21 @@ export default function Compliance() {
         item.loanNo.toLowerCase().includes(term)
     );
   }, [items, searchTerm, filterMode]);
+
+  const {
+    paginatedItems,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, {
+    initialPageSize: 15,
+    resetKey: `${filterMode}|${searchTerm}`,
+  });
 
   const counts = useMemo(
     () => ({
@@ -167,15 +183,17 @@ export default function Compliance() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold text-foreground">Compliance</h1>
-        <p className="text-muted-foreground mt-1">Insurance & FC expiry tracking</p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Compliance</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Insurance & FC expiry tracking</p>
+        </div>
       </motion.div>
 
       {/* Filter Buttons + Search */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="dashboard-card">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="dashboard-card !p-4 hover:translate-y-0">
         <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-1 bg-secondary rounded-lg p-1">
+          <div className="flex items-center gap-1 bg-secondary rounded-xl p-1">
             {(["All", "Customer", "Vehicle"] as FilterMode[]).map(mode => (
               <Button
                 key={mode}
@@ -238,38 +256,38 @@ export default function Compliance() {
         ))}
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
               <tr className="border-b border-border bg-secondary/50">
                 {["Customer", "HP Number", "Vehicle", "Type", "Expiry Date", "Status"].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">{h}</th>
+                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-border/50">
               {loading ? (
                 <TableSkeletonRows columns={6} rows={6} />
               ) : error ? (
-                <tr className="border-b border-border/50">
+                <tr>
                   <td colSpan={6} className="px-4 py-6 text-center text-sm text-expense">{error}</td>
                 </tr>
               ) : filtered.length === 0 ? (
-                <tr className="border-b border-border/50">
+                <tr>
                   <td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">No records found</td>
                 </tr>
               ) : (
-                filtered.map((item, i) => {
+                paginatedItems.map((item, i) => {
                   const st = statusStyles[item.status] || { className: "badge-pending", icon: Clock };
                   return (
-                    <motion.tr key={item.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.03 * i }} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+                    <motion.tr key={item.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.03 * i }} className="hover:bg-secondary/40 transition-colors">
                       <td className="px-4 py-3 text-sm font-medium text-foreground">{item.customer}</td>
                       <td className="px-4 py-3 text-sm text-primary font-medium">{item.loanNo}</td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{item.vehicle}</td>
                       <td className="px-4 py-3 text-sm text-foreground">{item.type}</td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{item.expiryDate}</td>
-                      <td className="px-4 py-3"><span className={`${st.className} inline-flex items-center gap-1`}><st.icon className="h-3 w-3" /> {item.status}</span></td>
+                      <td className="px-4 py-3 text-sm"><span className={`${st.className} inline-flex items-center gap-1`}><st.icon className="h-3 w-3" /> {item.status}</span></td>
                     </motion.tr>
                   );
                 })
@@ -277,6 +295,19 @@ export default function Compliance() {
             </tbody>
           </table>
         </div>
+        {!loading && !error && (
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalItems}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            disabled={loading}
+          />
+        )}
       </motion.div>
     </div>
   );

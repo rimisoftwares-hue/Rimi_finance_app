@@ -16,8 +16,8 @@ const EntryPage: React.FC<EntryPageProps> = ({ initialType }) => {
     initialType || (queryType === 'vehicle' ? 'vehicle' : 'consulting');
 
   return (
-    <div className="min-h-screen bg-background py-8 px-4">
-      <div className="w-full mx-auto">
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="w-full">
         <MultiStepLoanEntryForm
           key={`${location.pathname}?type=${resolvedType}`}
           initialType={resolvedType}

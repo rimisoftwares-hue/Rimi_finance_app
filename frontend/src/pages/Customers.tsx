@@ -211,12 +211,27 @@ const Customers = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <h2 className="text-2xl font-bold text-foreground">
-          {currentFilter === 'all' ? 'All Customers' :
-            currentFilter === 'close' ? 'Closed Loans' :
-              currentFilter === 'seized' ? 'Seized Vehicles' : 'Active Loans'}
-        </h2>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+            {currentFilter === 'all'
+              ? 'All Customers'
+              : currentFilter === 'close'
+                ? 'Closed Loans'
+                : currentFilter === 'seized'
+                  ? 'Seized Vehicles'
+                  : 'Active Loans'}
+          </h1>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {currentFilter === 'all'
+              ? 'Directory of all active, closed, and seized borrower accounts'
+              : currentFilter === 'close'
+                ? 'Customer accounts with fully settled and closed loan agreements'
+                : currentFilter === 'seized'
+                  ? 'Customer records with seized and godown-stored vehicles'
+                  : 'Active borrower accounts, loan schedules, and customer profiles'}
+          </p>
+        </div>
       </div>
 
       {/* Stats Navigation - Updated for dark mode with 4 cards */}
@@ -281,7 +296,7 @@ const Customers = () => {
       </div>
 
       {/* Customer List - Updated for dark mode */}
-      <div className="card-elevated overflow-hidden">
+      <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
         {filteredCustomers.length === 0 ? (
           <div className="p-8 text-center">
             <p className="text-muted-foreground">
@@ -293,37 +308,37 @@ const Customers = () => {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-border">
-                <thead className="bg-secondary/50 border-b border-border text-muted-foreground uppercase text-xs tracking-wider font-semibold">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b border-border bg-secondary/50">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Customer
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Contact
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Vehicle Number
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Vehicle Name
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Vehicle Model
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Loan Status
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-card divide-y divide-border">
+                <tbody className="divide-y divide-border/50">
                   {pagedCustomers.map((customer) => (
                     <tr
                       key={customer.id}
                       onClick={() => handleRowClick(customer.id)}
-                      className="cursor-pointer hover:bg-muted/30 transition-colors duration-150"
+                      className="cursor-pointer hover:bg-secondary/40 transition-colors"
                     >
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm whitespace-nowrap">
                         <div className="flex items-center">
                           <div className="h-10 w-10 rounded-full bg-muted overflow-hidden flex-shrink-0">
                             {customer.cphoto ? (
@@ -350,7 +365,7 @@ const Customers = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap max-w-[200px]">
+                      <td className="px-4 py-3 text-sm whitespace-nowrap max-w-[200px]">
                         <div className="text-sm text-foreground">
                           {customer.contacts && customer.contacts.length > 0
                             ? customer.contacts[0].number
@@ -360,22 +375,22 @@ const Customers = () => {
                           {customer.caddress || 'N/A'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm whitespace-nowrap">
                         <div className="text-sm font-medium text-foreground">
                           {customer.vehicle_number || 'N/A'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm whitespace-nowrap">
                         <span className="text-sm text-foreground">
                           {customer.vehicleName || 'N/A'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm whitespace-nowrap">
                         <span className="text-sm text-foreground">
                           {customer.vehicle_modal || customer.modelName || 'N/A'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm whitespace-nowrap">
                         <span className={`px-2 py-1 text-xs rounded-full ${customer.loanStatus === 'active'
                             ? 'bg-success/10 text-success dark:bg-success/20'
                             : customer.loanStatus === 'close'
@@ -401,7 +416,6 @@ const Customers = () => {
               endIndex={endIndex}
               onPageChange={setPage}
               onPageSizeChange={setPageSize}
-              pageSizeOptions={[15, 25, 50]}
             />
           </>
         )}

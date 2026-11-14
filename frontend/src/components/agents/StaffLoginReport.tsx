@@ -19,14 +19,6 @@ import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -103,7 +95,6 @@ export default function StaffLoginReport() {
 
   // Data & State
   const [items, setItems] = useState<StaffLoginReportItem[]>([]);
-  const [total, setTotal] = useState(0);
   const [kpis, setKpis] = useState<StaffLoginReportKpis>({
     staffDays: 0,
     totalSessions: 0,
@@ -161,7 +152,6 @@ export default function StaffLoginReport() {
 
       if (res.success) {
         setItems(res.data || []);
-        setTotal(res.total || 0);
         setKpis(
           res.kpis || {
             staffDays: 0,
@@ -377,10 +367,10 @@ export default function StaffLoginReport() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-          <h1 className="text-2xl font-bold text-foreground">Staff App Login Report</h1>
-          <p className="text-sm text-muted-foreground">Monitor staff login activity and session duration</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Staff App Login Report</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Monitor staff login activity and session duration</p>
         </motion.div>
         <Button
           variant="outline"
@@ -402,7 +392,7 @@ export default function StaffLoginReport() {
         {kpiCards.map((kpi) => (
           <Card key={kpi.label}>
             <CardContent className="p-4 flex items-center gap-3">
-              <div className={`p-2 rounded-lg bg-muted ${kpi.color}`}>
+              <div className={`p-2 rounded-xl bg-muted ${kpi.color}`}>
                 <kpi.icon className="h-5 w-5" />
               </div>
               <div>
@@ -476,258 +466,253 @@ export default function StaffLoginReport() {
       </Card>
 
       {/* Main Table */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-auto max-h-[65vh]">
-            <Table>
-              <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur z-10">
-                <TableRow>
-                  <TableHead className="text-xs w-8"></TableHead>
-                  <TableHead className="text-xs">Date</TableHead>
-                  <TableHead className="text-xs">Time</TableHead>
-                  <TableHead className="text-xs">Staff</TableHead>
-                  <TableHead className="text-xs">Code</TableHead>
-                  <TableHead className="text-xs">Duration</TableHead>
-                  <TableHead className="text-xs">Device</TableHead>
-                  <TableHead className="text-xs">IP Address</TableHead>
-                  {hasFinanceColumn && <TableHead className="text-xs">Finance</TableHead>}
-                  <TableHead className="text-xs">Office Dist.</TableHead>
-                  <TableHead className="text-xs">Location</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  <TableSkeletonRows columns={hasFinanceColumn ? 11 : 10} rows={6} />
-                ) : items.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={hasFinanceColumn ? 11 : 10}
-                      className="p-12 text-center text-muted-foreground"
-                    >
-                      No login sessions found for the selected criteria.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  pagedItems.map((entry) => {
-                    const latestLoginTime =
-                      entry.timeline && entry.timeline.length > 0
-                        ? entry.timeline[entry.timeline.length - 1].login
-                        : "—";
+      <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-border bg-secondary/50">
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider w-10 px-3 py-3.5"></th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Date</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Time</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Staff</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Code</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Duration</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Device</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">IP Address</th>
+                {hasFinanceColumn && <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Finance</th>}
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Office Dist.</th>
+                <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">Location</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {isLoading ? (
+                <TableSkeletonRows columns={hasFinanceColumn ? 11 : 10} rows={6} />
+              ) : items.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={hasFinanceColumn ? 11 : 10}
+                    className="px-4 py-12 text-sm text-center text-muted-foreground"
+                  >
+                    No login sessions found for the selected criteria.
+                  </td>
+                </tr>
+              ) : (
+                pagedItems.map((entry) => {
+                  const latestLoginTime =
+                    entry.timeline && entry.timeline.length > 0
+                      ? entry.timeline[entry.timeline.length - 1].login
+                      : "—";
 
-                    return (
-                      <Fragment key={entry.groupKey}>
-                        <TableRow
-                          className="hover:bg-muted/50 cursor-pointer"
-                          onClick={() =>
-                            setExpandedRow(
-                              expandedRow === entry.groupKey ? null : entry.groupKey
-                            )
-                          }
-                        >
-                          <TableCell className="p-2">
-                            {expandedRow === entry.groupKey ? (
-                              <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                            ) : (
-                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                            )}
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            {formatDateString(entry.date)}
-                          </TableCell>
-                          <TableCell className="text-xs font-mono">
-                            {latestLoginTime}
-                          </TableCell>
-                          <TableCell>
-                            <div>
-                              <p className="text-sm font-medium text-foreground">
-                                {entry.staffName}
-                              </p>
-                              <Badge variant="outline" className="text-[10px] uppercase">
-                                {entry.role}
-                              </Badge>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs font-mono text-muted-foreground">
-                            {entry.staffCode}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="secondary" className="text-xs">
-                              <Clock className="h-3 w-3 mr-1" />
-                              {formatDuration(entry.totalDurationSeconds)}
+                  return (
+                    <Fragment key={entry.groupKey}>
+                      <tr
+                        className="hover:bg-secondary/40 transition-colors cursor-pointer"
+                        onClick={() =>
+                          setExpandedRow(
+                            expandedRow === entry.groupKey ? null : entry.groupKey
+                          )
+                        }
+                      >
+                        <td className="px-3 py-3 text-sm">
+                          {expandedRow === entry.groupKey ? (
+                            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm whitespace-nowrap">
+                          {formatDateString(entry.date)}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-mono">
+                          {latestLoginTime}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <div>
+                            <p className="text-sm font-medium text-foreground">
+                              {entry.staffName}
+                            </p>
+                            <Badge variant="outline" className="text-[10px] uppercase">
+                              {entry.role}
                             </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                              {entry.primaryPlatform?.toLowerCase().includes("mobile") ||
-                              entry.primaryDevice?.toLowerCase().includes("mobile") ? (
-                                <Smartphone className="h-3 w-3 shrink-0" />
-                              ) : (
-                                <Monitor className="h-3 w-3 shrink-0" />
-                              )}
-                              <span className="truncate max-w-[120px]">
-                                {entry.primaryDevice || entry.primaryPlatform || "—"}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs font-mono text-muted-foreground">
-                            {entry.latestIp || "—"}
-                          </TableCell>
-                          {hasFinanceColumn && (
-                            <TableCell className="text-xs text-muted-foreground">
-                              {entry.financeName || "—"}
-                            </TableCell>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm font-mono text-muted-foreground">
+                          {entry.staffCode}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <Badge variant="secondary" className="text-xs">
+                            <Clock className="h-3 w-3 mr-1" />
+                            {formatDuration(entry.totalDurationSeconds)}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            {entry.primaryPlatform?.toLowerCase().includes("mobile") ||
+                            entry.primaryDevice?.toLowerCase().includes("mobile") ? (
+                              <Smartphone className="h-3 w-3 shrink-0" />
+                            ) : (
+                              <Monitor className="h-3 w-3 shrink-0" />
+                            )}
+                            <span className="truncate max-w-[120px]">
+                              {entry.primaryDevice || entry.primaryPlatform || "—"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm font-mono text-muted-foreground">
+                          {entry.latestIp || "—"}
+                        </td>
+                        {hasFinanceColumn && (
+                          <td className="px-4 py-3 text-sm text-muted-foreground">
+                            {entry.financeName || "—"}
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-sm">
+                          {entry.avgDistanceKm !== null ? (
+                            <Badge
+                              variant={entry.avgDistanceKm > 10 ? "destructive" : "outline"}
+                              className="text-xs"
+                            >
+                              {entry.avgDistanceKm.toFixed(1)} KM
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
                           )}
-                          <TableCell>
-                            {entry.avgDistanceKm !== null ? (
-                              <Badge
-                                variant={entry.avgDistanceKm > 10 ? "destructive" : "outline"}
-                                className="text-xs"
-                              >
-                                {entry.avgDistanceKm.toFixed(1)} KM
-                              </Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {entry.latestLat !== null &&
-                            entry.latestLng !== null &&
-                            Number.isFinite(entry.latestLat) &&
-                            Number.isFinite(entry.latestLng) ? (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openMaps(entry.latestLat!, entry.latestLng!);
-                                }}
-                                className="flex items-center gap-1 text-xs text-primary hover:underline"
-                              >
-                                <MapPin className="h-3 w-3 shrink-0" />
-                                <span className="truncate max-w-[140px]">
-                                  {entry.latestLocation ||
-                                    `${entry.latestLat.toFixed(4)}, ${entry.latestLng.toFixed(4)}`}
-                                </span>
-                              </button>
-                            ) : entry.latestLocation ? (
-                              <span
-                                className="text-xs text-muted-foreground truncate max-w-[140px] block"
-                                title={entry.latestLocation}
-                              >
-                                {entry.latestLocation}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {entry.latestLat !== null &&
+                          entry.latestLng !== null &&
+                          Number.isFinite(entry.latestLat) &&
+                          Number.isFinite(entry.latestLng) ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openMaps(entry.latestLat!, entry.latestLng!);
+                              }}
+                              className="flex items-center gap-1 text-xs text-primary hover:underline"
+                            >
+                              <MapPin className="h-3 w-3 shrink-0" />
+                              <span className="truncate max-w-[140px]">
+                                {entry.latestLocation ||
+                                  `${entry.latestLat.toFixed(4)}, ${entry.latestLng.toFixed(4)}`}
                               </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
+                            </button>
+                          ) : entry.latestLocation ? (
+                            <span
+                              className="text-xs text-muted-foreground truncate max-w-[140px] block"
+                              title={entry.latestLocation}
+                            >
+                              {entry.latestLocation}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      </tr>
 
-                        {/* Expanded Timeline */}
-                        <AnimatePresence>
-                          {expandedRow === entry.groupKey && (
-                            <TableRow key={`${entry.groupKey}-timeline`}>
-                              <TableCell
-                                colSpan={hasFinanceColumn ? 11 : 10}
-                                className="p-0"
+                      {/* Expanded Timeline */}
+                      <AnimatePresence>
+                        {expandedRow === entry.groupKey && (
+                          <tr key={`${entry.groupKey}-timeline`}>
+                            <td
+                              colSpan={hasFinanceColumn ? 11 : 10}
+                              className="p-0"
+                            >
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden"
                               >
-                                <motion.div
-                                  initial={{ height: 0, opacity: 0 }}
-                                  animate={{ height: "auto", opacity: 1 }}
-                                  exit={{ height: 0, opacity: 0 }}
-                                  className="overflow-hidden"
-                                >
-                                  <div className="p-4 bg-muted/30 border-t border-border">
-                                    <p className="text-xs font-semibold text-foreground mb-3">
-                                      Login Timeline ({entry.timeline.length}{" "}
-                                      {entry.timeline.length === 1
-                                        ? "session"
-                                        : "sessions"}
-                                      )
-                                    </p>
-                                    <div className="space-y-2">
-                                      {entry.timeline.map((t) => (
-                                        <div
-                                          key={t.id}
-                                          className="flex flex-wrap items-center gap-4 text-xs"
-                                        >
-                                          <div className="flex items-center gap-2">
-                                            <div className="w-2 h-2 rounded-full bg-green-500" />
-                                            <span className="text-muted-foreground">
-                                              Login:
-                                            </span>
-                                            <span className="font-mono font-medium text-foreground">
-                                              {t.login}
-                                            </span>
-                                          </div>
-                                          <span className="text-muted-foreground">→</span>
-                                          <div className="flex items-center gap-2">
-                                            <div
-                                              className={`w-2 h-2 rounded-full ${
-                                                t.logout === "Active"
-                                                  ? "bg-emerald-500 animate-pulse"
-                                                  : "bg-red-500"
-                                              }`}
-                                            />
-                                            <span className="text-muted-foreground">
-                                              Logout:
-                                            </span>
-                                            <span className="font-mono font-medium text-foreground">
-                                              {t.logout}
-                                            </span>
-                                          </div>
-                                          <Badge
-                                            variant="secondary"
-                                            className="text-[10px]"
-                                          >
-                                            {t.duration}
-                                          </Badge>
-                                          <Badge
-                                            variant="outline"
-                                            className="text-[10px] capitalize"
-                                          >
-                                            {t.reason?.replace(/_/g, " ")}
-                                          </Badge>
-                                          {t.device && (
-                                            <span className="text-muted-foreground text-[11px] font-mono">
-                                              {t.device}
-                                            </span>
-                                          )}
-                                          {t.ip && (
-                                            <span className="text-muted-foreground text-[11px] font-mono">
-                                              ({t.ip})
-                                            </span>
-                                          )}
+                                <div className="p-4 bg-secondary/20 border-t border-border/50">
+                                  <p className="text-xs font-semibold text-foreground mb-3">
+                                    Login Timeline ({entry.timeline.length}{" "}
+                                    {entry.timeline.length === 1
+                                      ? "session"
+                                      : "sessions"}
+                                    )
+                                  </p>
+                                  <div className="space-y-2">
+                                    {entry.timeline.map((t) => (
+                                      <div
+                                        key={t.id}
+                                        className="flex flex-wrap items-center gap-4 text-xs"
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-2 h-2 rounded-full bg-green-500" />
+                                          <span className="text-muted-foreground">
+                                            Login:
+                                          </span>
+                                          <span className="font-mono font-medium text-foreground">
+                                            {t.login}
+                                          </span>
                                         </div>
-                                      ))}
-                                    </div>
+                                        <span className="text-muted-foreground">→</span>
+                                        <div className="flex items-center gap-2">
+                                          <div
+                                            className={`w-2 h-2 rounded-full ${
+                                              t.logout === "Active"
+                                                ? "bg-emerald-500 animate-pulse"
+                                                : "bg-red-500"
+                                            }`}
+                                          />
+                                          <span className="text-muted-foreground">
+                                            Logout:
+                                          </span>
+                                          <span className="font-mono font-medium text-foreground">
+                                            {t.logout}
+                                          </span>
+                                        </div>
+                                        <Badge
+                                          variant="secondary"
+                                          className="text-[10px]"
+                                        >
+                                          {t.duration}
+                                        </Badge>
+                                        <Badge
+                                          variant="outline"
+                                          className="text-[10px] capitalize"
+                                        >
+                                          {t.reason?.replace(/_/g, " ")}
+                                        </Badge>
+                                        {t.device && (
+                                          <span className="text-muted-foreground text-[11px] font-mono">
+                                            {t.device}
+                                          </span>
+                                        )}
+                                        {t.ip && (
+                                          <span className="text-muted-foreground text-[11px] font-mono">
+                                            ({t.ip})
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
-                                </motion.div>
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </AnimatePresence>
-                      </Fragment>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </div>
-          {!isLoading && totalItems > 0 && (
-            <TablePagination
-              page={page}
-              totalPages={totalPages}
-              pageSize={pageSize}
-              totalItems={total || totalItems}
-              startIndex={startIndex}
-              endIndex={endIndex}
-              onPageChange={setPage}
-              onPageSizeChange={setPageSize}
-              pageSizeOptions={[15, 25, 50]}
-              disabled={isLoading}
-            />
-          )}
-        </CardContent>
-      </Card>
+                                </div>
+                              </motion.div>
+                            </td>
+                          </tr>
+                        )}
+                      </AnimatePresence>
+                    </Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+          disabled={isLoading}
+        />
+      </div>
     </div>
   );
 }

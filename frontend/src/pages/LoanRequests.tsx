@@ -16,6 +16,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { AppSelect } from "@/components/common/AppSelect";
+import { TablePagination } from "@/components/common";
+import { useClientPagination } from "@/hooks/useClientPagination";
 import { toast } from "sonner";
 
 const LOAN_REQ_STATUS_OPTIONS = [
@@ -482,7 +484,7 @@ function DetailDialog({ req, onClose, onUpdate }: {
                 <InfoRow label="Pincode" value={req.pincode} mono />
                 <InfoRow label="GPS" value={
                   <a href={`https://maps.google.com/?q=${req.gps.lat},${req.gps.lng}`} target="_blank" rel="noreferrer"
-                     className="text-primary hover:underline inline-flex items-center gap-1 font-mono text-xs">
+                    className="text-primary hover:underline inline-flex items-center gap-1 font-mono text-xs">
                     {req.gps.lat}, {req.gps.lng} <ExternalLink className="h-3 w-3" />
                   </a>
                 } />
@@ -786,8 +788,6 @@ const initialFilters = {
   agent: "", branch: "", vehicleType: "",
 };
 
-const PAGE = 10;
-
 export default function LoanRequests() {
   const [rows, setRows] = useState<LoanRequest[]>(MOCK);
   const [searchTerm, setSearchTerm] = useState("");
@@ -796,7 +796,6 @@ export default function LoanRequests() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<keyof LoanRequest>("applicationDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [page, setPage] = useState(1);
   const [loading] = useState(false);
   const [active, setActive] = useState<LoanRequest | null>(null);
 
@@ -828,8 +827,20 @@ export default function LoanRequests() {
     });
   }, [rows, searchTerm, filters, sortKey, sortDir]);
 
-  const paged = filtered.slice((page - 1) * PAGE, page * PAGE);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const {
+    paginatedItems: paged,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, {
+    initialPageSize: 15,
+    resetKey: `${searchTerm}|${filters.status}|${filters.period}|${filters.agent}|${filters.branch}|${filters.vehicleType}`,
+  });
 
   const toggleSort = (k: keyof LoanRequest) => {
     if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -860,7 +871,7 @@ export default function LoanRequests() {
   };
 
   const SortHead = ({ label, k, align = "left" }: { label: string; k: keyof LoanRequest; align?: "left" | "right" | "center" }) => (
-    <th className={`text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 text-${align} cursor-pointer select-none hover:text-foreground`}
+    <th className={`text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-${align} cursor-pointer select-none hover:text-foreground`}
       onClick={() => toggleSort(k)}>
       <span className="inline-flex items-center gap-1">{label}
         {sortKey === k && (sortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
@@ -871,10 +882,10 @@ export default function LoanRequests() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Loan Requests</h1>
-          <p className="text-muted-foreground mt-1">Review, verify and process customer loan applications</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Loan Requests</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Review, verify and process customer loan applications</p>
         </div>
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
@@ -900,7 +911,7 @@ export default function LoanRequests() {
           { l: "Total Requested", v: inr(rows.reduce((s, r) => s + r.loanRequested, 0)), c: "text-primary", i: CreditCard },
         ].map(k => (
           <div key={k.l} className="dashboard-card flex items-center gap-3">
-            <div className={`h-10 w-10 rounded-lg bg-secondary flex items-center justify-center ${k.c}`}><k.i className="h-5 w-5" /></div>
+            <div className={`h-10 w-10 rounded-xl bg-secondary flex items-center justify-center ${k.c}`}><k.i className="h-5 w-5" /></div>
             <div>
               <p className="text-xs text-muted-foreground">{k.l}</p>
               <p className={`text-lg font-bold ${k.c}`}>{k.v}</p>
@@ -910,164 +921,166 @@ export default function LoanRequests() {
       </motion.div>
 
       {/* Search + Filters */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="dashboard-card">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3 flex-1 flex-wrap">
-            <div className="relative flex-1 min-w-[240px] max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search by name, mobile, HPL, vehicle, request ID…" value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setPage(1); }} className="pl-10" />
-            </div>
-            <Button variant="outline" size="sm" onClick={() => setFiltersOpen(!filtersOpen)} className="gap-2">
-              <Filter className="h-4 w-4" /> Filters {filtersOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            </Button>
-            <Button variant="ghost" size="sm" className="gap-2" onClick={clearFilters}><RotateCcw className="h-4 w-4" /> Clear</Button>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {(["", "Today", "Week", "Month"] as const).map(p => (
-              <button key={p || "all"} onClick={() => setFilters(f => ({ ...f, period: p }))}
-                className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${filters.period === p ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-secondary"}`}>
-                {p || "All"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {filtersOpen && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-border">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Status</label>
-                  <AppSelect
-                    value={filters.status}
-                    onValueChange={val => setFilters(f => ({ ...f, status: val as any }))}
-                    options={LOAN_REQ_STATUS_OPTIONS}
-                    placeholder="All"
-                    triggerClassName="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Agent</label>
-                  <AppSelect
-                    value={filters.agent}
-                    onValueChange={val => setFilters(f => ({ ...f, agent: val }))}
-                    options={[
-                      { value: "", label: "All Agents" },
-                      ...uniq("agent").map(a => ({ value: a, label: a })),
-                    ]}
-                    placeholder="All Agents"
-                    triggerClassName="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Branch</label>
-                  <AppSelect
-                    value={filters.branch}
-                    onValueChange={val => setFilters(f => ({ ...f, branch: val }))}
-                    options={[
-                      { value: "", label: "All Branches" },
-                      ...uniq("branch").map(b => ({ value: b, label: b })),
-                    ]}
-                    placeholder="All Branches"
-                    triggerClassName="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Vehicle Type</label>
-                  <AppSelect
-                    value={filters.vehicleType}
-                    onValueChange={val => setFilters(f => ({ ...f, vehicleType: val }))}
-                    options={LOAN_REQ_VEHICLE_TYPE_OPTIONS}
-                    placeholder="All Types"
-                    triggerClassName="w-full"
-                  />
-                </div>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="dashboard-card !p-4 hover:translate-y-0">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3 flex-1 flex-wrap">
+              <div className="relative flex-1 min-w-[240px] max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input placeholder="Search by name, mobile, HPL, vehicle, request ID…" value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setPage(1); }} className="pl-10" />
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
+              <Button variant="outline" size="sm" onClick={() => setFiltersOpen(!filtersOpen)} className="gap-2">
+                <Filter className="h-4 w-4" /> Filters {filtersOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              </Button>
+              <Button variant="ghost" size="sm" className="gap-2" onClick={clearFilters}><RotateCcw className="h-4 w-4" /> Clear</Button>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {(["", "Today", "Week", "Month"] as const).map(p => (
+                <button key={p || "all"} onClick={() => setFilters(f => ({ ...f, period: p }))}
+                  className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${filters.period === p ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-secondary"}`}>
+                  {p || "All"}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      {/* Table */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden">
-        {loading && <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
-        {!loading && (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="sticky top-0 z-10">
-                <tr className="border-b border-border bg-secondary/50">
-                  <th className="px-3 py-3 w-10">
-                    <Checkbox checked={paged.length > 0 && paged.every(r => selected.has(r.id))} onCheckedChange={toggleAll} />
-                  </th>
-                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 text-left">Customer</th>
-                  <SortHead label="Mobile" k="mobile" />
-                  <SortHead label="Vehicle" k="vehicleName" />
-                  <SortHead label="Booking" k="bookingAmount" align="right" />
-                  <SortHead label="Loan Amount" k="loanRequested" align="right" />
-                  <SortHead label="Applied" k="applicationDate" />
-                  <SortHead label="Visit" k="visitDate" />
-                  <SortHead label="Status" k="status" align="center" />
-                  <SortHead label="Agent" k="agent" />
-                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paged.map((r, i) => (
-                  <motion.tr key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.03 * i }}
-                    className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
-                    <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
-                      <Checkbox checked={selected.has(r.id)} onCheckedChange={() => toggleOne(r.id)} />
-                    </td>
-                    <td className="px-4 py-3 cursor-pointer" onClick={() => setActive(r)}>
-                      <div className="flex items-center gap-3">
-                        <img src={r.photo} alt={r.name} className="h-9 w-9 rounded-full object-cover ring-1 ring-border" />
-                        <div>
-                          <p className="text-sm font-semibold text-foreground leading-tight">{r.name}</p>
-                          <p className="text-[11px] text-muted-foreground font-mono">{r.reqId}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => setActive(r)}>
-                      <span className="flex items-center gap-1 font-mono text-xs"><Phone className="h-3 w-3" /> {r.mobile}</span>
-                    </td>
-                    <td className="px-4 py-3 cursor-pointer" onClick={() => setActive(r)}>
-                      <p className="text-sm text-foreground">{r.vehicleName}</p>
-                      <p className="text-[11px] text-muted-foreground font-mono">{r.vehicleNo}</p>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-income font-medium" onClick={() => setActive(r)}>{inr(r.bookingAmount)}</td>
-                    <td className="px-4 py-3 text-sm text-right font-semibold text-primary" onClick={() => setActive(r)}>{inr(r.loanRequested)}</td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => setActive(r)}>{r.applicationDate}</td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => setActive(r)}>{r.visitDate}</td>
-                    <td className="px-4 py-3 text-center" onClick={() => setActive(r)}>
-                      <Badge variant="outline" className={statusStyles[r.status]}>{r.status}</Badge>
-                      {r.hplNo && <p className="text-[10px] font-mono text-primary mt-0.5">{r.hplNo}</p>}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => setActive(r)}>{r.agent}</td>
-                    <td className="px-4 py-3 text-center">
-                      <Button size="sm" variant="outline" className="h-7 px-2 gap-1" onClick={() => setActive(r)}>
-                        <Eye className="h-3 w-3" /> Review
-                      </Button>
-                    </td>
-                  </motion.tr>
+          <AnimatePresence>
+            {filtersOpen && (
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-border">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Status</label>
+                    <AppSelect
+                      value={filters.status}
+                      onValueChange={val => setFilters(f => ({ ...f, status: val as any }))}
+                      options={LOAN_REQ_STATUS_OPTIONS}
+                      placeholder="All"
+                      triggerClassName="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Agent</label>
+                    <AppSelect
+                      value={filters.agent}
+                      onValueChange={val => setFilters(f => ({ ...f, agent: val }))}
+                      options={[
+                        { value: "", label: "All Agents" },
+                        ...uniq("agent").map(a => ({ value: a, label: a })),
+                      ]}
+                      placeholder="All Agents"
+                      triggerClassName="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Branch</label>
+                    <AppSelect
+                      value={filters.branch}
+                      onValueChange={val => setFilters(f => ({ ...f, branch: val }))}
+                      options={[
+                        { value: "", label: "All Branches" },
+                        ...uniq("branch").map(b => ({ value: b, label: b })),
+                      ]}
+                      placeholder="All Branches"
+                      triggerClassName="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground mb-1 block">Vehicle Type</label>
+                    <AppSelect
+                      value={filters.vehicleType}
+                      onValueChange={val => setFilters(f => ({ ...f, vehicleType: val }))}
+                      options={LOAN_REQ_VEHICLE_TYPE_OPTIONS}
+                      placeholder="All Types"
+                      triggerClassName="w-full"
+                    />
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+
+        {/* Table */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
+            {loading && <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
+            {!loading && (
+              <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="border-b border-border bg-secondary/50">
+                          <th className="px-3 py-3.5 w-10">
+                            <Checkbox checked={paged.length > 0 && paged.every(r => selected.has(r.id))} onCheckedChange={toggleAll} />
+                          </th>
+                          <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-left">Customer</th>
+                          <SortHead label="Mobile" k="mobile" />
+                          <SortHead label="Vehicle" k="vehicleName" />
+                          <SortHead label="Booking" k="bookingAmount" align="right" />
+                          <SortHead label="Loan Amount" k="loanRequested" align="right" />
+                          <SortHead label="Applied" k="applicationDate" />
+                          <SortHead label="Visit" k="visitDate" />
+                          <SortHead label="Status" k="status" align="center" />
+                          <SortHead label="Agent" k="agent" />
+                          <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5 text-center">Action</th>
+                      </tr>
+                    </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {paged.map((r, i) => (
+                          <motion.tr key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.03 * i }}
+                    className="hover:bg-secondary/40 transition-colors">
+                              <td className="px-3 py-3 text-sm" onClick={e => e.stopPropagation()}>
+                                <Checkbox checked={selected.has(r.id)} onCheckedChange={() => toggleOne(r.id)} />
+                              </td>
+                                <td className="px-4 py-3 text-sm cursor-pointer" onClick={() => setActive(r)}>
+                                  <div className="flex items-center gap-3">
+                                    <img src={r.photo} alt={r.name} className="h-9 w-9 rounded-full object-cover ring-1 ring-border" />
+                                    <div>
+                                      <p className="text-sm font-semibold text-foreground leading-tight">{r.name}</p>
+                                      <p className="text-[11px] text-muted-foreground font-mono">{r.reqId}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => setActive(r)}>
+                                  <span className="flex items-center gap-1 font-mono text-xs"><Phone className="h-3 w-3" /> {r.mobile}</span>
+                                </td>
+                                  <td className="px-4 py-3 text-sm cursor-pointer" onClick={() => setActive(r)}>
+                                    <p className="text-sm text-foreground">{r.vehicleName}</p>
+                                    <p className="text-[11px] text-muted-foreground font-mono">{r.vehicleNo}</p>
+                                  </td>
+                                  <td className="px-4 py-3 text-sm text-right text-income font-medium" onClick={() => setActive(r)}>{inr(r.bookingAmount)}</td>
+                                  <td className="px-4 py-3 text-sm text-right font-semibold text-primary" onClick={() => setActive(r)}>{inr(r.loanRequested)}</td>
+                                  <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => setActive(r)}>{r.applicationDate}</td>
+                                  <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => setActive(r)}>{r.visitDate}</td>
+                                    <td className="px-4 py-3 text-sm text-center" onClick={() => setActive(r)}>
+                                      <Badge variant="outline" className={statusStyles[r.status]}>{r.status}</Badge>
+                                      {r.hplNo && <p className="text-[10px] font-mono text-primary mt-0.5">{r.hplNo}</p>}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-muted-foreground" onClick={() => setActive(r)}>{r.agent}</td>
+                                      <td className="px-4 py-3 text-sm text-center">
+                                        <Button size="sm" variant="outline" className="h-7 px-2 gap-1" onClick={() => setActive(r)}>
+                                          <Eye className="h-3 w-3" /> Review
+                                        </Button>
+                                      </td>
+                                    </motion.tr>
                 ))}
-                {paged.length === 0 && (
-                  <tr><td colSpan={11} className="text-center py-12 text-sm text-muted-foreground">No loan requests match your filters.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                                    {paged.length === 0 && (
+                                      <tr><td colSpan={11} className="text-center py-12 text-sm text-muted-foreground">No loan requests match your filters.</td></tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
         )}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-          <span className="text-sm text-muted-foreground">Showing {paged.length} of {filtered.length} records</span>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button>
-            <span className="text-xs text-muted-foreground">Page {page} of {totalPages}</span>
-            <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
-          </div>
-        </div>
-      </motion.div>
+                              <TablePagination
+                                page={page}
+                                totalPages={totalPages}
+                                pageSize={pageSize}
+                                totalItems={totalItems}
+                                startIndex={startIndex}
+                                endIndex={endIndex}
+                                onPageChange={setPage}
+                                onPageSizeChange={setPageSize}
+                              />
+                            </motion.div>
 
-      {active && <DetailDialog req={active} onClose={() => setActive(null)} onUpdate={(patch) => updateReq(active.id, patch)} />}
-    </div>
-  );
+                            {active && <DetailDialog req={active} onClose={() => setActive(null)} onUpdate={(patch) => updateReq(active.id, patch)} />}
+                          </div>
+                        );
 }

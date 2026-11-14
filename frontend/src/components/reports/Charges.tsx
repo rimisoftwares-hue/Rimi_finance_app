@@ -4,7 +4,8 @@ import { Filter, ChevronDown, ChevronUp, RotateCcw, Search, Download, Printer, C
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { DatePicker } from "../ui/date-picker";
-import { AppSelect, TableSkeletonRows } from "../common";
+import { AppSelect, TablePagination, TableSkeletonRows, AutoSuggestInput } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
 import apiClient from "../../api/apiClient";
 
 const DEAL_TYPE_OPTIONS = [
@@ -105,6 +106,18 @@ export default function Charges() {
 
   const filtered = charges;
 
+  const {
+    paginatedItems: paginatedCharges,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(filtered, { initialPageSize: 15 });
+
   const totals = useMemo(() => {
     return filtered.reduce(
       (a, r) => ({
@@ -201,30 +214,15 @@ export default function Charges() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold text-foreground">Charges Report</h1>
-        <p className="text-muted-foreground mt-1">All charges and fees breakdown per loan</p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Charges Report</h1>
+          <p className="text-muted-foreground mt-1 text-sm">All charges and fees breakdown per loan</p>
+        </div>
       </motion.div>
 
-      {/* Datalists for AutoSuggest */}
-      <datalist id="charges-streets-list">
-        {filterOptions.streets.map(s => (
-          <option key={s} value={s} />
-        ))}
-      </datalist>
-      <datalist id="charges-villages-list">
-        {filterOptions.villages.map(v => (
-          <option key={v} value={v} />
-        ))}
-      </datalist>
-      <datalist id="charges-cities-list">
-        {filterOptions.cities.map(c => (
-          <option key={c} value={c} />
-        ))}
-      </datalist>
-
       {/* Filter Panel */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="dashboard-card">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="dashboard-card !p-4 hover:translate-y-0 relative z-20">
         <div className="flex items-center gap-3">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -248,16 +246,57 @@ export default function Charges() {
         </div>
         <AnimatePresence>
           {filtersOpen && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{
+                height: "auto",
+                opacity: 1,
+                transitionEnd: { overflow: "visible" },
+              }}
+              exit={{
+                height: 0,
+                opacity: 0,
+                overflow: "hidden",
+              }}
+              transition={{ duration: 0.2 }}
+              className={filtersOpen ? "overflow-visible" : "overflow-hidden"}
+            >
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-border">
                 <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Date (From)</label><DatePicker value={filters.dateFrom} onChange={e => handleFilter("dateFrom", e.target.value)} placeholder="From Date" /></div>
                 <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Date (To)</label><DatePicker value={filters.dateTo} onChange={e => handleFilter("dateTo", e.target.value)} placeholder="To Date" /></div>
                 <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Loan No</label><Input className="text-sm" value={filters.loanNo} onChange={e => handleFilter("loanNo", e.target.value)} placeholder="Search loan..." /></div>
                 <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Amount (Min)</label><Input type="number" className="text-sm" value={filters.amountMin} onChange={e => handleFilter("amountMin", e.target.value)} placeholder="0" /></div>
                 <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Amount (Max)</label><Input type="number" className="text-sm" value={filters.amountMax} onChange={e => handleFilter("amountMax", e.target.value)} placeholder="50000" /></div>
-                <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Street</label><Input list="charges-streets-list" className="text-sm" value={filters.street} onChange={e => handleFilter("street", e.target.value)} placeholder="Street..." /></div>
-                <div><label className="text-xs font-medium text-muted-foreground mb-1 block">Village</label><Input list="charges-villages-list" className="text-sm" value={filters.village} onChange={e => handleFilter("village", e.target.value)} placeholder="Village..." /></div>
-                <div><label className="text-xs font-medium text-muted-foreground mb-1 block">City</label><Input list="charges-cities-list" className="text-sm" value={filters.city} onChange={e => handleFilter("city", e.target.value)} placeholder="City..." /></div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Street</label>
+                  <AutoSuggestInput
+                    value={filters.street}
+                    onChange={(val) => handleFilter("street", val)}
+                    suggestions={filterOptions.streets}
+                    placeholder="Street..."
+                    inputClassName="text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Village</label>
+                  <AutoSuggestInput
+                    value={filters.village}
+                    onChange={(val) => handleFilter("village", val)}
+                    suggestions={filterOptions.villages}
+                    placeholder="Village..."
+                    inputClassName="text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">City</label>
+                  <AutoSuggestInput
+                    value={filters.city}
+                    onChange={(val) => handleFilter("city", val)}
+                    suggestions={filterOptions.cities}
+                    placeholder="City..."
+                    inputClassName="text-sm"
+                  />
+                </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Deal Type</label>
                   <AppSelect
@@ -289,30 +328,30 @@ export default function Charges() {
         ))}
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-10">
               <tr className="border-b border-border bg-secondary/50">
                 {["Loan No", "Customer", "Doc Charges", "Processing Fee", "Penalty", "Seizing Charges", "Total"].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">{h}</th>
+                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-border/50">
               {loading ? (
                 <TableSkeletonRows columns={7} rows={6} />
               ) : error ? (
-                <tr className="border-b border-border/50">
+                <tr>
                   <td colSpan={7} className="px-4 py-6 text-center text-sm text-expense">{error}</td>
                 </tr>
               ) : filtered.length === 0 ? (
-                <tr className="border-b border-border/50">
+                <tr>
                   <td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">No records found</td>
                 </tr>
               ) : (
-                filtered.map((r, i) => (
-                  <motion.tr key={r.id || `${r.loanNo}-${i}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.02 * i }} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+                paginatedCharges.map((r, i) => (
+                  <motion.tr key={r.id || `${r.loanNo}-${i}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.02 * i }} className="hover:bg-secondary/40 transition-colors">
                     <td className="px-4 py-3 text-sm text-primary font-medium">{r.loanNo || "—"}</td>
                     <td className="px-4 py-3 text-sm font-medium text-foreground">{r.customer}</td>
                     <td className="px-4 py-3 text-sm text-foreground">₹{Number(r.docCharges || 0).toLocaleString("en-IN")}</td>
@@ -325,8 +364,8 @@ export default function Charges() {
               )}
             </tbody>
             {!loading && !error && filtered.length > 0 && (
-              <tfoot>
-                <tr className="bg-secondary/50 font-bold">
+              <tfoot className="bg-secondary/60 border-t-2 border-border font-bold">
+                <tr>
                   <td colSpan={2} className="px-4 py-3 text-sm text-foreground">Total</td>
                   <td className="px-4 py-3 text-sm text-foreground">₹{totals.doc.toLocaleString("en-IN")}</td>
                   <td className="px-4 py-3 text-sm text-foreground">₹{totals.proc.toLocaleString("en-IN")}</td>
@@ -338,6 +377,19 @@ export default function Charges() {
             )}
           </table>
         </div>
+        {!loading && !error && (
+          <TablePagination
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={totalItems}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            disabled={loading}
+          />
+        )}
       </motion.div>
     </div>
   );

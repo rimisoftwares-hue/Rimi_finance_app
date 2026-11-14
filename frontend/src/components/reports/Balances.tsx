@@ -4,7 +4,8 @@ import { Download, Printer, Copy, Search } from "lucide-react";
 import { Button } from "../ui/button";
 import { DatePicker } from "../ui/date-picker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { TableSkeletonRows } from "../common";
+import { TablePagination, TableSkeletonRows } from "../common";
+import { useClientPagination } from "../../hooks/useClientPagination";
 import apiClient from "../../api/apiClient";
 import { useToast } from "../../hooks/use-toast";
 
@@ -43,6 +44,18 @@ function BalanceTable({
   loading: boolean;
   error: string | null;
 }) {
+  const {
+    paginatedItems,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startIndex,
+    endIndex,
+  } = useClientPagination(data, { initialPageSize: 15 });
+
   const totals = useMemo(
     () =>
       data.reduce(
@@ -57,36 +70,36 @@ function BalanceTable({
   );
 
   return (
-    <div className="dashboard-card p-0 overflow-hidden">
+    <div className="dashboard-card p-0 overflow-hidden border border-border shadow-sm hover:translate-y-0">
       <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead>
+        <table className="w-full text-left border-collapse">
+          <thead className="sticky top-0 z-10">
             <tr className="border-b border-border bg-secondary/50">
               {["Customer", "Loan No", "Total", "Received", "Balance"].map(h => (
-                <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">
+                <th key={h} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3.5">
                   {h}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-border/50">
             {loading ? (
               <TableSkeletonRows columns={5} rows={6} />
             ) : error ? (
-              <tr className="border-b border-border/50">
+              <tr>
                 <td colSpan={5} className="px-4 py-6 text-center text-sm text-expense">
                   {error}
                 </td>
               </tr>
             ) : data.length === 0 ? (
-              <tr className="border-b border-border/50">
+              <tr>
                 <td colSpan={5} className="px-4 py-6 text-center text-sm text-muted-foreground">
                   No records found
                 </td>
               </tr>
             ) : (
-              data.map((r, i) => (
-                <tr key={`${r.loanNo || "loan"}-${r.customer}-${i}`} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+              paginatedItems.map((r, i) => (
+                <tr key={`${r.loanNo || "loan"}-${r.customer}-${i}`} className="hover:bg-secondary/40 transition-colors">
                   <td className="px-4 py-3 text-sm font-medium text-foreground">{r.customer}</td>
                   <td className="px-4 py-3 text-sm text-primary font-medium">{r.loanNo || "—"}</td>
                   <td className="px-4 py-3 text-sm text-foreground">₹{r.total.toLocaleString("en-IN")}</td>
@@ -97,8 +110,8 @@ function BalanceTable({
             )}
           </tbody>
           {!loading && !error && data.length > 0 && (
-            <tfoot>
-              <tr className="bg-secondary/50 font-bold">
+            <tfoot className="bg-secondary/60 border-t-2 border-border font-bold">
+              <tr>
                 <td colSpan={2} className="px-4 py-3 text-sm text-foreground">Total</td>
                 <td className="px-4 py-3 text-sm text-foreground">₹{totals.total.toLocaleString("en-IN")}</td>
                 <td className="px-4 py-3 text-sm text-income">₹{totals.received.toLocaleString("en-IN")}</td>
@@ -108,6 +121,19 @@ function BalanceTable({
           )}
         </table>
       </div>
+      {!loading && !error && (
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+          disabled={loading}
+        />
+      )}
     </div>
   );
 }
@@ -164,14 +190,25 @@ export default function Balances() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const currentTabRecords = useMemo(() => {
-    const list = balanceData[activeTab] || [];
-    if (!search.trim()) return list;
+  const filteredByTab = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return list.filter(
-      r => r.customer.toLowerCase().includes(q) || r.loanNo.toLowerCase().includes(q)
-    );
-  }, [balanceData, activeTab, search]);
+    const filterList = (list: BalanceRow[]) =>
+      !q
+        ? list
+        : list.filter(
+            (r) =>
+              r.customer.toLowerCase().includes(q) ||
+              r.loanNo.toLowerCase().includes(q)
+          );
+    return {
+      principal: filterList(balanceData.principal),
+      interest: filterList(balanceData.interest),
+      penalty: filterList(balanceData.penalty),
+      seizing: filterList(balanceData.seizing),
+    };
+  }, [balanceData, search]);
+
+  const currentTabRecords = filteredByTab[activeTab] || [];
 
   const handleCopy = async () => {
     try {
@@ -245,13 +282,15 @@ export default function Balances() {
 
   return (
     <div className="space-y-6">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-3xl font-bold text-foreground">Balances</h1>
-        <p className="text-muted-foreground mt-1">Outstanding balance breakdown by category</p>
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Balances</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Outstanding balance breakdown by category</p>
+        </div>
       </motion.div>
 
       {/* Filters Toolbar */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="dashboard-card">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="dashboard-card !p-4 hover:translate-y-0">
         <div className="flex flex-wrap items-end gap-4">
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">From Date</label>
@@ -294,23 +333,23 @@ export default function Balances() {
         onValueChange={v => setActiveTab(v as any)}
         className="w-full"
       >
-        <TabsList className="bg-secondary">
+        <TabsList className="bg-secondary rounded-xl">
           <TabsTrigger value="principal">Principal</TabsTrigger>
           <TabsTrigger value="interest">Interest</TabsTrigger>
           <TabsTrigger value="penalty">Penalty</TabsTrigger>
           <TabsTrigger value="seizing">Seizing</TabsTrigger>
         </TabsList>
         <TabsContent value="principal" className="mt-4">
-          <BalanceTable data={balanceData.principal} loading={loading} error={error} />
+          <BalanceTable data={filteredByTab.principal} loading={loading} error={error} />
         </TabsContent>
         <TabsContent value="interest" className="mt-4">
-          <BalanceTable data={balanceData.interest} loading={loading} error={error} />
+          <BalanceTable data={filteredByTab.interest} loading={loading} error={error} />
         </TabsContent>
         <TabsContent value="penalty" className="mt-4">
-          <BalanceTable data={balanceData.penalty} loading={loading} error={error} />
+          <BalanceTable data={filteredByTab.penalty} loading={loading} error={error} />
         </TabsContent>
         <TabsContent value="seizing" className="mt-4">
-          <BalanceTable data={balanceData.seizing} loading={loading} error={error} />
+          <BalanceTable data={filteredByTab.seizing} loading={loading} error={error} />
         </TabsContent>
       </Tabs>
     </div>

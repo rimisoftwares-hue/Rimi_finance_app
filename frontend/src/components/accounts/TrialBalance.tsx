@@ -149,10 +149,10 @@ export default function TrialBalance() {
   return (
     <div className="space-y-4">
       {/* Page Header with Balanced/Mismatch badge and moved Export/Print buttons */}
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Trial Balance</h1>
-          <p className="text-sm text-muted-foreground">Group-wise with drill-down</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Trial Balance</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Group-wise with drill-down</p>
         </div>
         <div className="flex items-center gap-2">
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-medium ${isBalanced ? "bg-income/10 text-income" : "bg-expense/10 text-expense"}`}>

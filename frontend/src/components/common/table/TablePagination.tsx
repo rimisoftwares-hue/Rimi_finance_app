@@ -29,13 +29,17 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
   pageSize,
   onPageChange,
   onPageSizeChange,
-  pageSizeOptions = [15, 25, 50],
+  pageSizeOptions = [15, 30, 50, 100],
   totalItems,
   startIndex,
   endIndex,
   disabled = false,
   className = '',
 }) => {
+  if (totalItems !== undefined ? totalItems <= 15 : totalPages <= 1) {
+    return null;
+  }
+
   const safeTotalPages = Math.max(1, totalPages);
   const safePage = Math.min(Math.max(1, page), safeTotalPages);
 

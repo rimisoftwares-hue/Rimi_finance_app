@@ -80,7 +80,7 @@ export default function AISettings() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 w-full">
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
           <Settings className="h-7 w-7 text-primary" /> AI Settings
@@ -105,7 +105,7 @@ export default function AISettings() {
                 <Label>Leave Reason</Label>
                 <Input value={companyRules.leaveReason} onChange={(e) => setCompanyRules({ ...companyRules, leaveReason: e.target.value })} placeholder="e.g. Holi Festival" />
               </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+              <div className="flex items-center justify-between p-3 rounded-xl border border-border/60 bg-muted/30">
                 <div>
                   <p className="text-sm font-medium text-foreground">Enable Notifications</p>
                   <p className="text-xs text-muted-foreground">Send holiday alerts to customers</p>
@@ -152,7 +152,7 @@ export default function AISettings() {
                 { key: "followUpReminder" as const, label: "Follow-up Reminder", desc: "Auto follow-up on unresolved conversations" },
                 { key: "escalationAlerts" as const, label: "Escalation Alerts", desc: "Notify admin on negative interactions" },
               ].map((item) => (
-                <div key={item.key} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                <div key={item.key} className="flex items-center justify-between p-3 rounded-xl border border-border/60 bg-muted/30 hover:bg-muted/50 transition-colors">
                   <div>
                     <p className="text-sm font-medium text-foreground">{item.label}</p>
                     <p className="text-xs text-muted-foreground">{item.desc}</p>
@@ -188,7 +188,7 @@ export default function AISettings() {
                 <Label>No Response Timeout (hours)</Label>
                 <Input type="number" value={escalation.noResponseHours} onChange={(e) => setEscalation({ ...escalation, noResponseHours: e.target.value })} />
               </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+              <div className="flex items-center justify-between p-3 rounded-xl border border-border/60 bg-muted/30">
                 <div>
                   <p className="text-sm font-medium text-foreground">Auto Follow-up</p>
                   <p className="text-xs text-muted-foreground">Automatically follow up after timeout</p>

@@ -152,10 +152,10 @@ export default function Vehicles() {
   return (
     <div className="space-y-4 md:space-y-6 animate-fade-in">
       {/* Page Header - Compact and responsive */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl xs:text-2xl sm:text-2xl md:text-3xl font-bold text-foreground truncate">Vehicles</h1>
-          <p className="text-xs xs:text-sm md:text-base text-muted-foreground mt-1 truncate">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground truncate">Vehicles</h1>
+          <p className="text-muted-foreground mt-1 text-sm truncate">
             Manage your vehicle inventory and sales
           </p>
         </div>
