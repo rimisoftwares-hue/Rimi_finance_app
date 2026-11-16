@@ -544,6 +544,15 @@ export function createExistingCustomerCheckController(options: ControllerOptions
 
   const dispose = () => {
     cancelPending();
+    activeExtracted = {
+      hasValidInput: false,
+      signature: '',
+      requestBody: {},
+      contactIndexByNormPhoneIndex: [],
+      normalizedPhones: [],
+      normalizedAadhar: null,
+      normalizedGovtIdNumber: null,
+    };
   };
 
   return {
@@ -553,3 +562,4 @@ export function createExistingCustomerCheckController(options: ControllerOptions
     dispose,
   };
 }
+

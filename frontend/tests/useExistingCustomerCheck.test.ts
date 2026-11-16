@@ -262,3 +262,31 @@ test('5. Never throws into the form when API rejects, and maps fieldMatchMap by 
 
   ctrl.dispose();
 });
+
+test('6. React StrictMode mount -> dispose -> remount with identical initial input still fires debounced check', async () => {
+  let calls = 0;
+  const ctrl = createExistingCustomerCheckController({
+    debounceMs: 25,
+    fetcher: async () => {
+      calls += 1;
+      return SAMPLE_MATCH_RESPONSE;
+    },
+    shouldDefaultCollapsed: () => false,
+  });
+
+  const editInitialInput = {
+    contacts: [{ contact_type: 'customer', type: 'mobile', number: '9876543210' }],
+    excludeCustomerId: '11111111-2222-4333-8444-555555555555',
+  };
+
+  // Simulated React 18 StrictMode: mount -> cleanup -> remount synchronously
+  ctrl.updateInput(editInitialInput);
+  ctrl.dispose();
+  ctrl.updateInput(editInitialInput);
+
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(calls, 1, 'Remount after StrictMode cleanup must still execute the debounced check');
+  assert.equal(ctrl.getSnapshot().matchCount, 2);
+
+  ctrl.dispose();
+});

@@ -135,3 +135,4 @@ export function formatPoliteMatchAnnouncement(
   const countWord = matchCount === 1 ? '1 existing record' : `${matchCount} existing records`;
   return `${contextLabel}: ${countWord}. ${firstHeadline}.`;
 }
+

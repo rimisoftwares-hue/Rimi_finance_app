@@ -200,3 +200,4 @@ test('7. Polite aria-live announcement summarizes new matches without raw PII', 
   assert.match(msg, /Existing customer found/);
   assert.doesNotMatch(msg, /9876543210/);
 });
+
