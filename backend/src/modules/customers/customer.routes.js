@@ -3029,8 +3029,8 @@ router.use((err, req, res, next) => {
   });
 });
 
-// Updated search endpoint without checkFinance
-router.get('/search', async (req, res) => {
+// Tenant-scoped customer search endpoint
+router.get('/search', enhancedCheckFinance, async (req, res) => {
   try {
     const { cname = '', cfname = '', mobile = '', vehicleNumber = '' } = req.query;
 
@@ -3102,11 +3102,13 @@ router.get('/search', async (req, res) => {
       LEFT JOIN vehicle_detail vd ON COALESCE(l.vehicle_id, c.vehicle_id) = vd.id
       LEFT JOIN vehicle_info vi ON vd.vehicle_info_id = vi.id
       LEFT JOIN contacts ct ON c.id = ct.customer_id
-      WHERE 
-        ( $1 <> '' AND $2 <> '' AND c.cname LIKE $3 AND ct.number = $4)
-        OR ( $5 <> '' AND c.cfname_value LIKE $6)
-        OR ( $7 <> '' AND ct.number = $8)
-        OR ( $9 <> '' AND vd.vehicle_number = $10)
+      WHERE c.finance_id = $11::uuid
+        AND (
+          ( $1 <> '' AND $2 <> '' AND c.cname LIKE $3 AND ct.number = $4)
+          OR ( $5 <> '' AND c.cfname_value LIKE $6)
+          OR ( $7 <> '' AND ct.number = $8)
+          OR ( $9 <> '' AND vd.vehicle_number = $10)
+        )
       LIMIT 1
     `;
 
@@ -3114,7 +3116,8 @@ router.get('/search', async (req, res) => {
       cname, mobileExact, cnameLike, mobileExact,
       cfname, cfnameLike,
       mobileExact, mobileExact,
-      vehicleExact, vehicleExact
+      vehicleExact, vehicleExact,
+      req.financeId
     ];
 
     const { rows: rows } = await db.query(sql, params);
@@ -3127,9 +3130,9 @@ router.get('/search', async (req, res) => {
 
     const { rows: contactsRows } = await db.query('SELECT contact_type, type, number FROM contacts WHERE customer_id = $1', [r.id]);
     const { rows: guardianRows } = await db.query('SELECT * FROM guardians WHERE customer_id = $1', [r.id]);
-    const { rows: loanRows } = await db.query('SELECT * FROM loans WHERE customer_id = $1', [r.id]);
-    const { rows: vehicleRows } = await db.query('SELECT vd.*, vi.model_name AS "modelName", vi.brand FROM vehicle_detail vd LEFT JOIN vehicle_info vi ON vd.vehicle_info_id = vi.id WHERE vd.id = (SELECT COALESCE(l.vehicle_id, c.vehicle_id) FROM customers c LEFT JOIN loans l ON l.customer_id = c.id WHERE c.id = $1 LIMIT 1)', [r.id]);
-    const { rows: paymentRows } = await db.query('SELECT id, due_date AS "dueDate", TO_CHAR(payment_date, \'YYYY-MM-DD\') AS "paymentDate", bill_number AS "billNumber", amount, penalty FROM payments WHERE customer_id = $1 ORDER BY due_date DESC', [r.id]);
+    const { rows: loanRows } = await db.query('SELECT * FROM loans WHERE customer_id = $1 AND (finance_id = $2::uuid OR finance_id IS NULL)', [r.id, req.financeId]);
+    const { rows: vehicleRows } = await db.query('SELECT vd.*, vi.model_name AS "modelName", vi.brand FROM vehicle_detail vd LEFT JOIN vehicle_info vi ON vd.vehicle_info_id = vi.id WHERE vd.id = (SELECT COALESCE(l.vehicle_id, c.vehicle_id) FROM customers c LEFT JOIN loans l ON l.customer_id = c.id WHERE c.id = $1 AND c.finance_id = $2::uuid LIMIT 1)', [r.id, req.financeId]);
+    const { rows: paymentRows } = await db.query('SELECT id, due_date AS "dueDate", TO_CHAR(payment_date, \'YYYY-MM-DD\') AS "paymentDate", bill_number AS "billNumber", amount, penalty FROM payments WHERE customer_id = $1 AND (finance_id = $2::uuid OR finance_id IS NULL) ORDER BY due_date DESC', [r.id, req.financeId]);
 
     // Retrieve KYC documents for customer and guardian
     const guardianId = guardianRows[0]?.id ? guardianRows[0].id.toString() : (r.guardian_id ? r.guardian_id.toString() : null);
