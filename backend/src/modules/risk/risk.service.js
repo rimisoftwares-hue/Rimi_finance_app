@@ -512,13 +512,13 @@ function formatAddress(a) {
 /**
  * GET /api/risk/customers/:customerId/deep-view
  */
-async function getCustomerDeepView(financeId, customerId) {
+async function getCustomerDeepView(financeId, customerId, { requireLoan = false } = {}) {
   if (!isValidUuid(customerId)) throw httpError(400, 'Invalid customer id');
   const id = customerId.trim();
   const asOfDate = todayIso();
 
   const [customerResult, monthlyResult, addressResult] = await Promise.all([
-    db.query(buildCustomerRiskSql('c.id = $2::uuid', { requireLoan: false }), [financeId, id]),
+    db.query(buildCustomerRiskSql('c.id = $2::uuid', { requireLoan: Boolean(requireLoan) }), [financeId, id]),
     db.query(MONTHLY_PAYMENTS_SQL, [financeId, id]),
     db.query(HOME_ADDRESS_SQL, [financeId, id]),
   ]);
@@ -1066,7 +1066,7 @@ async function getDueAnalysis(financeId) {
  * Looks up every customer record (incl. closed / previous loans) in the caller's
  * finance matching ANY of the supplied identifiers, and scores the combined history.
  */
-async function getCreditCheck(financeId, query = {}) {
+async function getCreditCheck(financeId, query = {}, { requireLoan = true } = {}) {
   const aadharRaw = query.aadhar !== undefined ? String(query.aadhar).trim() : '';
   const phoneRaw = query.phone !== undefined ? String(query.phone).trim() : '';
   const customerIdRaw = query.customerId !== undefined ? String(query.customerId).trim() : '';
@@ -1101,7 +1101,10 @@ async function getCreditCheck(financeId, query = {}) {
     )`);
   }
 
-  const { rows } = await db.query(buildCustomerRiskSql(`(${conditions.join(' OR ')})`), params);
+  const { rows } = await db.query(
+    buildCustomerRiskSql(`(${conditions.join(' OR ')})`, { requireLoan: Boolean(requireLoan) }),
+    params
+  );
 
   if (rows.length === 0) {
     return {
@@ -1181,10 +1184,16 @@ module.exports = {
   getCustomerDeepView,
   getDueAnalysis,
   getCreditCheck,
-  // exported for testing
+  // exported helpers for sibling modules & testing
   buildCustomerRiskSql,
   buildDueAnalysisSql,
   trendSnapshotDates,
   formatAddress,
+  scoreRow,
+  humanize,
+  round2,
+  get checkExistingCustomerIdentity() {
+    return require('./existingCustomerCheck.service').checkExistingCustomerIdentity;
+  },
 };
 

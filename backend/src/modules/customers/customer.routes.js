@@ -29,6 +29,9 @@ const {
   computeTerminatedAggregates,
   extractTerminatedFilterOptions
 } = require('./terminatedHelper');
+const {
+  checkExistingCustomerIdentity,
+} = require('../risk/existingCustomerCheck.service');
 require("dotenv").config();
 
 const bucketName = process.env.BUCKET_NAME;
@@ -634,6 +637,129 @@ const saveVehicleMedia = async (client, { financeId, vehicleId, mediaUrl, mediaT
     return rows[0]?.id;
   }
 };
+
+// Per-user sliding-window rate limiter for POST /customers/check-existing (30 req / 60s)
+const CHECK_EXISTING_RATE_WINDOW_MS = 60 * 1000;
+const CHECK_EXISTING_RATE_MAX = 30;
+const checkExistingRateBuckets = new Map();
+
+const checkExistingRateLimiter = (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  const now = Date.now();
+  const principalKey = String(req.user?.id || req.owner?.id || req.ip || 'anonymous');
+
+  // Opportunistic sweep to bound Map size
+  if (checkExistingRateBuckets.size > 1000) {
+    for (const [k, b] of checkExistingRateBuckets.entries()) {
+      if (b.resetAt <= now) checkExistingRateBuckets.delete(k);
+    }
+  }
+
+  let bucket = checkExistingRateBuckets.get(principalKey);
+  if (!bucket || bucket.resetAt <= now) {
+    bucket = { count: 0, resetAt: now + CHECK_EXISTING_RATE_WINDOW_MS };
+    checkExistingRateBuckets.set(principalKey, bucket);
+  }
+
+  bucket.count += 1;
+  if (bucket.count > CHECK_EXISTING_RATE_MAX) {
+    const retryAfterSec = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    res.set('Retry-After', String(retryAfterSec));
+    return res.status(429).json({
+      success: false,
+      error: 'Too many identity check requests. Please wait a moment.',
+      error_code: 'RATE_LIMITED',
+    });
+  }
+
+  return next();
+};
+
+// Real-time existing customer / guarantor identity check (registered ABOVE all /:customerId routes)
+router.post('/check-existing', enhancedCheckFinance, checkExistingRateLimiter, async (req, res) => {
+  const startedAt = Date.now();
+  res.set('Cache-Control', 'no-store');
+
+  try {
+    if (!req.financeId || (!req.user?.id && !req.owner?.id)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied',
+        error_code: 'FORBIDDEN',
+      });
+    }
+
+    const body = req.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Request body must be a JSON object',
+      });
+    }
+
+    if (typeof req.rawBody === 'string' && req.rawBody.length > 4096) {
+      return res.status(400).json({
+        success: false,
+        error: 'Request payload too large',
+      });
+    }
+
+    if (body.phones !== undefined && body.phones !== null) {
+      if (!Array.isArray(body.phones) || body.phones.length > 6) {
+        return res.status(400).json({
+          success: false,
+          error: 'phones must be an array of at most 6 strings',
+        });
+      }
+      for (const p of body.phones) {
+        if (typeof p !== 'string' || p.length > 32) {
+          return res.status(400).json({
+            success: false,
+            error: 'Each phone entry must be a short string',
+          });
+        }
+      }
+    }
+
+    const stringFields = ['aadhar', 'otherGovtIdType', 'otherGovtIdNumber', 'excludeCustomerId'];
+    for (const key of stringFields) {
+      const val = body[key];
+      if (val !== undefined && val !== null && (typeof val !== 'string' || val.length > 64)) {
+        return res.status(400).json({
+          success: false,
+          error: `${key} must be a short string`,
+        });
+      }
+    }
+
+    const data = await checkExistingCustomerIdentity(req.financeId, {
+      phones: body.phones,
+      aadhar: body.aadhar,
+      otherGovtIdType: body.otherGovtIdType,
+      otherGovtIdNumber: body.otherGovtIdNumber,
+      excludeCustomerId: body.excludeCustomerId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      ...data,
+    });
+  } catch (err) {
+    const durationMs = Date.now() - startedAt;
+    const status = err?.statusCode || 500;
+    if (status >= 500) {
+      console.error('[customers/check-existing] error', {
+        financeId: req.financeId || null,
+        durationMs,
+        code: err?.code || null,
+      });
+    }
+    return res.status(status).json({
+      success: false,
+      error: status >= 500 ? 'Failed to check existing customer records' : err.message,
+    });
+  }
+});
 
 // CREATE Customer
 router.post('/', enhancedCheckFinance, upload.fields([
