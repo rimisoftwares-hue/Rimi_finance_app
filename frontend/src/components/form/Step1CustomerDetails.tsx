@@ -607,9 +607,17 @@ import { useOwnerAuth } from '../../contexts/OwnerAuthContext';
 import { useAuth } from '../../contexts/AuthContext';
 
 import { useNextHplno } from '../../hooks/useNextHplno'; // Import the hook
+import { useExistingCustomerCheck } from '../../hooks/useExistingCustomerCheck';
+import {
+  ExistingCustomerSideToggle,
+  IdentityMatchInlineChip,
+  useExistingCustomerOverlayController,
+} from './ExistingCustomerSideToggle';
+import { CustomerDeepView } from '../CustomerDeepView';
 
 interface Step1Props {
   errors: Record<string, string>;
+  excludeCustomerId?: string;
 }
 
 const loanStatusOptions = [
@@ -634,13 +642,24 @@ const govtIdOptions = [
 ];
 
 // Step1CustomerDetails.tsx
-export const Step1CustomerDetails: React.FC<Step1Props> = ({ errors }) => {
+export const Step1CustomerDetails: React.FC<Step1Props> = ({ errors, excludeCustomerId }) => {
   const { customer, updateCustomer } = useFormStore();
   const { owner } = useOwnerAuth();
   const { currentFinance } = useAuth();
   const { nextHplno, loading, error } = useNextHplno();
   const [hasManuallyEdited, setHasManuallyEdited] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
+
+  const resolvedExcludeCustomerId = excludeCustomerId || customer.id || undefined;
+  const existingCheck = useExistingCustomerCheck({
+    contacts: customer.ccontacts,
+    aadhar: customer.aadhar_id,
+    otherGovtIdType: customer.other_govt_id_type,
+    otherGovtIdNumber: customer.other_govt_id_number,
+    excludeCustomerId: resolvedExcludeCustomerId,
+    financeScopeKey: currentFinance?.id ?? owner?.id ?? null,
+  });
+  const overlay = useExistingCustomerOverlayController(existingCheck.setPanelState);
   
   // Handle Enter key to move to next text input only
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -694,6 +713,7 @@ const handleContactChange = (contacts: any[]) => {
 
 
   return (
+    <>
      <div ref={formRef} onKeyDown={handleKeyDown} className="grid grid-cols-1 lg:grid-cols-3 gap-3">
       {/* Left Column - Personal Details */}
       <section className="form-section">
@@ -770,6 +790,8 @@ const handleContactChange = (contacts: any[]) => {
               onChange={handleContactChange}
               errors={errors}
               contactType="customer"
+              matchedByIndex={existingCheck.fieldMatchMap.byContactIndex}
+              onMatchChipClick={overlay.expandFromChip}
             />
           </div>
         </div>
@@ -863,15 +885,21 @@ const handleContactChange = (contacts: any[]) => {
           Government Identification
         </h3>
         <div className="grid grid-cols-1 gap-2">
-          <TextInput
-            label="Aadhar Number"
-            value={customer.aadhar_id}
-            onChange={(e) => updateCustomer({ aadhar_id: e.target.value })}
-            error={errors.aadhar_id}
-            placeholder="Enter 12-digit Aadhar"
-            maxLength={12}
-            inputMode="numeric"
-          />
+          <div>
+            <TextInput
+              label="Aadhar Number"
+              value={customer.aadhar_id}
+              onChange={(e) => updateCustomer({ aadhar_id: e.target.value })}
+              error={errors.aadhar_id}
+              placeholder="Enter 12-digit Aadhar"
+              maxLength={12}
+              inputMode="numeric"
+            />
+            <IdentityMatchInlineChip
+              summary={existingCheck.fieldMatchMap.aadhar}
+              onClick={overlay.expandFromChip}
+            />
+          </div>
           <div className="grid grid-cols-2 gap-1">
           <SelectInput
             label="Other Govt ID Type"
@@ -880,17 +908,43 @@ const handleContactChange = (contacts: any[]) => {
             options={govtIdOptions}
             error={errors.other_govt_id_type}
           />
-          <CapitalizedInput
-            label="Other Govt ID Number"
-            casing="upper"
-            value={customer.other_govt_id_number}
-            onChange={(e) => updateCustomer({ other_govt_id_number: e.target.value })}
-            error={errors.other_govt_id_number}
-            placeholder="Enter ID number"
-          />
+          <div>
+            <CapitalizedInput
+              label="Other Govt ID Number"
+              casing="upper"
+              value={customer.other_govt_id_number}
+              onChange={(e) => updateCustomer({ other_govt_id_number: e.target.value })}
+              error={errors.other_govt_id_number}
+              placeholder="Enter ID number"
+            />
+            <IdentityMatchInlineChip
+              summary={existingCheck.fieldMatchMap.otherGovtId}
+              onClick={overlay.expandFromChip}
+            />
+          </div>
           </div>
         </div>
       </section>
     </div>
+
+    <ExistingCustomerSideToggle
+      stepContext="customer"
+      matches={existingCheck.matches}
+      matchCount={existingCheck.matchCount}
+      loading={existingCheck.loading}
+      highestRiskLevel={existingCheck.highestRiskLevel}
+      panelState={existingCheck.panelState}
+      onPanelStateChange={existingCheck.setPanelState}
+      drawerOpen={overlay.deepViewOpen}
+      onOpenDeepView={overlay.openDeepView}
+      pillButtonRef={overlay.pillButtonRef}
+    />
+
+    <CustomerDeepView
+      customer={overlay.deepViewCustomer}
+      open={overlay.deepViewOpen}
+      onClose={overlay.closeDeepView}
+    />
+    </>
   );
 };

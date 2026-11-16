@@ -246,9 +246,19 @@ import { AddressForm } from './AddressForm';
 import { ContactInput } from './ContactInput';
 import { useFormStore } from '../../types/formStore';
 import { Shield, MapPin, Phone, Camera, Briefcase, User } from 'lucide-react';
+import { useOwnerAuth } from '../../contexts/OwnerAuthContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useExistingCustomerCheck } from '../../hooks/useExistingCustomerCheck';
+import {
+  ExistingCustomerSideToggle,
+  IdentityMatchInlineChip,
+  useExistingCustomerOverlayController,
+} from './ExistingCustomerSideToggle';
+import { CustomerDeepView } from '../CustomerDeepView';
 
 interface Step3Props {
   errors: Record<string, string>;
+  excludeCustomerId?: string;
 }
 
 const fatherNameUnits = [
@@ -267,9 +277,22 @@ const govtIdOptions = [
   { value: 'other', label: 'Other' },
 ];
 
-export const Step3GuardianDetails: React.FC<Step3Props> = ({ errors }) => {
-  const { guardian, updateGuardian } = useFormStore();
+export const Step3GuardianDetails: React.FC<Step3Props> = ({ errors, excludeCustomerId }) => {
+  const { customer, guardian, updateGuardian } = useFormStore();
+  const { owner } = useOwnerAuth();
+  const { currentFinance } = useAuth();
   const formRef = useRef<HTMLDivElement>(null);
+
+  const resolvedExcludeCustomerId = excludeCustomerId || customer.id || undefined;
+  const existingCheck = useExistingCustomerCheck({
+    contacts: guardian.gcontacts,
+    aadhar: guardian.aadhar_id,
+    otherGovtIdType: guardian.other_govt_id_type,
+    otherGovtIdNumber: guardian.other_govt_id_number,
+    excludeCustomerId: resolvedExcludeCustomerId,
+    financeScopeKey: currentFinance?.id ?? owner?.id ?? null,
+  });
+  const overlay = useExistingCustomerOverlayController(existingCheck.setPanelState);
   
   const handleContactChange = (contacts: any[]) => {
     updateGuardian({ gcontacts: contacts });
@@ -298,6 +321,7 @@ export const Step3GuardianDetails: React.FC<Step3Props> = ({ errors }) => {
   };
 
   return (
+    <>
     <div ref={formRef} onKeyDown={handleKeyDown} className="grid grid-cols-1 lg:grid-cols-3 gap-3">
       {/* Left Column - Personal Details */}
       <section className="form-section">
@@ -352,6 +376,8 @@ export const Step3GuardianDetails: React.FC<Step3Props> = ({ errors }) => {
               onChange={handleContactChange}
               errors={errors}
               contactType="guardian"
+              matchedByIndex={existingCheck.fieldMatchMap.byContactIndex}
+              onMatchChipClick={overlay.expandFromChip}
             />
           </div>
         </div>
@@ -451,14 +477,20 @@ export const Step3GuardianDetails: React.FC<Step3Props> = ({ errors }) => {
           Government Identification
         </h3>
         <div className="grid grid-cols-1 gap-2">
-          <TextInput
-            label="Aadhar Number"
-            value={guardian.aadhar_id}
-            onChange={(e) => updateGuardian({ aadhar_id: e.target.value })}
-            error={errors.aadhar_id}
-            placeholder="Enter 12-digit Aadhar"
-            maxLength={12}
-          />
+          <div>
+            <TextInput
+              label="Aadhar Number"
+              value={guardian.aadhar_id}
+              onChange={(e) => updateGuardian({ aadhar_id: e.target.value })}
+              error={errors.aadhar_id}
+              placeholder="Enter 12-digit Aadhar"
+              maxLength={12}
+            />
+            <IdentityMatchInlineChip
+              summary={existingCheck.fieldMatchMap.aadhar}
+              onClick={overlay.expandFromChip}
+            />
+          </div>
           <div className="grid grid-cols-2 gap-1">
             <SelectInput
               label="Other Govt ID Type"
@@ -467,14 +499,20 @@ export const Step3GuardianDetails: React.FC<Step3Props> = ({ errors }) => {
               options={govtIdOptions}
               error={errors.other_govt_id_type}
             />
-            <CapitalizedInput
-              casing="upper"
-              label="Other Govt ID Number"
-              value={guardian.other_govt_id_number}
-              onChange={(e) => updateGuardian({ other_govt_id_number: e.target.value })}
-              error={errors.other_govt_id_number}
-              placeholder="Enter ID number"
-            />
+            <div>
+              <CapitalizedInput
+                casing="upper"
+                label="Other Govt ID Number"
+                value={guardian.other_govt_id_number}
+                onChange={(e) => updateGuardian({ other_govt_id_number: e.target.value })}
+                error={errors.other_govt_id_number}
+                placeholder="Enter ID number"
+              />
+              <IdentityMatchInlineChip
+                summary={existingCheck.fieldMatchMap.otherGovtId}
+                onClick={overlay.expandFromChip}
+              />
+            </div>
           </div>
           <CapitalizedInput
             casing="words"
@@ -487,5 +525,25 @@ export const Step3GuardianDetails: React.FC<Step3Props> = ({ errors }) => {
         </div>
       </section>
     </div>
+
+    <ExistingCustomerSideToggle
+      stepContext="guardian"
+      matches={existingCheck.matches}
+      matchCount={existingCheck.matchCount}
+      loading={existingCheck.loading}
+      highestRiskLevel={existingCheck.highestRiskLevel}
+      panelState={existingCheck.panelState}
+      onPanelStateChange={existingCheck.setPanelState}
+      drawerOpen={overlay.deepViewOpen}
+      onOpenDeepView={overlay.openDeepView}
+      pillButtonRef={overlay.pillButtonRef}
+    />
+
+    <CustomerDeepView
+      customer={overlay.deepViewCustomer}
+      open={overlay.deepViewOpen}
+      onClose={overlay.closeDeepView}
+    />
+    </>
   );
 };

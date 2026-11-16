@@ -353,13 +353,23 @@ export const MultiStepFormEdit: React.FC<MultiStepFormEditProps> = ({
       </div>
 
       <div className="flex-1 overflow-auto min-h-0 px-4 py-2">
-        {currentStep === 1 && <Step1CustomerDetails errors={errors} />}
+        {currentStep === 1 && (
+          <Step1CustomerDetails
+            errors={errors}
+            excludeCustomerId={customer.id || initialData?.customer?.id}
+          />
+        )}
         {currentStep === 2 && (
           dealType === 'consulting' 
             ? <Step2ConsuldingLoan errors={errors} />
             : <Step2VehicleLoan errors={errors} />
         )}
-        {currentStep === 3 && <Step3GuardianDetails errors={errors} />}
+        {currentStep === 3 && (
+          <Step3GuardianDetails
+            errors={errors}
+            excludeCustomerId={customer.id || initialData?.customer?.id}
+          />
+        )}
       </div>
 
       {/* Navigation Buttons */}

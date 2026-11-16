@@ -3,12 +3,16 @@ import { SelectInput } from './SelectInput';
 import { CapitalizedInput } from '../common/CapitalizedInput';
 import { Plus, Trash2 } from 'lucide-react';
 import { CustomerContact } from '../../types/formStore';
+import type { FieldMatchSummary } from '../../hooks/existingCustomerCheckModel';
+import { IdentityMatchInlineChip } from './ExistingCustomerSideToggle';
 
 interface ContactInputProps {
   contacts: CustomerContact[];
   onChange: (contacts: CustomerContact[]) => void;
   errors?: Record<string, string>;
   contactType: 'customer' | 'guardian';
+  matchedByIndex?: Record<number, FieldMatchSummary>;
+  onMatchChipClick?: () => void;
 }
 
 export const ContactInput: React.FC<ContactInputProps> = ({
@@ -16,6 +20,8 @@ export const ContactInput: React.FC<ContactInputProps> = ({
   onChange,
   errors = {},
   contactType,
+  matchedByIndex,
+  onMatchChipClick,
 }) => {
   // Defensive initialization: guarantee at least one contact row
   const defaultContact: CustomerContact = {
@@ -117,6 +123,12 @@ export const ContactInput: React.FC<ContactInputProps> = ({
                 maxLength={15}
                 className="h-[42px] text-sm"
               />
+              {contact.type !== 'work' && matchedByIndex?.[index] && onMatchChipClick && (
+                <IdentityMatchInlineChip
+                  summary={matchedByIndex[index]}
+                  onClick={onMatchChipClick}
+                />
+              )}
             </div>
             {effectiveContacts.length > 1 && (
               <button
