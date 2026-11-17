@@ -251,22 +251,36 @@ const CustomerDetails = () => {
         ? response.data
         : response.data.payments || [];
 
-      const formatted: Payment[] = paymentsData.map(p => ({
-        ...p,
-        amount: Number(p.amount) || 0,
-        penalty: Number(p.penalty) || 0,
-        payment_mode_amount: Number(p.payment_mode_amount) || 0,
-        payment_mode_1_amount: Number(p.payment_mode_1_amount) || 0,
-        hand_loan: Number(p.hand_loan) || 0,
-        collected_by: p.collected_by || '',
-        payment_mode: p.payment_mode || 'cash',
-        payment_mode_1: p.payment_mode_1,
-        hand_loan_remark: p.hand_loan_remark || '',
-        remarks: p.remarks || '',
-        status: p.status || 'pending',
-        payment_status: p.payment_status || 'active',
-        sub_dues: p.sub_dues || p.sub_due || [],
-      }));
+      const formatted: Payment[] = paymentsData.map(p => {
+        const rawSubs: any[] = p.sub_dues || p.sub_due || [];
+        const formattedSubs = rawSubs.map((sd: any) => ({
+          ...sd,
+          paid_amount: Number(sd.paid_amount ?? sd.amount) || 0,
+          principal_amount: Number(sd.principal_amount) || 0,
+          interest_amount: Number(sd.interest_amount) || 0,
+          payment_mode_amount: Number(sd.payment_mode_amount) || 0,
+          payment_mode_1_amount: Number(sd.payment_mode_1_amount) || 0,
+        }));
+
+        return {
+          ...p,
+          amount: Number(p.amount) || 0,
+          principal_amount: Number(p.principal_amount) || 0,
+          interest_amount: Number(p.interest_amount) || 0,
+          penalty: Number(p.penalty) || 0,
+          payment_mode_amount: Number(p.payment_mode_amount) || 0,
+          payment_mode_1_amount: Number(p.payment_mode_1_amount) || 0,
+          hand_loan: Number(p.hand_loan) || 0,
+          collected_by: p.collected_by || '',
+          payment_mode: p.payment_mode || 'cash',
+          payment_mode_1: p.payment_mode_1,
+          hand_loan_remark: p.hand_loan_remark || '',
+          remarks: p.remarks || '',
+          status: p.status || 'pending',
+          payment_status: p.payment_status || 'active',
+          sub_dues: formattedSubs,
+        };
+      });
 
       setPayments(formatted);
     } catch (err) {
@@ -424,16 +438,39 @@ const CustomerDetails = () => {
 
   };
 
+  const openDues = useMemo(() => {
+    const dueAmt = Number(loan?.due_amount ?? loan?.dueAmount ?? 0);
+    if (dueAmt <= 0) return [];
+    return payments
+      .filter((p) => !isPaymentCancelled(p) && p.status !== 'paid')
+      .map((p) => {
+        const activeSubs = (p.sub_dues || []).filter(
+          (sd) => String(sd.status || 'active').toLowerCase() !== 'cancelled'
+        );
+        const paidAmount =
+          (Number(p.amount) || 0) +
+          activeSubs.reduce((s, sd) => s + (Number(sd.paid_amount) || 0), 0);
+        const paidInterest =
+          (Number(p.interest_amount) || 0) +
+          activeSubs.reduce((s, sd) => s + (Number(sd.interest_amount) || 0), 0);
+        return { id: p.id, dueDate: p.dueDate, paidAmount, paidInterest };
+      })
+      .filter((od) => od.paidAmount < dueAmt)
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  }, [payments, loan]);
+
   // ─── Open payment dialog ──────────────────────────────────────────────────
   const handleOpenPaymentDialog = (payment?: Payment) => {
     if (payment) {
-      // Edit mode — pre-fill with existing payment data
+      // Edit mode — pre-fill with existing payment data including Principal & Interest
       setEditingPayment(payment);
       setPaymentFormData({
         dueDate: payment.dueDate,
         paymentDate: payment.paymentDate || '',
         billNumber: payment.billNumber,
         amount: payment.amount,
+        principal_amount: payment.principal_amount,
+        interest_amount: payment.interest_amount,
         penalty: payment.penalty,
         collected_by: payment.collected_by || currentUserName,
         payment_mode: payment.payment_mode || 'cash',
@@ -444,8 +481,7 @@ const CustomerDetails = () => {
         remarks: payment.remarks || '',
       });
     } else {
-      // Add mode — inject last partial info so dialog can show debt banner
-
+      // Add mode — inject next due date & default EMI amount
       setEditingPayment(null);
       setPaymentFormData({
         ...defaultPaymentForm,
@@ -465,6 +501,10 @@ const CustomerDetails = () => {
         await apiClient.put(`/payments/${editingPayment.id}`, {
           ...data,
           amount: Number(data.amount),
+          principal_amount:
+            data.principal_amount !== undefined ? Number(data.principal_amount) : undefined,
+          interest_amount:
+            data.interest_amount !== undefined ? Number(data.interest_amount) : undefined,
           penalty: Number(data.penalty),
           payment_mode_1_amount: Number(data.payment_mode_1_amount),
           hand_loan: Number(data.hand_loan),
@@ -475,6 +515,10 @@ const CustomerDetails = () => {
           ...data,
           hplno: customer?.hplno,
           amount: Number(data.amount),
+          principal_amount:
+            data.principal_amount !== undefined ? Number(data.principal_amount) : undefined,
+          interest_amount:
+            data.interest_amount !== undefined ? Number(data.interest_amount) : undefined,
           dueAmount: Number(loan?.due_amount ?? loan?.dueAmount ?? 0),
           last_payment_id: last_payment_id,
           last_due_paid: Number(last_due_paid),
@@ -677,6 +721,8 @@ const CustomerDetails = () => {
           currentUserName={currentUserName}
           isOwner={isOwner}
           allUsers={allUsers}
+          loan={loan}
+          openDues={openDues}
         />
 
         {/* History Dialog */}

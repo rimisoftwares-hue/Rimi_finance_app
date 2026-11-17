@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { Edit, Trash2, Eye, ChevronDown, ChevronRight } from 'lucide-react';
 import { Payment, SubDue } from '../../types/customer';
 import { format, parseISO } from 'date-fns';
@@ -53,7 +53,7 @@ interface PaymentTableProps {
   payments: Payment[];
   dueAmount?: number;
   onEdit: (payment: Payment) => void;
-  onDelete: (paymentId: number) => void;
+  onDelete: (paymentId: number | string) => void;
   calculatePenaltyDays: (index: number) => number;
 }
 
@@ -66,11 +66,11 @@ const PaymentTable = ({
 }: PaymentTableProps) => {
   const { user } = useAuth();
   const isOwner = user?.role === 'owner';
-  const [collapsedDates, setCollapsedDates] = useState<Set<number>>(new Set());
+  const [collapsedDates, setCollapsedDates] = useState<Set<number | string>>(new Set());
   const [viewPayment, setViewPayment] = useState<Payment | null>(null);
   const [viewSubDue, setViewSubDue] = useState<{ sub: SubDue; parent: Payment } | null>(null);
 
-  const toggleExpand = (id: number) => {
+  const toggleExpand = (id: number | string) => {
     setCollapsedDates((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -78,14 +78,21 @@ const PaymentTable = ({
     });
   };
 
+  const isRowCancelled = (payment: Payment) =>
+    String(payment.payment_status || 'active').toLowerCase() === 'cancelled' ||
+    String(payment.status || '').toLowerCase() === 'cancelled';
+
   const getPenaltyDays = (payment: Payment) => {
     const idx = payments.indexOf(payment);
     return idx >= 0 ? calculatePenaltyDays(idx) : 0;
   };
   const getBalance = (payment: Payment) => {
+    if (isRowCancelled(payment)) return 0;
     if (payment.status !== 'paid') {
       const expected = Number(dueAmount) || 0;
-      const subTotal = (payment.sub_dues || []).reduce((s, sd) => s + (sd.paid_amount || 0), 0);
+      const subTotal = (payment.sub_dues || [])
+        .filter((sd) => String(sd.status || 'active').toLowerCase() !== 'cancelled')
+        .reduce((s, sd) => s + (sd.paid_amount || 0), 0);
       const totalPaid = (payment.amount || 0) + subTotal;
       return Math.max(expected - totalPaid, 0);
     }
@@ -94,7 +101,10 @@ const PaymentTable = ({
 
   const getComputedStatus = (payment: Payment) => {
     const balance = getBalance(payment);
-    if (payment.amount === 0 && (!payment.sub_dues || payment.sub_dues.length === 0)) return 'pending';
+    const activeSubs = (payment.sub_dues || []).filter(
+      (sd) => String(sd.status || 'active').toLowerCase() !== 'cancelled'
+    );
+    if (payment.amount === 0 && activeSubs.length === 0) return 'pending';
     if (balance <= 0) return 'paid';
     return 'partial';
   };
@@ -108,8 +118,25 @@ const PaymentTable = ({
   }
 
   const totalPaidAll = payments.reduce((s, p) => {
-    const subTotal = (p.sub_dues || []).reduce((ss, sd) => ss + (sd.paid_amount || 0), 0);
+    if (isRowCancelled(p)) return s;
+    const subTotal = (p.sub_dues || [])
+      .filter((sd) => String(sd.status || 'active').toLowerCase() !== 'cancelled')
+      .reduce((ss, sd) => ss + (sd.paid_amount || 0), 0);
     return s + (p.amount || 0) + subTotal;
+  }, 0);
+  const totalPrincipalAll = payments.reduce((s, p) => {
+    if (isRowCancelled(p)) return s;
+    const subPrin = (p.sub_dues || [])
+      .filter((sd) => String(sd.status || 'active').toLowerCase() !== 'cancelled')
+      .reduce((ss, sd) => ss + (sd.principal_amount || 0), 0);
+    return s + (p.principal_amount || 0) + subPrin;
+  }, 0);
+  const totalInterestAll = payments.reduce((s, p) => {
+    if (isRowCancelled(p)) return s;
+    const subInt = (p.sub_dues || [])
+      .filter((sd) => String(sd.status || 'active').toLowerCase() !== 'cancelled')
+      .reduce((ss, sd) => ss + (sd.interest_amount || 0), 0);
+    return s + (p.interest_amount || 0) + subInt;
   }, 0);
   const totalBalanceAll = payments.reduce((s, p) => s + getBalance(p), 0);
 
@@ -127,6 +154,8 @@ const PaymentTable = ({
                 <TableHead>Status</TableHead>
                 <TableHead className="hidden sm:table-cell">Bill No</TableHead>
                 <TableHead>Paid</TableHead>
+                <TableHead>Principal</TableHead>
+                <TableHead>Interest</TableHead>
                 <TableHead>Balance</TableHead>
                 <TableHead className="hidden md:table-cell">Collected By</TableHead>
                 <TableHead className="hidden lg:table-cell">Penalty Days</TableHead>
@@ -144,7 +173,7 @@ const PaymentTable = ({
                 const status = payment.status || getComputedStatus(payment);
 
                 return (
-                  <>
+                  <Fragment key={`group-${payment.id}`}>
                     {/* ── Primary Payment Row ── */}
                     <TableRow
                       key={`pay-${payment.id}`}
@@ -169,6 +198,12 @@ const PaymentTable = ({
                       </TableCell>
                       <TableCell className="font-semibold text-success">
                         ₹{(payment.amount || 0).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-foreground font-medium">
+                        ₹{(payment.principal_amount || 0).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground font-medium">
+                        ₹{(payment.interest_amount || 0).toLocaleString()}
                       </TableCell>
                       <TableCell>
                         {balance > 0 ? (
@@ -242,6 +277,12 @@ const PaymentTable = ({
                         <TableCell className="font-semibold text-success">
                           ₹{(sub.paid_amount || 0).toLocaleString()}
                         </TableCell>
+                        <TableCell className="text-foreground text-sm">
+                          ₹{(sub.principal_amount || 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm">
+                          ₹{(sub.interest_amount || 0).toLocaleString()}
+                        </TableCell>
                         <TableCell />
                         <TableCell className="hidden md:table-cell text-muted-foreground">
                           {sub.collected_by || '-'}
@@ -251,7 +292,7 @@ const PaymentTable = ({
                         {isOwner && <TableCell />}
                       </TableRow>
                     ))}
-                  </>
+                  </Fragment>
                 );
               })}
             </TableBody>
@@ -268,6 +309,18 @@ const PaymentTable = ({
             <span className="text-muted-foreground">Total Paid:</span>{' '}
             <span className="font-semibold text-success">
               ₹{totalPaidAll.toLocaleString()}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Total Principal Paid:</span>{' '}
+            <span className="font-semibold text-foreground">
+              ₹{totalPrincipalAll.toLocaleString()}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Total Interest Paid:</span>{' '}
+            <span className="font-semibold text-foreground">
+              ₹{totalInterestAll.toLocaleString()}
             </span>
           </div>
           <div>
@@ -320,11 +373,23 @@ const PaymentTable = ({
               </div>
 
               {/* Amount Details */}
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-muted-foreground">Amount Paid</p>
                   <p className="font-semibold text-success text-lg">
                     ₹{(viewPayment.amount || 0).toLocaleString()}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-muted-foreground">Principal</p>
+                  <p className="font-semibold text-foreground text-lg">
+                    ₹{(viewPayment.principal_amount || 0).toLocaleString()}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-muted-foreground">Interest</p>
+                  <p className="font-semibold text-muted-foreground text-lg">
+                    ₹{(viewPayment.interest_amount || 0).toLocaleString()}
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -468,6 +533,18 @@ const PaymentTable = ({
                   <p className="text-sm text-muted-foreground">Amount Paid</p>
                   <p className="text-lg font-semibold text-success">
                     ₹{(viewSubDue.sub.paid_amount || 0).toLocaleString()}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">Principal</p>
+                  <p className="text-base font-semibold text-foreground">
+                    ₹{(viewSubDue.sub.principal_amount || 0).toLocaleString()}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">Interest</p>
+                  <p className="text-base font-semibold text-muted-foreground">
+                    ₹{(viewSubDue.sub.interest_amount || 0).toLocaleString()}
                   </p>
                 </div>
               </div>
