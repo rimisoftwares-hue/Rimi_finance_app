@@ -1102,12 +1102,24 @@ async function getUserProfileOverview(req, options = {}) {
     throw err;
   }
 
-  const isOwnerToken = Boolean(req.owner?.id);
-  const principalId = isOwnerToken
-    ? String(req.owner.id).trim()
-    : req.user?.id
+  let isOwnerToken = false;
+  let principalId = '';
+
+  if (req.principalType === 'owner') {
+    isOwnerToken = true;
+    principalId = req.owner?.id
+      ? String(req.owner.id).trim()
+      : req.principalId
+        ? String(req.principalId).trim()
+        : '';
+  } else if (req.principalType === 'user' || (req.principalType === undefined && req.user?.id)) {
+    isOwnerToken = false;
+    principalId = req.user?.id
       ? String(req.user.id).trim()
-      : '';
+      : req.principalId
+        ? String(req.principalId).trim()
+        : '';
+  }
 
   if (!isValidUuid(principalId)) {
     const err = new Error('Authenticated user or owner context is required');
@@ -1115,7 +1127,7 @@ async function getUserProfileOverview(req, options = {}) {
     throw err;
   }
 
-  const ownerUsername = req.owner?.username || null;
+  const ownerUsername = isOwnerToken ? (req.owner?.username || null) : null;
 
   // 1. Fetch profile section (1 query)
   const { resolvedUserId, profile } = await fetchProfileSection(queryable, {
