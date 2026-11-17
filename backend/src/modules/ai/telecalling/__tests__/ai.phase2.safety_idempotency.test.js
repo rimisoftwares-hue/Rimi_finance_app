@@ -601,6 +601,10 @@ test('Phase 2.2: Idempotency-Key validation, replay (Idempotency-Replay: true), 
 
   // 2. Manual call creation + replay + 422 mismatch
   const runner = createStatefulCallRunner();
+  const liveAllowEnv = {
+    VOICE_TELEPHONY_MODE: 'live_allowlist',
+    TEST_ALLOWED_NUMBERS: ALLOWED_PHONE,
+  };
   let pythonDispatchCount = 0;
   const idemKey = 'manual-call:01960000-1111-4222-8333-444444444444';
 
@@ -609,6 +613,7 @@ test('Phase 2.2: Idempotency-Key validation, replay (Idempotency-Replay: true), 
     { customerId: CUSTOMER_1 },
     {
       callId: CALL_1,
+      env: liveAllowEnv,
       idempotencyKey: idemKey,
       requireIdempotencyKey: true,
       queryRunner: runner,
@@ -628,6 +633,7 @@ test('Phase 2.2: Idempotency-Key validation, replay (Idempotency-Replay: true), 
     { customerId: CUSTOMER_1 },
     {
       callId: CALL_2,
+      env: liveAllowEnv,
       idempotencyKey: idemKey,
       requireIdempotencyKey: true,
       queryRunner: runner,
@@ -729,6 +735,10 @@ test('Phase 2.3 (A1 + A3): Connect error never burns attempt/cooldown; read time
   const aiService = require('../ai.service');
   const callQueue = require('../callQueue.service');
   const runner = createStatefulCallRunner();
+  const liveAllowEnv = {
+    VOICE_TELEPHONY_MODE: 'live_allowlist',
+    TEST_ALLOWED_NUMBERS: ALLOWED_PHONE,
+  };
 
   // 1. Pre-dial connect error (`ECONNREFUSED`) -> 503/502, attempt = 0, cooldown NOT burned!
   await assert.rejects(
@@ -738,6 +748,7 @@ test('Phase 2.3 (A1 + A3): Connect error never burns attempt/cooldown; read time
         { customerId: CUSTOMER_1 },
         {
           callId: CALL_1,
+          env: liveAllowEnv,
           idempotencyKey: 'manual-call:connect-err-001',
           requireIdempotencyKey: true,
           queryRunner: runner,
@@ -763,6 +774,7 @@ test('Phase 2.3 (A1 + A3): Connect error never burns attempt/cooldown; read time
     { customerId: CUSTOMER_1 },
     {
       callId: CALL_2,
+      env: liveAllowEnv,
       idempotencyKey: 'manual-call:connect-retry-002',
       requireIdempotencyKey: true,
       queryRunner: runner,
@@ -780,6 +792,7 @@ test('Phase 2.3 (A1 + A3): Connect error never burns attempt/cooldown; read time
         FINANCE_A,
         { customerId: CUSTOMER_1 },
         {
+          env: liveAllowEnv,
           idempotencyKey: 'manual-call:concurrent-003',
           requireIdempotencyKey: true,
           queryRunner: runner,
@@ -798,6 +811,7 @@ test('Phase 2.3 (A1 + A3): Connect error never burns attempt/cooldown; read time
         { customerId: CUSTOMER_2 },
         {
           callId: timeoutCallId,
+          env: liveAllowEnv,
           idempotencyKey: 'manual-call:read-timeout-001',
           requireIdempotencyKey: true,
           queryRunner: runner,
@@ -826,6 +840,7 @@ test('Phase 2.3 (A1 + A3): Connect error never burns attempt/cooldown; read time
         FINANCE_A,
         { customerId: CUSTOMER_2 },
         {
+          env: liveAllowEnv,
           idempotencyKey: 'manual-call:read-timeout-second-dial',
           requireIdempotencyKey: true,
           queryRunner: runner,
@@ -882,10 +897,12 @@ test('Phase 2.4 (Telephony Mode + A5 Gates): Fail-closed VOICE_TELEPHONY_MODE, k
     VOICE_LIVE_CALLS_CONFIRMED: process.env.VOICE_LIVE_CALLS_CONFIRMED,
     TEST_ALLOWED_NUMBERS: process.env.TEST_ALLOWED_NUMBERS,
     VOICE_AI_INTERNAL_HMAC_SECRET: process.env.VOICE_AI_INTERNAL_HMAC_SECRET,
+    VOICE_INTERNAL_API_KEY: process.env.VOICE_INTERNAL_API_KEY,
   };
 
   try {
-    process.env.VOICE_AI_INTERNAL_HMAC_SECRET = 'phase2-test-hmac-secret';
+    process.env.VOICE_AI_INTERNAL_HMAC_SECRET = 'phase2-test-hmac-secret-0123456789';
+    process.env.VOICE_INTERNAL_API_KEY = 'phase2-test-api-key-0123456789abcdef';
 
     // 1. Browser-supplied `mock_telephony: false` rejected with 400
     await assert.rejects(
@@ -898,29 +915,35 @@ test('Phase 2.4 (Telephony Mode + A5 Gates): Fail-closed VOICE_TELEPHONY_MODE, k
       (err) => err.statusCode === 400 && err.code === 'untrusted_client_fields'
     );
 
-    // 2. Unset VOICE_TELEPHONY_MODE defaults to 'mock'
+    // 2. Unset VOICE_TELEPHONY_MODE fails closed with 503 telephony_disabled
     delete process.env.VOICE_TELEPHONY_MODE;
     delete process.env.VOICE_AI_KILL_SWITCH;
-    assert.equal(voiceClient.resolveVoiceTelephonyMode(), 'mock');
-
-    // 3. Invalid VOICE_TELEPHONY_MODE fails closed with 503 invalid_telephony_mode
-    process.env.VOICE_TELEPHONY_MODE = 'yolo_prod';
-    await assert.rejects(
-      () =>
-        aiService.initiateManualCustomerCall(
-          FINANCE_A,
-          { customerId: CUSTOMER_1 },
-          {
-            idempotencyKey: 'manual-call:bad-mode-001',
-            requireIdempotencyKey: true,
-            queryRunner: createStatefulCallRunner(),
-          }
-        ),
-      (err) => err.statusCode === 503 && err.code === 'invalid_telephony_mode'
+    assert.throws(
+      () => voiceClient.resolveVoiceTelephonyMode(),
+      (err) => err.statusCode === 503 && err.code === 'telephony_disabled'
     );
 
+    // 3. Invalid or legacy 'mock' VOICE_TELEPHONY_MODE fails closed with 503 invalid_telephony_mode
+    for (const badMode of ['yolo_prod', 'mock']) {
+      process.env.VOICE_TELEPHONY_MODE = badMode;
+      await assert.rejects(
+        () =>
+          aiService.initiateManualCustomerCall(
+            FINANCE_A,
+            { customerId: CUSTOMER_1 },
+            {
+              idempotencyKey: `manual-call:bad-mode-${badMode}`,
+              requireIdempotencyKey: true,
+              queryRunner: createStatefulCallRunner(),
+            }
+          ),
+        (err) => err.statusCode === 503 && err.code === 'invalid_telephony_mode'
+      );
+    }
+
     // 4. Kill switch halts dispatch immediately with 503
-    process.env.VOICE_TELEPHONY_MODE = 'mock';
+    process.env.VOICE_TELEPHONY_MODE = 'live_allowlist';
+    process.env.TEST_ALLOWED_NUMBERS = ALLOWED_PHONE;
     process.env.VOICE_AI_KILL_SWITCH = 'true';
     await assert.rejects(
       () =>
@@ -985,8 +1008,9 @@ test('Phase 2.4 (Telephony Mode + A5 Gates): Fail-closed VOICE_TELEPHONY_MODE, k
     assert.equal(pythonCalled, false);
     assert.equal(nonAllowedRunner.callLogsById.size, 0);
 
-    // 7. dispatchManualCallToVoiceAgent removes hardcoded mock_telephony: true and derives from server mode
+    // 7. dispatchManualCallToVoiceAgent strips mock_telephony and sends layered headers
     let capturedWireBody = null;
+    let capturedWireHeaders = null;
     await voiceClient.dispatchManualCallToVoiceAgent(
       {
         finance_id: FINANCE_A,
@@ -997,6 +1021,7 @@ test('Phase 2.4 (Telephony Mode + A5 Gates): Fail-closed VOICE_TELEPHONY_MODE, k
         telephonyMode: 'live_allowlist',
         fetchImpl: async (_url, init) => {
           capturedWireBody = JSON.parse(init.body);
+          capturedWireHeaders = init.headers;
           return {
             ok: true,
             status: 202,
@@ -1008,7 +1033,9 @@ test('Phase 2.4 (Telephony Mode + A5 Gates): Fail-closed VOICE_TELEPHONY_MODE, k
       }
     );
     assert.equal(capturedWireBody.telephony_mode, 'live_allowlist');
-    assert.equal(capturedWireBody.mock_telephony, false);
+    assert.equal('mock_telephony' in capturedWireBody, false);
+    assert.equal(capturedWireHeaders['X-Internal-API-Key'], process.env.VOICE_INTERNAL_API_KEY);
+    assert.equal(capturedWireHeaders['X-Finance-Id'], FINANCE_A);
 
     // 8. VOICE_TELEPHONY_MODE=live without VOICE_LIVE_CALLS_CONFIRMED=true -> 503 live_calls_not_confirmed
     process.env.VOICE_TELEPHONY_MODE = 'live';
@@ -1035,116 +1062,40 @@ test('Phase 2.4 (Telephony Mode + A5 Gates): Fail-closed VOICE_TELEPHONY_MODE, k
   }
 });
 
-test('Phase 2.5 (A4 + Legacy 410): Mock calls tag mock-<callId>, isolate L2/L3/PTP/DNC, dry-run is strictly read-only, and /leads/:leadId/call returns 410 Gone', async () => {
+test('Phase 2.5 (Live Allowlist IDs + Dry-Run Audit + Legacy 410): Live allowlist tags af-call-<callId>, dry-run is strictly read-only, and /leads/:leadId/call returns 410 Gone', async () => {
   const aiService = require('../ai.service');
   const aiRoutes = require('../../ai.routes');
-  const internalService = require('../ai.internal.service');
   const { auditMockVoiceDataDryRun } = require('../../../../../scripts/cleanup_mock_voice_data_dry_run');
 
-  // 1. Mock mode tags provider_call_id = `mock-${callId}`
+  // 1. live_allowlist mode tags initial provider_call_id = `af-call-${callId}` and promotes to Dograh provider_call_id
   const runner = createStatefulCallRunner();
-  const mockRes = await aiService.initiateManualCustomerCall(
+  const liveRes = await aiService.initiateManualCustomerCall(
     FINANCE_A,
     { customerId: CUSTOMER_1 },
     {
       callId: CALL_1,
-      idempotencyKey: 'manual-call:mock-tag-001',
+      env: {
+        VOICE_TELEPHONY_MODE: 'live_allowlist',
+        TEST_ALLOWED_NUMBERS: ALLOWED_PHONE,
+      },
+      idempotencyKey: 'manual-call:live-tag-001',
       requireIdempotencyKey: true,
       queryRunner: runner,
       checkHealthFn: async () => ({ online: true, status: 'ready' }),
       dispatchFn: async (payload) => {
-        assert.equal(payload.provider_call_id, `mock-${CALL_1}`);
-        return { accepted: true, call_lifecycle_status: 'initiated' };
+        assert.equal(payload.provider_call_id, `af-call-${CALL_1}`);
+        return {
+          accepted: true,
+          call_lifecycle_status: 'initiated',
+          provider_call_id: 'dograh-run-1051',
+        };
       },
     }
   );
-  assert.equal(mockRes.providerCallId, `mock-${CALL_1}`);
-  assert.equal(mockRes.mockTelephony, true);
+  assert.equal(liveRes.providerCallId, 'dograh-run-1051');
+  assert.equal('mockTelephony' in liveRes, false);
 
-  // 2. completeInternalVoiceCall strips L2 summary, L3 memory, PTP, callback, and DNC writes for mock calls
-  let capturedFnParams = null;
-  const mockCompleteRunner = {
-    async query(sql, params) {
-      if (sql.includes('FROM ai_telecalling_call_logs') && sql.includes('SELECT')) {
-        return {
-          rows: [
-            {
-              call_id: CALL_1,
-              lead_id: LEAD_1,
-              provider_call_id: `mock-${CALL_1}`,
-              call_lifecycle_status: 'in_progress',
-            },
-          ],
-        };
-      }
-      if (sql.includes('UPDATE ai_telecalling_call_logs')) {
-        return { rows: [{ provider_call_id: `mock-${CALL_1}`, lead_id: LEAD_1 }] };
-      }
-      if (sql.includes('FROM ai_telecalling_leads')) {
-        return { rows: [{ lead_id: LEAD_1 }] };
-      }
-      if (sql.includes('fn_complete_voice_call')) {
-        capturedFnParams = params;
-        return { rows: [{ result: { status: 'success', mock_isolated: true } }] };
-      }
-      return { rows: [] };
-    },
-  };
-
-  await internalService.completeInternalVoiceCall(
-    {
-      finance_id: FINANCE_A,
-      customer_id: CUSTOMER_1,
-      call_id: CALL_1,
-      lead_id: LEAD_1,
-      call_status: 'completed',
-      call_lifecycle_status: 'completed',
-      disposition: 'ptp_confirmed',
-      summary_short: 'Mock fabricated summary',
-      rolling_summary: 'Mock fabricated rolling profile',
-      promised_amount: 5000,
-      promised_date: '2026-11-20',
-      callback_at: '2026-11-15T10:00:00Z',
-      explicit_opt_out: true,
-    },
-    { queryRunner: mockCompleteRunner }
-  );
-
-  assert.ok(capturedFnParams, 'fn_complete_voice_call should still finalize the call log row');
-  assert.equal(capturedFnParams[11], null, 'p_summary_short ($12) must be NULL for mock calls');
-  assert.equal(capturedFnParams[18], null, 'p_rolling_summary ($19) must be NULL for mock calls');
-  assert.equal(capturedFnParams[23], false, 'p_explicit_opt_out ($24) must be FALSE for mock calls');
-  assert.equal(capturedFnParams[25], null, 'p_promised_amount ($26) must be NULL for mock calls');
-  assert.equal(capturedFnParams[26], null, 'p_promised_date ($27) must be NULL for mock calls');
-  assert.equal(capturedFnParams[28], null, 'p_callback_at ($29) must be NULL for mock calls');
-
-  // 3. recordInternalPromiseToPay skips DB insert when call is mock-*
-  let ptpInserted = false;
-  const mockPtpRunner = {
-    async query(sql) {
-      if (sql.includes('FROM ai_telecalling_call_logs')) {
-        return { rows: [{ provider_call_id: `mock-${CALL_1}` }] };
-      }
-      if (sql.includes('INSERT INTO promise_to_pay')) {
-        ptpInserted = true;
-      }
-      return { rows: [{ customer_id: CUSTOMER_1, finance_id: FINANCE_A }] };
-    },
-  };
-  const ptpSkipRes = await internalService.recordInternalPromiseToPay(
-    {
-      finance_id: FINANCE_A,
-      customer_id: CUSTOMER_1,
-      call_id: CALL_1,
-      promised_amount: 5000,
-      promised_date: '2026-11-20',
-    },
-    { queryRunner: mockPtpRunner }
-  );
-  assert.equal(ptpInserted, false, 'Mock call must NEVER insert into promise_to_pay');
-  assert.equal(ptpSkipRes.mockIsolated, true);
-
-  // 4. Dry-run cleanup audit executes strictly READ ONLY transaction + SELECTs (zero mutations)
+  // 2. Dry-run cleanup audit executes strictly READ ONLY transaction + SELECTs (zero mutations)
   const dryRunSql = [];
   const dryRunClient = {
     async query(sql) {
@@ -1167,7 +1118,7 @@ test('Phase 2.5 (A4 + Legacy 410): Mock calls tag mock-<callId>, isolate L2/L3/P
     'Dry-run script must execute ZERO mutating SQL statements'
   );
 
-  // 5. Legacy POST /api/ai/leads/:leadId/call returns 410 Gone
+  // 3. Legacy POST /api/ai/leads/:leadId/call returns 410 Gone
   const goneRes = createMockExpressRes();
   await aiRoutes.handleTriggerLeadCall(
     { financeId: FINANCE_A, params: { leadId: LEAD_1 } },

@@ -18,7 +18,6 @@ const {
   toLeadCallStatusEnum,
   fromDbCallRowToDomainState,
   validateLifecycleTransition,
-  isMockProviderCallId,
   TERMINAL_DB_STATUSES,
 } = require('./callLifecycle.mapper');
 
@@ -95,24 +94,6 @@ async function assertTenantCustomerOwnership(runner, financeId, customerId) {
     );
   }
   return rows[0];
-}
-
-async function isMockCallContext(runner, { financeId, callId, providerCallId, mockTelephony }) {
-  if (mockTelephony === true || isMockProviderCallId(providerCallId)) {
-    return true;
-  }
-  if (!callId) {
-    return false;
-  }
-  const { rows } = await runner.query(
-    `SELECT provider_call_id
-       FROM ai_telecalling_call_logs
-      WHERE id = $1::uuid
-        AND finance_id = $2::uuid
-      LIMIT 1`,
-    [callId, financeId]
-  );
-  return isMockProviderCallId(rows[0]?.provider_call_id);
 }
 
 /**
@@ -202,7 +183,7 @@ async function updateInternalCallStatus(payload = {}, opts = {}) {
     `UPDATE ai_telecalling_call_logs
         SET call_lifecycle_status = $4,
             call_status = $5::lead_call_status_enum,
-            provider_call_id = CASE WHEN provider_call_id LIKE 'mock-%' THEN provider_call_id ELSE COALESCE($6, provider_call_id) END,
+            provider_call_id = COALESCE($6, provider_call_id),
             answered = COALESCE($7, answered),
             customer_spoke = COALESCE($8, customer_spoke),
             owning_worker_id = COALESCE($9, owning_worker_id),
@@ -299,22 +280,6 @@ async function recordInternalScheduleCallback(payload = {}, opts = {}) {
   const rawSource = String(payload.source || 'customer_voice_request').trim();
   const source = VALID_CALLBACK_SOURCES.has(rawSource) ? rawSource : 'customer_voice_request';
 
-  // Amendment A4: Mock calls must NEVER create real follow-up callbacks
-  const isMock = await isMockCallContext(runner, {
-    financeId,
-    callId,
-    providerCallId: payload.provider_call_id,
-    mockTelephony: payload.mock_telephony,
-  });
-  if (isMock) {
-    return {
-      callbackId: null,
-      scheduledAt: scheduledDate.toISOString(),
-      source,
-      mockIsolated: true,
-    };
-  }
-
   const note = payload.customer_note ? String(payload.customer_note).slice(0, 300) : null;
   const timezone = String(payload.timezone || 'Asia/Kolkata').slice(0, 40);
   const phoneE164 = payload.phone_e164
@@ -401,22 +366,6 @@ async function recordInternalPromiseToPay(payload = {}, opts = {}) {
   }
 
   await assertTenantCustomerOwnership(runner, financeId, customerId);
-
-  // Amendment A4: Mock calls must NEVER create real Promise-to-Pay commitments
-  const isMock = await isMockCallContext(runner, {
-    financeId,
-    callId,
-    providerCallId: payload.provider_call_id,
-    mockTelephony: payload.mock_telephony,
-  });
-  if (isMock) {
-    return {
-      ptpId: null,
-      promisedAmount,
-      promisedDate,
-      mockIsolated: true,
-    };
-  }
 
   const promisedTimeText = payload.promised_time_text
     ? String(payload.promised_time_text).slice(0, 80)
@@ -518,22 +467,6 @@ async function recordInternalPrivacyOptOut(payload = {}, opts = {}) {
   }
 
   const cust = await assertTenantCustomerOwnership(runner, financeId, customerId);
-
-  // Amendment A4: Mock calls must NEVER erase voiceprints or write active DNC suppressions
-  const isMock = await isMockCallContext(runner, {
-    financeId,
-    callId,
-    providerCallId: payload.provider_call_id,
-    mockTelephony: payload.mock_telephony,
-  });
-  if (isMock) {
-    return {
-      actionType,
-      biometricErased: false,
-      suppressionId: null,
-      mockIsolated: true,
-    };
-  }
 
   let biometricErased = false;
   let suppressionId = null;
@@ -705,244 +638,377 @@ async function completeInternalVoiceCall(payload = {}, opts = {}) {
     ? String(payload.provider_call_id).trim().slice(0, 120)
     : null;
 
-  // Sync `provider_call_id` on the initiated `ai_telecalling_call_logs` row so `fn_complete_voice_call`
-  // updates the exact `call_id` row in-place rather than inserting a second row.
-  let existingLifecycleStatus = null;
-  let existingDisposition = null;
-  if (callId) {
-    const fallbackProviderId = syncedProviderCallId || `af-call-${callId}`;
-    const { rows: logRows } = await runner.query(
-      `UPDATE ai_telecalling_call_logs
-          SET provider_call_id = CASE WHEN provider_call_id LIKE 'mock-%' THEN provider_call_id ELSE COALESCE(provider_call_id, $4) END
-        WHERE id = $1::uuid
-          AND finance_id = $2::uuid
-          AND customer_id = $3::uuid
-        RETURNING provider_call_id, lead_id::text AS lead_id, call_lifecycle_status, disposition`,
-      [callId, financeId, customerId, fallbackProviderId]
-    );
-    if (logRows.length > 0) {
-      syncedProviderCallId = logRows[0].provider_call_id;
-      existingLifecycleStatus = logRows[0].call_lifecycle_status || null;
-      existingDisposition = logRows[0].disposition || null;
-      if (!leadId && logRows[0].lead_id) {
-        leadId = logRows[0].lead_id;
-      }
-    }
-  }
-
   const requestedLifecycle = payload.call_lifecycle_status
     ? toDbLifecycleStatus(payload.call_lifecycle_status)
     : 'completed';
 
-  if (existingLifecycleStatus && TERMINAL_DB_STATUSES.has(String(existingLifecycleStatus).toLowerCase())) {
-    const transition = validateLifecycleTransition(existingLifecycleStatus, requestedLifecycle, {
-      currentDisposition: existingDisposition,
-    });
-    if (!transition.allowed && !transition.idempotentNoop) {
-      return {
-        status: 'ignored_terminal_immutable',
-        call_log_id: callId,
-        call_lifecycle_status: existingLifecycleStatus,
-      };
-    }
-  }
+  const useDedicatedTxClient =
+    typeof runner.connect === 'function' &&
+    (runner !== db || !Object.prototype.hasOwnProperty.call(runner, 'query'));
+  const txRunner = useDedicatedTxClient ? await runner.connect() : runner;
 
-  if (!leadId) {
-    const { rows: leadRows } = await runner.query(
-      `SELECT id::text AS lead_id
-         FROM ai_telecalling_leads
-        WHERE finance_id = $1::uuid
-          AND customer_id = $2::uuid
-        LIMIT 1`,
-      [financeId, customerId]
-    );
-    if (leadRows.length === 0) {
-      throw createHttpError(
-        404,
-        'Telecalling lead not found for finance_id and customer_id',
-        'lead_not_found'
+  try {
+    if (useDedicatedTxClient) {
+      await txRunner.query('BEGIN');
+    }
+
+    let existingLifecycleStatus = null;
+    let existingDisposition = null;
+    let existingRecordingS3Key = null;
+    let existingRecordingStatus = 'not_recorded';
+
+    if (callId) {
+      const { rows: lockedRows } = await txRunner.query(
+        `SELECT id::text AS call_id,
+                provider_call_id,
+                lead_id::text AS lead_id,
+                call_lifecycle_status,
+                disposition,
+                recording_s3_key,
+                recording_status
+           FROM ai_telecalling_call_logs
+          WHERE id = $1::uuid
+            AND finance_id = $2::uuid
+            AND customer_id = $3::uuid
+          FOR UPDATE`,
+        [callId, financeId, customerId]
       );
-    }
-    leadId = leadRows[0].lead_id;
-  } else {
-    const { rows: verifyLead } = await runner.query(
-      `SELECT id::text AS lead_id
-         FROM ai_telecalling_leads
-        WHERE id = $1::uuid
-          AND finance_id = $2::uuid
-          AND customer_id = $3::uuid
-        LIMIT 1`,
-      [leadId, financeId, customerId]
-    );
-    if (verifyLead.length === 0) {
-      throw createHttpError(
-        404,
-        'lead_id does not belong to specified finance_id and customer_id',
-        'lead_tenant_mismatch'
+
+      if (lockedRows.length > 0) {
+        const locked = lockedRows[0];
+        if (locked.provider_call_id && !syncedProviderCallId) {
+          syncedProviderCallId = locked.provider_call_id;
+        }
+        existingLifecycleStatus = locked.call_lifecycle_status || null;
+        existingDisposition = locked.disposition || null;
+        existingRecordingS3Key = locked.recording_s3_key || null;
+        existingRecordingStatus = locked.recording_status || 'not_recorded';
+        if (!leadId && locked.lead_id) {
+          leadId = locked.lead_id;
+        }
+      }
+
+      if (
+        existingLifecycleStatus &&
+        TERMINAL_DB_STATUSES.has(String(existingLifecycleStatus).toLowerCase())
+      ) {
+        const transition = validateLifecycleTransition(existingLifecycleStatus, requestedLifecycle, {
+          currentDisposition: existingDisposition,
+        });
+        if (!transition.allowed && !transition.idempotentNoop) {
+          if (useDedicatedTxClient) {
+            await txRunner.query('COMMIT');
+          }
+          return {
+            status: 'ignored_terminal_immutable',
+            call_log_id: callId,
+            call_lifecycle_status: existingLifecycleStatus,
+          };
+        }
+
+        const normRecStatus = String(existingRecordingStatus || 'not_recorded').toLowerCase();
+        if (
+          recordingS3Key &&
+          !existingRecordingS3Key &&
+          ['not_recorded', 'pending', 'uploading', ''].includes(normRecStatus)
+        ) {
+          const recStatusVal = payload.recording_status
+            ? String(payload.recording_status).slice(0, 24)
+            : 'ready';
+          const recDurVal =
+            payload.recording_duration_seconds != null
+              ? Math.max(0, Math.round(Number(payload.recording_duration_seconds)))
+              : null;
+          const recSizeVal =
+            payload.recording_size_bytes != null
+              ? Math.max(0, Math.round(Number(payload.recording_size_bytes)))
+              : null;
+
+          await txRunner.query(
+            `UPDATE ai_telecalling_call_logs
+                SET recording_s3_key = $4,
+                    recording_status = $5,
+                    recording_duration_seconds = COALESCE($6, recording_duration_seconds),
+                    recording_size_bytes = COALESCE($7, recording_size_bytes)
+              WHERE id = $1::uuid
+                AND finance_id = $2::uuid
+                AND customer_id = $3::uuid`,
+            [callId, financeId, customerId, recordingS3Key, recStatusVal, recDurVal, recSizeVal]
+          );
+
+          if (useDedicatedTxClient) {
+            await txRunner.query('COMMIT');
+          }
+          return {
+            status: 'already_completed_recording_attached',
+            call_log_id: callId,
+            call_lifecycle_status: existingLifecycleStatus,
+          };
+        }
+
+        if (useDedicatedTxClient) {
+          await txRunner.query('COMMIT');
+        }
+        return {
+          status: 'already_completed_idempotent',
+          call_log_id: callId,
+          call_lifecycle_status: existingLifecycleStatus,
+        };
+      }
+
+      // Non-terminal row: sync provider_call_id so fn_complete_voice_call updates the exact call_id row in-place
+      const fallbackProviderId = syncedProviderCallId || `af-call-${callId}`;
+      const { rows: logRows } = await txRunner.query(
+        `UPDATE ai_telecalling_call_logs
+            SET provider_call_id = COALESCE(provider_call_id, $4)
+          WHERE id = $1::uuid
+            AND finance_id = $2::uuid
+            AND customer_id = $3::uuid
+          RETURNING provider_call_id, lead_id::text AS lead_id, call_lifecycle_status, disposition`,
+        [callId, financeId, customerId, fallbackProviderId]
       );
+      if (logRows.length > 0) {
+        syncedProviderCallId = logRows[0].provider_call_id || fallbackProviderId;
+        if (!leadId && logRows[0].lead_id) {
+          leadId = logRows[0].lead_id;
+        }
+        if (
+          logRows[0].call_lifecycle_status &&
+          TERMINAL_DB_STATUSES.has(String(logRows[0].call_lifecycle_status).toLowerCase())
+        ) {
+          const transition = validateLifecycleTransition(
+            logRows[0].call_lifecycle_status,
+            requestedLifecycle,
+            { currentDisposition: logRows[0].disposition || null }
+          );
+          if (!transition.allowed && !transition.idempotentNoop) {
+            if (useDedicatedTxClient) {
+              await txRunner.query('COMMIT');
+            }
+            return {
+              status: 'ignored_terminal_immutable',
+              call_log_id: callId,
+              call_lifecycle_status: logRows[0].call_lifecycle_status,
+            };
+          }
+          if (useDedicatedTxClient) {
+            await txRunner.query('COMMIT');
+          }
+          return {
+            status: 'already_completed_idempotent',
+            call_log_id: callId,
+            call_lifecycle_status: logRows[0].call_lifecycle_status,
+          };
+        }
+      }
+    }
+
+    if (!leadId) {
+      const { rows: leadRows } = await txRunner.query(
+        `SELECT id::text AS lead_id
+           FROM ai_telecalling_leads
+          WHERE finance_id = $1::uuid
+            AND customer_id = $2::uuid
+          LIMIT 1`,
+        [financeId, customerId]
+      );
+      if (leadRows.length === 0) {
+        throw createHttpError(
+          404,
+          'Telecalling lead not found for finance_id and customer_id',
+          'lead_not_found'
+        );
+      }
+      leadId = leadRows[0].lead_id;
+    } else {
+      const { rows: verifyLead } = await txRunner.query(
+        `SELECT id::text AS lead_id
+           FROM ai_telecalling_leads
+          WHERE id = $1::uuid
+            AND finance_id = $2::uuid
+            AND customer_id = $3::uuid
+          LIMIT 1`,
+        [leadId, financeId, customerId]
+      );
+      if (verifyLead.length === 0) {
+        throw createHttpError(
+          404,
+          'lead_id does not belong to specified finance_id and customer_id',
+          'lead_tenant_mismatch'
+        );
+      }
+    }
+
+    if (!syncedProviderCallId) {
+      syncedProviderCallId = `af-call-${callId || crypto.randomUUID()}`;
+    }
+
+    const rawCallStatus = String(payload.call_status || 'completed').trim().toLowerCase();
+    const callStatus = VALID_CALL_STATUS_ENUM.has(rawCallStatus) ? rawCallStatus : 'completed';
+    const durationSeconds = Math.max(0, Math.round(Number(payload.duration_seconds || 0)));
+    const languageUsed = String(payload.language_used || 'ta-IN').slice(0, 16);
+    const rawSentiment = String(payload.sentiment || 'neutral').trim().toLowerCase();
+    const sentiment = VALID_SENTIMENTS.has(rawSentiment) ? rawSentiment : 'neutral';
+    const identityVerified = Boolean(payload.identity_verified ?? false);
+    const transcript = Array.isArray(payload.transcript) ? payload.transcript : [];
+    const disposition = payload.disposition ? String(payload.disposition).slice(0, 60) : null;
+    const outcomeNote = payload.outcome_note ? String(payload.outcome_note).slice(0, 2000) : null;
+
+    const memoryTokens = Math.max(0, Math.round(Number(payload.memory_tokens || 0)));
+    const promptTokens = Math.max(0, Math.round(Number(payload.prompt_tokens || 0)));
+    const completionTokens = Math.max(0, Math.round(Number(payload.completion_tokens || 0)));
+    const summaryTokens = Math.max(0, Math.round(Number(payload.summary_tokens || 0)));
+    const totalTokens = Math.max(
+      Math.round(Number(payload.total_tokens || 0)),
+      memoryTokens + promptTokens + completionTokens + summaryTokens
+    );
+    const ttsCharacters = Math.max(0, Math.round(Number(payload.tts_characters || 0)));
+    const sttSeconds = Math.max(0, Number(payload.stt_seconds || 0));
+    const llmModel = payload.llm_model ? String(payload.llm_model).slice(0, 80) : null;
+    const ttsModel = payload.tts_model ? String(payload.tts_model).slice(0, 80) : null;
+    const sttModel = payload.stt_model ? String(payload.stt_model).slice(0, 80) : null;
+
+    const params = [
+      leadId, // $1 p_lead_id
+      syncedProviderCallId, // $2 p_provider_call_id
+      callStatus, // $3 p_call_status
+      durationSeconds, // $4 p_duration_seconds
+      languageUsed, // $5 p_language_used
+      sentiment, // $6 p_sentiment
+      identityVerified, // $7 p_identity_verified
+      JSON.stringify(transcript), // $8 p_transcript
+      disposition, // $9 p_disposition
+      outcomeNote, // $10 p_outcome_note
+      payload.audio_url ? String(payload.audio_url).slice(0, 500) : null, // $11 p_audio_url
+      payload.summary_short ? String(payload.summary_short).slice(0, 320) : null, // $12 p_summary_short
+      payload.stated_reason ? String(payload.stated_reason).slice(0, 200) : null, // $13 p_stated_reason
+      payload.commitment_summary ? String(payload.commitment_summary).slice(0, 200) : null, // $14 p_commitment_summary
+      payload.observable_tone ? String(payload.observable_tone).slice(0, 24) : 'calm', // $15 p_observable_tone
+      JSON.stringify(payload.stated_facts || {}), // $16 p_stated_facts
+      JSON.stringify(payload.ai_inferences || {}), // $17 p_ai_inferences
+      summaryTokens, // $18 p_summary_tokens
+      payload.rolling_summary ? String(payload.rolling_summary).slice(0, 600) : null, // $19 p_rolling_summary
+      payload.communication_style ? String(payload.communication_style).slice(0, 200) : null, // $20 p_communication_style
+      payload.preferred_call_time ? String(payload.preferred_call_time).slice(0, 80) : null, // $21 p_preferred_call_time
+      typeof payload.language_confirmed === 'boolean' ? payload.language_confirmed : null, // $22 p_language_confirmed
+      payload.recent_interaction_digest ? String(payload.recent_interaction_digest).slice(0, 320) : null, // $23 p_recent_interaction_digest
+      Boolean(payload.explicit_opt_out ?? false), // $24 p_explicit_opt_out
+      payload.opt_out_excerpt ? String(payload.opt_out_excerpt).slice(0, 320) : null, // $25 p_opt_out_excerpt
+      payload.promised_amount != null ? Number(payload.promised_amount) : null, // $26 p_promised_amount
+      payload.promised_date || null, // $27 p_promised_date
+      payload.promised_time_text ? String(payload.promised_time_text).slice(0, 80) : null, // $28 p_promised_time_text
+      payload.callback_at || null, // $29 p_callback_at
+      payload.observation ? JSON.stringify(payload.observation) : null, // $30 p_observation
+      payload.config_version != null ? Number(payload.config_version) : null, // $31 p_config_version
+      payload.policy_version != null ? Number(payload.policy_version) : null, // $32 p_policy_version
+      memoryTokens, // $33 p_memory_tokens
+      promptTokens, // $34 p_prompt_tokens
+      completionTokens, // $35 p_completion_tokens
+      payload.greeting_latency_ms != null ? Math.round(Number(payload.greeting_latency_ms)) : null, // $36 p_greeting_latency_ms
+      payload.turn_latency_p50_ms != null ? Math.round(Number(payload.turn_latency_p50_ms)) : null, // $37 p_turn_latency_p50_ms
+      Math.max(0, Math.round(Number(payload.barge_in_count || 0))), // $38 p_barge_in_count
+      requestedLifecycle, // $39 p_call_lifecycle_status
+      typeof payload.answered === 'boolean' ? payload.answered : null, // $40 p_answered
+      typeof payload.customer_spoke === 'boolean' ? payload.customer_spoke : null, // $41 p_customer_spoke
+      recordingS3Key, // $42 p_recording_s3_key
+      payload.recording_status ? String(payload.recording_status).slice(0, 24) : null, // $43 p_recording_status
+      payload.recording_duration_seconds != null
+        ? Math.max(0, Math.round(Number(payload.recording_duration_seconds)))
+        : null, // $44 p_recording_duration_seconds
+      payload.recording_size_bytes != null
+        ? Math.max(0, Math.round(Number(payload.recording_size_bytes)))
+        : null, // $45 p_recording_size_bytes
+      payload.error_detail ? String(payload.error_detail).slice(0, 1000) : null, // $46 p_error_detail
+      totalTokens, // $47 p_total_tokens
+      ttsCharacters, // $48 p_tts_characters
+      sttSeconds, // $49 p_stt_seconds
+      llmModel, // $50 p_llm_model
+      ttsModel, // $51 p_tts_model
+      sttModel, // $52 p_stt_model
+    ];
+
+    const { rows } = await txRunner.query(
+      `SELECT public.fn_complete_voice_call(
+          $1::uuid,
+          $2::varchar,
+          $3::lead_call_status_enum,
+          $4::int,
+          $5::varchar,
+          $6::ai_sentiment_enum,
+          $7::boolean,
+          $8::jsonb,
+          $9::varchar,
+          $10::text,
+          $11::varchar,
+          $12::varchar,
+          $13::varchar,
+          $14::varchar,
+          $15::varchar,
+          $16::jsonb,
+          $17::jsonb,
+          $18::int,
+          $19::text,
+          $20::varchar,
+          $21::varchar,
+          $22::boolean,
+          $23::varchar,
+          $24::boolean,
+          $25::varchar,
+          $26::numeric,
+          $27::date,
+          $28::varchar,
+          $29::timestamptz,
+          $30::jsonb,
+          $31::bigint,
+          $32::int,
+          $33::int,
+          $34::int,
+          $35::int,
+          $36::int,
+          $37::int,
+          $38::int,
+          $39::varchar,
+          $40::boolean,
+          $41::boolean,
+          $42::varchar,
+          $43::varchar,
+          $44::int,
+          $45::bigint,
+          $46::text,
+          $47::int,
+          $48::int,
+          $49::numeric,
+          $50::varchar,
+          $51::varchar,
+          $52::varchar
+       ) AS result`,
+      params
+    );
+
+    const fnResult = rows[0]?.result || {};
+    if (fnResult.status === 'error') {
+      throw createHttpError(404, fnResult.message || 'Failed to complete call', 'complete_call_failed');
+    }
+
+    if (useDedicatedTxClient) {
+      await txRunner.query('COMMIT');
+    }
+
+    return fnResult;
+  } catch (err) {
+    if (useDedicatedTxClient) {
+      try {
+        await txRunner.query('ROLLBACK');
+      } catch (_rbErr) {
+        // ignore rollback error
+      }
+    }
+    throw err;
+  } finally {
+    if (useDedicatedTxClient && typeof txRunner.release === 'function') {
+      txRunner.release();
     }
   }
-
-  if (!syncedProviderCallId) {
-    syncedProviderCallId = `af-call-${callId || crypto.randomUUID()}`;
-  }
-
-  // Amendment A4: Strict Mock Isolation — mock calls (`mock-*` or `mock_telephony: true`)
-  // finalize `ai_telecalling_call_logs` ONLY and NEVER feed L2 summaries, L3 memory, PTPs, callbacks, or DNC!
-  const isMockCall = isMockProviderCallId(syncedProviderCallId) || payload.mock_telephony === true;
-
-  const rawCallStatus = String(payload.call_status || 'completed').trim().toLowerCase();
-  const callStatus = VALID_CALL_STATUS_ENUM.has(rawCallStatus) ? rawCallStatus : 'completed';
-  const durationSeconds = Math.max(0, Math.round(Number(payload.duration_seconds || 0)));
-  const languageUsed = String(payload.language_used || 'ta-IN').slice(0, 16);
-  const rawSentiment = String(payload.sentiment || 'neutral').trim().toLowerCase();
-  const sentiment = VALID_SENTIMENTS.has(rawSentiment) ? rawSentiment : 'neutral';
-  const identityVerified = isMockCall ? false : Boolean(payload.identity_verified ?? false);
-  const transcript = Array.isArray(payload.transcript) ? payload.transcript : [];
-  const rawDisposition = payload.disposition ? String(payload.disposition).slice(0, 60) : null;
-  const disposition =
-    isMockCall && (rawDisposition === 'opt_out' || rawDisposition === 'wrong_number')
-      ? 'mock_simulated'
-      : rawDisposition;
-  const outcomeNote = payload.outcome_note ? String(payload.outcome_note).slice(0, 2000) : null;
-
-  const memoryTokens = Math.max(0, Math.round(Number(payload.memory_tokens || 0)));
-  const promptTokens = Math.max(0, Math.round(Number(payload.prompt_tokens || 0)));
-  const completionTokens = Math.max(0, Math.round(Number(payload.completion_tokens || 0)));
-  const summaryTokens = Math.max(0, Math.round(Number(payload.summary_tokens || 0)));
-  const totalTokens = Math.max(
-    Math.round(Number(payload.total_tokens || 0)),
-    memoryTokens + promptTokens + completionTokens + summaryTokens
-  );
-  const ttsCharacters = Math.max(0, Math.round(Number(payload.tts_characters || 0)));
-  const sttSeconds = Math.max(0, Number(payload.stt_seconds || 0));
-  const llmModel = payload.llm_model ? String(payload.llm_model).slice(0, 80) : null;
-  const ttsModel = String(payload.tts_model || 'bulbul:v4').slice(0, 80);
-  const sttModel = payload.stt_model ? String(payload.stt_model).slice(0, 80) : null;
-
-  const params = [
-    leadId, // $1 p_lead_id
-    syncedProviderCallId, // $2 p_provider_call_id
-    callStatus, // $3 p_call_status
-    durationSeconds, // $4 p_duration_seconds
-    languageUsed, // $5 p_language_used
-    sentiment, // $6 p_sentiment
-    identityVerified, // $7 p_identity_verified
-    JSON.stringify(transcript), // $8 p_transcript
-    disposition, // $9 p_disposition
-    outcomeNote, // $10 p_outcome_note
-    payload.audio_url ? String(payload.audio_url).slice(0, 500) : null, // $11 p_audio_url
-    isMockCall ? null : payload.summary_short ? String(payload.summary_short).slice(0, 320) : null, // $12 p_summary_short
-    isMockCall ? null : payload.stated_reason ? String(payload.stated_reason).slice(0, 200) : null, // $13 p_stated_reason
-    isMockCall ? null : payload.commitment_summary ? String(payload.commitment_summary).slice(0, 200) : null, // $14 p_commitment_summary
-    payload.observable_tone ? String(payload.observable_tone).slice(0, 24) : 'calm', // $15 p_observable_tone
-    JSON.stringify(isMockCall ? {} : payload.stated_facts || {}), // $16 p_stated_facts
-    JSON.stringify(isMockCall ? {} : payload.ai_inferences || {}), // $17 p_ai_inferences
-    summaryTokens, // $18 p_summary_tokens
-    isMockCall ? null : payload.rolling_summary ? String(payload.rolling_summary).slice(0, 600) : null, // $19 p_rolling_summary
-    isMockCall ? null : payload.communication_style ? String(payload.communication_style).slice(0, 200) : null, // $20 p_communication_style
-    isMockCall ? null : payload.preferred_call_time ? String(payload.preferred_call_time).slice(0, 80) : null, // $21 p_preferred_call_time
-    isMockCall ? null : typeof payload.language_confirmed === 'boolean' ? payload.language_confirmed : null, // $22 p_language_confirmed
-    isMockCall ? null : payload.recent_interaction_digest ? String(payload.recent_interaction_digest).slice(0, 320) : null, // $23 p_recent_interaction_digest
-    isMockCall ? false : Boolean(payload.explicit_opt_out ?? false), // $24 p_explicit_opt_out
-    isMockCall ? null : payload.opt_out_excerpt ? String(payload.opt_out_excerpt).slice(0, 320) : null, // $25 p_opt_out_excerpt
-    isMockCall ? null : payload.promised_amount != null ? Number(payload.promised_amount) : null, // $26 p_promised_amount
-    isMockCall ? null : payload.promised_date || null, // $27 p_promised_date
-    isMockCall ? null : payload.promised_time_text ? String(payload.promised_time_text).slice(0, 80) : null, // $28 p_promised_time_text
-    isMockCall ? null : payload.callback_at || null, // $29 p_callback_at
-    payload.observation ? JSON.stringify(payload.observation) : null, // $30 p_observation
-    payload.config_version != null ? Number(payload.config_version) : null, // $31 p_config_version
-    payload.policy_version != null ? Number(payload.policy_version) : null, // $32 p_policy_version
-    memoryTokens, // $33 p_memory_tokens
-    promptTokens, // $34 p_prompt_tokens
-    completionTokens, // $35 p_completion_tokens
-    payload.greeting_latency_ms != null ? Math.round(Number(payload.greeting_latency_ms)) : null, // $36 p_greeting_latency_ms
-    payload.turn_latency_p50_ms != null ? Math.round(Number(payload.turn_latency_p50_ms)) : null, // $37 p_turn_latency_p50_ms
-    Math.max(0, Math.round(Number(payload.barge_in_count || 0))), // $38 p_barge_in_count
-    requestedLifecycle, // $39 p_call_lifecycle_status
-    typeof payload.answered === 'boolean' ? payload.answered : null, // $40 p_answered
-    typeof payload.customer_spoke === 'boolean' ? payload.customer_spoke : null, // $41 p_customer_spoke
-    recordingS3Key, // $42 p_recording_s3_key
-    payload.recording_status ? String(payload.recording_status).slice(0, 24) : null, // $43 p_recording_status
-    payload.recording_duration_seconds != null
-      ? Math.max(0, Math.round(Number(payload.recording_duration_seconds)))
-      : null, // $44 p_recording_duration_seconds
-    payload.recording_size_bytes != null
-      ? Math.max(0, Math.round(Number(payload.recording_size_bytes)))
-      : null, // $45 p_recording_size_bytes
-    payload.error_detail ? String(payload.error_detail).slice(0, 1000) : null, // $46 p_error_detail
-    totalTokens, // $47 p_total_tokens
-    ttsCharacters, // $48 p_tts_characters
-    sttSeconds, // $49 p_stt_seconds
-    llmModel, // $50 p_llm_model
-    ttsModel, // $51 p_tts_model
-    sttModel, // $52 p_stt_model
-  ];
-
-  const { rows } = await runner.query(
-    `SELECT public.fn_complete_voice_call(
-        $1::uuid,
-        $2::varchar,
-        $3::lead_call_status_enum,
-        $4::int,
-        $5::varchar,
-        $6::ai_sentiment_enum,
-        $7::boolean,
-        $8::jsonb,
-        $9::varchar,
-        $10::text,
-        $11::varchar,
-        $12::varchar,
-        $13::varchar,
-        $14::varchar,
-        $15::varchar,
-        $16::jsonb,
-        $17::jsonb,
-        $18::int,
-        $19::text,
-        $20::varchar,
-        $21::varchar,
-        $22::boolean,
-        $23::varchar,
-        $24::boolean,
-        $25::varchar,
-        $26::numeric,
-        $27::date,
-        $28::varchar,
-        $29::timestamptz,
-        $30::jsonb,
-        $31::bigint,
-        $32::int,
-        $33::int,
-        $34::int,
-        $35::int,
-        $36::int,
-        $37::int,
-        $38::int,
-        $39::varchar,
-        $40::boolean,
-        $41::boolean,
-        $42::varchar,
-        $43::varchar,
-        $44::int,
-        $45::bigint,
-        $46::text,
-        $47::int,
-        $48::int,
-        $49::numeric,
-        $50::varchar,
-        $51::varchar,
-        $52::varchar
-     ) AS result`,
-    params
-  );
-
-  const fnResult = rows[0]?.result || {};
-  if (fnResult.status === 'error') {
-    throw createHttpError(404, fnResult.message || 'Failed to complete call', 'complete_call_failed');
-  }
-
-  return fnResult;
 }
 
 module.exports = {

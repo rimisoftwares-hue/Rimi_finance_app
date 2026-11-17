@@ -9,10 +9,22 @@
 
 const express = require('express');
 const router = express.Router();
-const { verifyInternalSignature } = require('./telecalling/voiceAgent.client');
+const {
+  verifyInternalSignature,
+  verifyInternalApiKey,
+} = require('./telecalling/voiceAgent.client');
 const internalService = require('./telecalling/ai.internal.service');
 
 function requireVoiceAiHmacAuth(req, res, next) {
+  const apiKey = req.headers['x-internal-api-key'];
+  if (!verifyInternalApiKey(apiKey)) {
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized internal Voice AI request',
+      code: 'unauthorized_api_key',
+    });
+  }
+
   const timestamp = req.headers['x-autofinex-timestamp'];
   const signature = req.headers['x-autofinex-signature'];
   const rawBody = Buffer.isBuffer(req.rawBody)
@@ -32,6 +44,16 @@ function requireVoiceAiHmacAuth(req, res, next) {
       success: false,
       error: 'Unauthorized internal Voice AI request',
       code: check.reason,
+    });
+  }
+
+  const headerFinanceId = String(req.headers['x-finance-id'] || '').trim();
+  const bodyFinanceId = String(req.body?.finance_id || req.body?.financeId || '').trim();
+  if (!headerFinanceId || !bodyFinanceId || headerFinanceId !== bodyFinanceId) {
+    return res.status(403).json({
+      success: false,
+      error: 'X-Finance-Id header must match payload finance_id',
+      code: 'tenant_context_mismatch',
     });
   }
 

@@ -240,7 +240,6 @@ export interface ManualCallInitResponse {
   callDisplayState?: CallLifecycleState;
   needsReconcile?: boolean;
   telephonyMode?: VoiceTelephonyMode;
-  mockTelephony: boolean;
   idempotencyReplay?: boolean;
 }
 
@@ -366,7 +365,6 @@ export interface LiveCallSession {
   callDisplayState?: CallLifecycleState;
   needsReconcile?: boolean;
   telephonyMode?: VoiceTelephonyMode;
-  mockTelephony?: boolean;
   callOutcome?: string;
   isTerminal: boolean;
   answered: boolean;
@@ -449,7 +447,6 @@ export interface EnqueueCallBatchResponse extends CallQueueBatch {
   skippedAlreadyQueued: string[];
   idempotencyReplay?: boolean;
   telephonyMode?: VoiceTelephonyMode;
-  mockTelephony?: boolean;
 }
 
 export interface ActiveCallQueueResponse {
@@ -669,18 +666,6 @@ export const aiApi = {
     const { data } = await apiClient.get<RecordingPlaybackResponse>(
       `/ai/calls/${encodeURIComponent(callId)}/recording-url`
     );
-    return data;
-  },
-
-  async triggerLeadCall(
-    leadId: string
-  ): Promise<{
-    success: boolean;
-    status: string;
-    leadId: string;
-    outboxEventId: string | null;
-  }> {
-    const { data } = await apiClient.post(`/ai/leads/${encodeURIComponent(leadId)}/call`);
     return data;
   },
 

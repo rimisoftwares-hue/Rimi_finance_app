@@ -29,7 +29,6 @@ const {
   validateIdempotencyKey,
   toDbLifecycleStatus,
   fromDbCallRowToDomainState,
-  isMockProviderCallId,
 } = require('./callLifecycle.mapper');
 
 const UUID_STRICT_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1324,9 +1323,8 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
       };
     }
 
-    function formatCallReplayFromRow(existing) {
+    function formatCallReplayFromRow(existing, telephonyMode = 'live_allowlist') {
       const mapped = fromDbCallRowToDomainState(existing);
-      const mockTelephony = isMockProviderCallId(existing.provider_call_id);
       return {
         callId: existing.call_id,
         leadId: existing.lead_id,
@@ -1336,8 +1334,7 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
         callLifecycleStatus: mapped.transportLifecycleStatus,
         callDisplayState: mapped.domainState,
         needsReconcile: mapped.needsReconcile,
-        telephonyMode: mockTelephony ? 'mock' : 'live_allowlist',
-        mockTelephony,
+        telephonyMode,
         idempotencyReplay: true,
       };
     }
@@ -1554,8 +1551,7 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
 
       const leadId = leadRows[0].lead_id;
       const callId = opts.callId || crypto.randomUUID();
-      // Amendment A4: Tag mock calls explicitly with `mock-<callId>` prefix (zero DDL)
-      const providerCallId = telephonyMode === 'mock' ? `mock-${callId}` : `af-call-${callId}`;
+      const providerCallId = `af-call-${callId}`;
       const rawUserId = opts.userId && UUID_STRICT_REGEX.test(String(opts.userId)) ? String(opts.userId) : null;
 
       // 9. Insert `'queued'` call log row with `idempotency_key` (`uq_atcl_finance_idem`)
@@ -1590,7 +1586,7 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
             resolvedPhoneE164,
             resolvedOverdue,
             rawUserId,
-            elig.tts_model || 'bulbul:v4',
+            elig.tts_model || null,
             elig.stt_model || null,
             elig.llm_model || null,
             idemKey,
@@ -1625,7 +1621,7 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
                 'idempotency_key_payload_mismatch'
               );
             }
-            return formatCallReplayFromRow(racedRows[0]);
+            return formatCallReplayFromRow(racedRows[0], telephonyMode);
           }
         }
         throw insertErr;
@@ -1650,9 +1646,7 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
         });
 
         const ackDbLifecycle = toDbLifecycleStatus(agentAck?.call_lifecycle_status || 'initiated');
-        const finalProviderCallId = isMockProviderCallId(providerCallId)
-          ? providerCallId
-          : agentAck?.provider_call_id || providerCallId;
+        const finalProviderCallId = agentAck?.provider_call_id || providerCallId;
 
         // Amendment A3: Increment attempt_count / daily_attempt_count / last_call_at ONLY on Python 202 ack (idempotent per callId)
         await runner.query(
@@ -1679,7 +1673,7 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
                     WHEN call_lifecycle_status IN ('queued', 'initiated') THEN $3
                     ELSE call_lifecycle_status
                   END,
-                  provider_call_id = CASE WHEN provider_call_id LIKE 'mock-%' THEN provider_call_id ELSE COALESCE($4, provider_call_id) END
+                  provider_call_id = COALESCE($4, provider_call_id)
             WHERE id = $1::uuid
               AND finance_id = $2::uuid`,
           [callId, financeId, ackDbLifecycle, agentAck?.provider_call_id || null]
@@ -1699,7 +1693,6 @@ async function getTelecallingLeads(financeId, query = {}, opts = {}) {
           callLifecycleStatus: mappedAck.transportLifecycleStatus,
           callDisplayState: mappedAck.domainState,
           telephonyMode,
-          mockTelephony: telephonyMode === 'mock',
           idempotencyReplay: false,
         };
       } catch (dispatchErr) {

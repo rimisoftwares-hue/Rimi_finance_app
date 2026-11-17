@@ -321,16 +321,6 @@ function validateLifecycleTransition(currentDbStatus, nextInputState, { currentD
   };
 }
 
-function isMockProviderCallId(providerCallId) {
-  return Boolean(
-    providerCallId &&
-      String(providerCallId)
-        .trim()
-        .toLowerCase()
-        .startsWith('mock-')
-  );
-}
-
 module.exports = {
   DOMAIN_CALL_STATES,
   AMBIGUOUS_CALL_STATE,
@@ -342,6 +332,5 @@ module.exports = {
   toLeadCallStatusEnum,
   fromDbCallRowToDomainState,
   validateLifecycleTransition,
-  isMockProviderCallId,
 };
 

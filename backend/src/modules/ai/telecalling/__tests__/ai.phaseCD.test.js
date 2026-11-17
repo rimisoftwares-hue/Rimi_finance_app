@@ -32,19 +32,23 @@ function createMockRes() {
   return res;
 }
 
-test('Phase C.1: requireVoiceAiHmacAuth enforces valid signature and ±300s replay window', () => {
+test('Phase C.1: requireVoiceAiHmacAuth enforces layered API key, valid HMAC signature, ±300s replay window, and X-Finance-Id', () => {
   const prevSecret = process.env.VOICE_AI_INTERNAL_HMAC_SECRET;
+  const prevApiKey = process.env.VOICE_INTERNAL_API_KEY;
   process.env.VOICE_AI_INTERNAL_HMAC_SECRET = TEST_SECRET;
+  process.env.VOICE_INTERNAL_API_KEY = 'test-api-key-phase-cd-2026-0123456789';
 
   try {
     const payload = { finance_id: FINANCE_A, call_id: CALL_1, customer_id: CUSTOMER_1 };
     const rawBody = JSON.stringify(payload);
     const signed = signInternalPayload(rawBody, TEST_SECRET);
 
-    // 1. Valid HMAC passes middleware
+    // 1. Valid layered headers pass middleware
     let nextCalled = false;
     const okReq = {
       headers: {
+        'x-internal-api-key': process.env.VOICE_INTERNAL_API_KEY,
+        'x-finance-id': FINANCE_A,
         'x-autofinex-timestamp': signed.timestamp,
         'x-autofinex-signature': signed.signature,
       },
@@ -60,6 +64,8 @@ test('Phase C.1: requireVoiceAiHmacAuth enforces valid signature and ±300s repl
     // 2. Tampered body fails with 401 signature_mismatch
     const tamperedReq = {
       headers: {
+        'x-internal-api-key': process.env.VOICE_INTERNAL_API_KEY,
+        'x-finance-id': FINANCE_B,
         'x-autofinex-timestamp': signed.timestamp,
         'x-autofinex-signature': signed.signature,
       },
@@ -78,6 +84,8 @@ test('Phase C.1: requireVoiceAiHmacAuth enforces valid signature and ±300s repl
     const oldSigned = signInternalPayload(rawBody, TEST_SECRET, oldTs);
     const replayReq = {
       headers: {
+        'x-internal-api-key': process.env.VOICE_INTERNAL_API_KEY,
+        'x-finance-id': FINANCE_A,
         'x-autofinex-timestamp': oldSigned.timestamp,
         'x-autofinex-signature': oldSigned.signature,
       },
@@ -93,6 +101,8 @@ test('Phase C.1: requireVoiceAiHmacAuth enforces valid signature and ±300s repl
   } finally {
     if (prevSecret === undefined) delete process.env.VOICE_AI_INTERNAL_HMAC_SECRET;
     else process.env.VOICE_AI_INTERNAL_HMAC_SECRET = prevSecret;
+    if (prevApiKey === undefined) delete process.env.VOICE_INTERNAL_API_KEY;
+    else process.env.VOICE_INTERNAL_API_KEY = prevApiKey;
   }
 });
 
@@ -307,6 +317,11 @@ test('Phase D.1: Zero-Trust initiateManualCustomerCall rejects untrusted client 
     (err) => err.statusCode === 400 && err.code === 'untrusted_client_fields'
   );
 
+  const allowlistEnv = {
+    VOICE_TELEPHONY_MODE: 'live_allowlist',
+    TEST_ALLOWED_NUMBERS: '+919876543210',
+  };
+
   // 2. Rejects with 503 when composite Voice AI health is offline
   await assert.rejects(
     () =>
@@ -314,6 +329,7 @@ test('Phase D.1: Zero-Trust initiateManualCustomerCall rejects untrusted client 
         FINANCE_A,
         { customerId: CUSTOMER_1 },
         {
+          env: allowlistEnv,
           checkHealthFn: async () => ({ online: false, status: 'offline' }),
         }
       ),
@@ -349,6 +365,7 @@ test('Phase D.1: Zero-Trust initiateManualCustomerCall rejects untrusted client 
         FINANCE_A,
         { customerId: CUSTOMER_1 },
         {
+          env: allowlistEnv,
           queryRunner: windowRunner,
           checkHealthFn: async () => ({ online: true, status: 'ready' }),
         }
@@ -357,9 +374,13 @@ test('Phase D.1: Zero-Trust initiateManualCustomerCall rejects untrusted client 
   );
 });
 
-test('Phase D.2: initiateManualCustomerCall dispatches server-resolved IDs with mock_telephony and rolls back on dispatch failure', async () => {
+test('Phase D.2: initiateManualCustomerCall dispatches server-resolved IDs in live_allowlist mode and rolls back on dispatch failure', async () => {
   let dispatchedPayload = null;
   const queries = [];
+  const allowlistEnv = {
+    VOICE_TELEPHONY_MODE: 'live_allowlist',
+    TEST_ALLOWED_NUMBERS: '+919876543210',
+  };
 
   const runner = {
     async query(sql, params) {
@@ -399,25 +420,27 @@ test('Phase D.2: initiateManualCustomerCall dispatches server-resolved IDs with 
     { customerId: CUSTOMER_1 },
     {
       callId: CALL_1,
+      env: allowlistEnv,
       queryRunner: runner,
       checkHealthFn: async () => ({ online: true, status: 'ready' }),
       dispatchFn: async (payload) => {
         dispatchedPayload = payload;
-        return { accepted: true, call_lifecycle_status: 'ringing' };
+        return { accepted: true, call_lifecycle_status: 'ringing', provider_call_id: 'dograh-run-88' };
       },
     }
   );
 
   assert.equal(okResult.callId, CALL_1);
   assert.equal(okResult.leadId, LEAD_1);
-  assert.equal(okResult.mockTelephony, true);
+  assert.equal(okResult.telephonyMode, 'live_allowlist');
+  assert.equal('mockTelephony' in okResult, false);
   assert.deepEqual(dispatchedPayload, {
     finance_id: FINANCE_A,
     customer_id: CUSTOMER_1,
     loan_id: LOAN_1,
     lead_id: LEAD_1,
     call_id: CALL_1,
-    provider_call_id: `mock-${CALL_1}`,
+    provider_call_id: `af-call-${CALL_1}`,
   });
 
   // Failure path rolls back stuck initiated/connecting status to failed
@@ -429,6 +452,7 @@ test('Phase D.2: initiateManualCustomerCall dispatches server-resolved IDs with 
         { customerId: CUSTOMER_1 },
         {
           callId: CALL_1,
+          env: allowlistEnv,
           queryRunner: runner,
           checkHealthFn: async () => ({ online: true, status: 'ready' }),
           dispatchFn: async () => {

@@ -23,7 +23,7 @@ const DEFAULT_HEALTH_TIMEOUT_MS = 3000;
 const DEFAULT_HEALTH_CACHE_TTL_MS = 15000;
 const DEFAULT_HMAC_REPLAY_WINDOW_SEC = 300;
 
-const VALID_TELEPHONY_MODES = new Set(['mock', 'live_allowlist', 'live']);
+const VALID_TELEPHONY_MODES = new Set(['live_allowlist', 'live']);
 
 const CONNECT_ERROR_CODES = new Set([
   'ECONNREFUSED',
@@ -82,14 +82,18 @@ function normalizeE164Phone(rawPhone) {
 
 /**
  * Resolves server-only `VOICE_TELEPHONY_MODE`.
- * - Unset / whitespace -> `'mock'`
- * - `'mock' | 'live_allowlist' | 'live'` -> valid
- * - Anything else -> throws `503 invalid_telephony_mode` (fail-closed, never `live`).
+ * - Unset / whitespace -> throws `503 telephony_disabled`
+ * - `'live_allowlist' | 'live'` -> valid
+ * - Anything else (including legacy `'mock'`) -> throws `503 invalid_telephony_mode`
  */
 function resolveVoiceTelephonyMode(env = process.env) {
   const raw = env?.VOICE_TELEPHONY_MODE;
   if (raw === undefined || raw === null || String(raw).trim() === '') {
-    return 'mock';
+    throw createSafetyError(
+      503,
+      'telephony_disabled',
+      'Server VOICE_TELEPHONY_MODE is unset; Voice AI dispatch is disabled'
+    );
   }
   const norm = String(raw).trim().toLowerCase();
   if (!VALID_TELEPHONY_MODES.has(norm)) {
@@ -100,6 +104,27 @@ function resolveVoiceTelephonyMode(env = process.env) {
     );
   }
   return norm;
+}
+
+function constantTimeSecretEqual(candidate, expected) {
+  const candDigest = crypto.createHash('sha256').update(String(candidate), 'utf8').digest();
+  const expDigest = crypto.createHash('sha256').update(String(expected), 'utf8').digest();
+  return crypto.timingSafeEqual(candDigest, expDigest);
+}
+
+/**
+ * Constant-time verification of `X-Internal-API-Key` against primary and optional previous key.
+ */
+function verifyInternalApiKey(providedKey, env = process.env) {
+  const provided = String(providedKey || '').trim();
+  const primary = String(env?.VOICE_INTERNAL_API_KEY || '').trim();
+  const previous = String(env?.VOICE_INTERNAL_API_KEY_PREVIOUS || '').trim();
+  if (!provided || !primary) {
+    return false;
+  }
+  const matchedPrimary = constantTimeSecretEqual(provided, primary);
+  const matchedPrevious = previous ? constantTimeSecretEqual(provided, previous) : false;
+  return Boolean(matchedPrimary || matchedPrevious);
 }
 
 function isVoiceKillSwitchActive(env = process.env) {
@@ -235,7 +260,7 @@ function getVoiceAgentBaseUrl() {
     .replace(/\/+$/, '');
 }
 
-async function probeJsonEndpoint(url, timeoutMs, fetchImpl = global.fetch) {
+async function probeJsonEndpoint(url, timeoutMs, fetchImpl = global.fetch, extraHeaders = {}) {
   const startedAt = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -243,7 +268,7 @@ async function probeJsonEndpoint(url, timeoutMs, fetchImpl = global.fetch) {
   try {
     const response = await fetchImpl(url, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', ...extraHeaders },
       signal: controller.signal,
     });
     const latencyMs = Math.max(0, Date.now() - startedAt);
@@ -314,11 +339,22 @@ async function checkVoiceSystemHealth(opts = {}) {
   }
 
   const gatewayUrl = opts.gatewayHealthUrl || getGatewayHealthUrl();
-  const agentHealthUrl = opts.agentHealthUrl || `${getVoiceAgentBaseUrl()}/health`;
+  const agentHealthUrl = opts.agentHealthUrl || `${getVoiceAgentBaseUrl()}/api/v1/health/deep`;
+  const agentHeaders = {};
+  const apiKey = String(opts.apiKey || process.env.VOICE_INTERNAL_API_KEY || '').trim();
+  const hmacSecret = String(
+    opts.hmacSecret || process.env.VOICE_AI_INTERNAL_HMAC_SECRET || ''
+  ).trim();
+  if (apiKey && hmacSecret) {
+    const signed = signInternalPayload('', hmacSecret);
+    agentHeaders['X-Internal-API-Key'] = apiKey;
+    agentHeaders['X-AutoFinex-Timestamp'] = signed.timestamp;
+    agentHeaders['X-AutoFinex-Signature'] = signed.signature;
+  }
 
   const [gatewayProbe, agentProbe] = await Promise.all([
     probeJsonEndpoint(gatewayUrl, timeoutMs, fetchImpl),
-    probeJsonEndpoint(agentHealthUrl, timeoutMs, fetchImpl),
+    probeJsonEndpoint(agentHealthUrl, timeoutMs, fetchImpl, agentHeaders),
   ]);
 
   const agentBody = agentProbe.body || {};
@@ -344,11 +380,11 @@ async function checkVoiceSystemHealth(opts = {}) {
   );
   const online = Boolean(gatewayProbe.ok && agentFullyHealthy);
 
-  let telephonyMode = 'mock';
+  let telephonyMode = 'disabled';
   try {
     telephonyMode = resolveVoiceTelephonyMode();
-  } catch (_modeErr) {
-    telephonyMode = 'invalid_closed';
+  } catch (modeErr) {
+    telephonyMode = modeErr.code === 'telephony_disabled' ? 'disabled' : 'invalid_closed';
   }
 
   const result = {
@@ -439,14 +475,30 @@ function verifyInternalSignature({
 
 /**
  * Dispatches a manual outbound call request to the Python Voice Agent
- * (`POST /api/v1/calls/outbound/manual`) with HMAC-SHA256 headers and
- * server-derived `telephony_mode` / `mock_telephony` (never client-supplied).
+ * (`POST /api/v1/calls/outbound/manual`) with layered `X-Internal-API-Key`,
+ * `X-Finance-Id`, `X-Request-Id`, and HMAC-SHA256 headers.
  */
 async function dispatchManualCallToVoiceAgent(payload, opts = {}) {
   const fetchImpl = opts.fetchImpl || global.fetch;
   const timeoutMs = Number(opts.timeoutMs || process.env.VOICE_DISPATCH_TIMEOUT_MS || 5000);
   const baseUrl = opts.voiceAgentBaseUrl || getVoiceAgentBaseUrl();
-  const secret = opts.hmacSecret || process.env.VOICE_AI_INTERNAL_HMAC_SECRET;
+  const apiKey = String(opts.apiKey || process.env.VOICE_INTERNAL_API_KEY || '').trim();
+  const secret = String(opts.hmacSecret || process.env.VOICE_AI_INTERNAL_HMAC_SECRET || '').trim();
+
+  if (!apiKey) {
+    throw createSafetyError(
+      503,
+      'missing_internal_api_key',
+      'VOICE_INTERNAL_API_KEY is not configured for Voice AI dispatch'
+    );
+  }
+  if (!secret) {
+    throw createSafetyError(
+      503,
+      'missing_internal_hmac_secret',
+      'VOICE_AI_INTERNAL_HMAC_SECRET is not configured for Voice AI dispatch'
+    );
+  }
 
   const mode = opts.telephonyMode
     ? resolveVoiceTelephonyMode({ VOICE_TELEPHONY_MODE: opts.telephonyMode })
@@ -455,22 +507,29 @@ async function dispatchManualCallToVoiceAgent(payload, opts = {}) {
   const safePayload = {
     ...payload,
     telephony_mode: mode,
-    mock_telephony: mode === 'mock',
   };
+  delete safePayload.mock_telephony;
 
   const { timestamp, signature, rawBody } = signInternalPayload(safePayload, secret);
+  const financeIdHeader = String(payload?.finance_id || '').trim();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const headers = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'X-Internal-API-Key': apiKey,
+      'X-Request-Id': crypto.randomUUID(),
+      'X-AutoFinex-Timestamp': timestamp,
+      'X-AutoFinex-Signature': signature,
+    };
+    if (financeIdHeader) {
+      headers['X-Finance-Id'] = financeIdHeader;
+    }
     const response = await fetchImpl(`${baseUrl}/api/v1/calls/outbound/manual`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'X-AutoFinex-Timestamp': timestamp,
-        'X-AutoFinex-Signature': signature,
-      },
+      headers,
       body: rawBody,
       signal: controller.signal,
     });
@@ -525,6 +584,7 @@ module.exports = {
   clearVoiceHealthCache,
   signInternalPayload,
   verifyInternalSignature,
+  verifyInternalApiKey,
   dispatchManualCallToVoiceAgent,
   resolveVoiceTelephonyMode,
   isVoiceKillSwitchActive,

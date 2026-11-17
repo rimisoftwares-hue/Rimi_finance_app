@@ -46,7 +46,6 @@ import {
   type RiskLevel,
 } from "../../api/aiApi";
 import {
-  TEST_MODE_BADGE_TEXT,
   STATUS_UNKNOWN_TEXT,
   MAX_CALL_POLL_DURATION_MS,
   createIdempotencyKeySession,
@@ -55,7 +54,6 @@ import {
   resolveCallLifecycleState,
   mapCallStateToUi,
   mapLeadRowToUiStatus,
-  isMockTelephonyActive,
   classifyCallInitError,
   computeNextPollDelayMs,
   type IdempotencyKeySession,
@@ -322,7 +320,6 @@ export default function LeadCalling() {
   const [queueModalOpen, setQueueModalOpen] = useState<boolean>(false);
   const [queueCandidates, setQueueCandidates] = useState<LeadItem[]>([]);
   const [activeQueueBatch, setActiveQueueBatch] = useState<CallQueueBatch | null>(null);
-  const [queueMockMode, setQueueMockMode] = useState<boolean>(false);
   const [queueInitError, setQueueInitError] = useState<ClassifiedCallInitError | null>(null);
   const [isQueueSubmitting, setIsQueueSubmitting] = useState<boolean>(false);
   const [isCancellingQueue, setIsCancellingQueue] = useState<boolean>(false);
@@ -902,7 +899,6 @@ export default function LeadCalling() {
         hasServerResponse: true,
       });
 
-      setQueueMockMode(isMockTelephonyActive(res));
       setDismissedBatchId(null);
       setActiveQueueBatch(res);
       setQueueModalOpen(false);
@@ -1011,11 +1007,6 @@ export default function LeadCalling() {
   const modalUi = useMemo(
     () => mapCallStateToUi(modalLifecycleState, { isDefinitePreDialFailure }),
     [modalLifecycleState, isDefinitePreDialFailure]
-  );
-
-  const showModalMockBadge = useMemo(
-    () => isMockTelephonyActive(liveCall) || isMockTelephonyActive(initCallMeta),
-    [liveCall, initCallMeta]
   );
 
   const isActivelyInCall = Boolean(
@@ -1274,11 +1265,6 @@ export default function LeadCalling() {
                             activeQueueBatch.status === "cancelled" ? "Cancelled" : "Completed"
                           } (${activeQueueBatch.completedCount}/${activeQueueBatch.totalItems} completed)`}
                     </span>
-                    {queueMockMode && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40">
-                        {TEST_MODE_BADGE_TEXT}
-                      </span>
-                    )}
                     {isQueueRunning && (
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30">
                         <span className="h-1.5 w-1.5 rounded-full bg-blue-600 animate-ping" />
@@ -2168,17 +2154,6 @@ export default function LeadCalling() {
 
               {/* Modal Body */}
               <div className="p-6 space-y-5 max-h-[82vh] overflow-y-auto">
-                {/* Visible Mock Telephony Badge when server reports `telephonyMode === "mock"` */}
-                {showModalMockBadge && (
-                  <div
-                    role="status"
-                    className="px-3.5 py-2.5 rounded-lg border border-amber-500/45 bg-amber-500/15 text-amber-950 dark:text-amber-200 text-xs font-bold flex items-center gap-2"
-                  >
-                    <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
-                    <span>{TEST_MODE_BADGE_TEXT}</span>
-                  </div>
-                )}
-
                 {/* Customer Snapshot Card */}
                 <div className="p-4 rounded-xl bg-secondary/50 border border-border flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">

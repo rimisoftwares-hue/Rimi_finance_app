@@ -3,7 +3,7 @@
  * Structured Error Classifier, and Backoff Polling Policy (Phase 4B).
  */
 
-export type VoiceTelephonyMode = "mock" | "live_allowlist" | "live";
+export type VoiceTelephonyMode = "live_allowlist" | "live";
 
 export type CallLifecycleState =
   | "idle"
@@ -103,7 +103,6 @@ export interface ClassifiedCallInitError {
   ambiguousCallId: string | null;
 }
 
-export const TEST_MODE_BADGE_TEXT = "TEST MODE - no real call is placed";
 export const STATUS_UNKNOWN_TEXT = "Status unknown - verifying";
 export const MAX_CALL_POLL_DURATION_MS = 12 * 60 * 1000;
 
@@ -576,23 +575,6 @@ export function mapLeadRowToUiStatus(
     blocksNewCall: ui.blocksNewCallForCustomer,
     blockReason: ui.blocksNewCallForCustomer ? STATUS_UNKNOWN_TEXT : null,
   };
-}
-
-/**
- * Detects whether backend response or session indicates mock telephony (`TEST MODE`).
- */
-export function isMockTelephonyActive(
-  source?: {
-    telephonyMode?: string | null;
-    mockTelephony?: boolean | null;
-    providerCallId?: string | null;
-  } | null
-): boolean {
-  if (!source) return false;
-  if (String(source.telephonyMode || "").toLowerCase() === "mock") return true;
-  if (source.mockTelephony === true) return true;
-  if (String(source.providerCallId || "").startsWith("mock-")) return true;
-  return false;
 }
 
 function parseRetryAfterHeader(
