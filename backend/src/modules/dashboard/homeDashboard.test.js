@@ -267,8 +267,9 @@ test('Home Dashboard Service Unit Tests', async (t) => {
 
   await t.test('6. computes overdueOver30Days, todaysDueCount, and highRiskCustomers accurately on fixture data', () => {
     const todayIST = '2026-11-10';
+    // Note: loans.due_date is the Month-0 cycle anchor (EMI #1 = clampedInstallmentDate(due_date, 1)).
     const fixtures = [
-      // Customer A: Due today (2026-11-10), balance remaining, on time so far -> todaysDueCount = 1, safe
+      // Customer A: Month-0 anchor 2026-10-10 -> EMI #1 due today (2026-11-10), balance remaining -> todaysDueCount = 1, safe
       {
         customer_id: 'cust-due-today',
         hplno: 101,
@@ -277,7 +278,7 @@ test('Home Dashboard Service Unit Tests', async (t) => {
         loan_id: 'loan-101',
         hp_amount: 50000,
         hp_date: '2026-10-10',
-        due_date: '2026-11-10',
+        due_date: '2026-10-10',
         due_month: 10,
         due_amount: 5500,
         net_payable: 55000,
@@ -285,7 +286,7 @@ test('Home Dashboard Service Unit Tests', async (t) => {
         payment_count: 0,
         on_time_count: 0,
       },
-      // Customer B: Overdue > 30 days (first due 2026-08-01, 0 paid -> ~101 days overdue -> critical risk, overdueOver30Days)
+      // Customer B: Month-0 anchor 2026-07-01 -> EMI #1 due 2026-08-01, 0 paid -> 101 days overdue -> critical risk, overdueOver30Days
       {
         customer_id: 'cust-overdue-100',
         hplno: 102,
@@ -294,7 +295,7 @@ test('Home Dashboard Service Unit Tests', async (t) => {
         loan_id: 'loan-102',
         hp_amount: 60000,
         hp_date: '2026-07-01',
-        due_date: '2026-08-01',
+        due_date: '2026-07-01',
         due_month: 12,
         due_amount: 6000,
         net_payable: 72000,
@@ -303,7 +304,7 @@ test('Home Dashboard Service Unit Tests', async (t) => {
         on_time_count: 0,
         broken_ptp_count: 2,
       },
-      // Customer C: Overdue 45 days (first due 2026-09-26, 0 paid -> 45 days overdue -> high/critical risk, overdueOver30Days)
+      // Customer C: Month-0 anchor 2026-08-26 -> EMI #1 due 2026-09-26, 0 paid -> 45 days overdue -> high/critical risk, overdueOver30Days
       {
         customer_id: 'cust-overdue-45',
         hplno: 103,
@@ -312,7 +313,7 @@ test('Home Dashboard Service Unit Tests', async (t) => {
         loan_id: 'loan-103',
         hp_amount: 40000,
         hp_date: '2026-08-26',
-        due_date: '2026-09-26',
+        due_date: '2026-08-26',
         due_month: 10,
         due_amount: 4500,
         net_payable: 45000,
@@ -320,7 +321,7 @@ test('Home Dashboard Service Unit Tests', async (t) => {
         payment_count: 0,
         on_time_count: 0,
       },
-      // Customer D: Overdue 10 days (first due 2026-10-31, 0 paid -> 10 days overdue -> NOT > 30 days)
+      // Customer D: Month-0 anchor 2026-09-30 -> EMI #1 due 2026-10-30, 0 paid -> 11 days overdue -> NOT > 30 days
       {
         customer_id: 'cust-overdue-10',
         hplno: 104,
@@ -329,7 +330,7 @@ test('Home Dashboard Service Unit Tests', async (t) => {
         loan_id: 'loan-104',
         hp_amount: 30000,
         hp_date: '2026-09-30',
-        due_date: '2026-10-31',
+        due_date: '2026-09-30',
         due_month: 10,
         due_amount: 3300,
         net_payable: 33000,
