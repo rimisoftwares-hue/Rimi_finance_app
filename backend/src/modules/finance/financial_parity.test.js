@@ -14,6 +14,7 @@ const {
 } = require('./financialCalculation.service');
 const { computeLoanMetrics, scoreCustomer, distanceRisk } = require('../risk/risk.scoring');
 const { mapPendingCollectionRow } = require('../customers/pendingCollectionsHelper');
+const { computeBusinessReport } = require('../accounting/reports/business.calculator');
 
 test('Phase 1 — Authoritative Financial Calculation & Cross-Module Parity Suite (12+ Edge Cases)', async (t) => {
   await t.test('Case 1: One overdue EMI (offset = 1..due_month from loans.due_date anchor)', () => {
@@ -351,6 +352,87 @@ test('Phase 1 — Authoritative Financial Calculation & Cross-Module Parity Suit
     assert.equal(distanceRisk(null), 0);
     assert.equal(distanceRisk(undefined), 0);
     assert.equal(distanceRisk(25), 50);
+  });
+
+  await t.test('Case 14: Interest-First / Custom Principal Paid overrides proportional approximation in ledger & business report', () => {
+    // 1. aggregateValidPaymentLedger aggregates stored principal_amount & interest_amount excluding cancelled rows
+    const agg = aggregateValidPaymentLedger(
+      [
+        { id: 'p1', amount: 3000, principal_amount: 2000, interest_amount: 1000, penalty: 0, status: 'partial', payment_status: 'active', payment_date: '2026-10-10' },
+        { id: 'p2', amount: 6000, principal_amount: 5000, interest_amount: 1000, penalty: 0, status: 'paid', payment_status: 'cancelled', payment_date: '2026-10-12' },
+      ],
+      [
+        { id: 'sd1', payment_id: 'p1', paid_amount: 3000, principal_amount: 3000, interest_amount: 0, status: 'active' },
+        { id: 'sd2', payment_id: 'p1', paid_amount: 1000, principal_amount: 1000, interest_amount: 0, status: 'cancelled' },
+      ]
+    );
+    assert.equal(agg.validEmiPaid, 6000);
+    assert.equal(agg.validPrincipalPaid, 5000);
+    assert.equal(agg.validInterestPaid, 1000);
+
+    // 2. Partial Interest-First payment: ₹3,000 paid on ₹50,000 HP / ₹60,000 Net Payable (10 * ₹6,000, ₹1,000 interest/mo)
+    // Interest-First paid = 2000P + 1000I -> outstandingPrincipal = 50000 - 2000 = 48000, outstandingInterest = 57000 - 48000 = 9000
+    // (Whereas proportional ratio would have yielded 50000 - 2500 = 47500!)
+    const ledgerWithActualPI = computeAuthoritativeLoanLedger({
+      loanStatus: 'active',
+      loanAmount: 50000,
+      hpAmount: 50000,
+      dueDate: '2026-09-10',
+      dueMonth: 10,
+      dueAmount: 6000,
+      netPayable: 60000,
+      validEmiPaid: 3000,
+      validPrincipalPaid: 2000,
+      asOfDate: '2026-11-12',
+    });
+    assert.equal(ledgerWithActualPI.remainingScheduledEmiAmount, 57000);
+    assert.equal(ledgerWithActualPI.outstandingPrincipal, 48000);
+    assert.equal(ledgerWithActualPI.outstandingInterest, 9000);
+
+    // Fallback when validPrincipalPaid is undefined keeps proportional calculation
+    const ledgerFallback = computeAuthoritativeLoanLedger({
+      loanStatus: 'active',
+      loanAmount: 50000,
+      hpAmount: 50000,
+      dueDate: '2026-09-10',
+      dueMonth: 10,
+      dueAmount: 6000,
+      netPayable: 60000,
+      validEmiPaid: 3000,
+      asOfDate: '2026-11-12',
+    });
+    assert.equal(ledgerFallback.outstandingPrincipal, 47500);
+    assert.equal(ledgerFallback.outstandingInterest, 9500);
+
+    // 3. computeBusinessReport honors stored principalPaise & interestPaise directly
+    const report = computeBusinessReport({
+      loanMonthRows: [],
+      paymentGroups: [
+        {
+          monthKey: '2026-11',
+          loanId: 'loan-1',
+          customerId: 'cust-1',
+          amountPaise: 300000,
+          principalPaise: 200000,
+          interestPaise: 100000,
+          penaltyPaise: 5000,
+          handLoanPaise: 0,
+          payment_status: 'active',
+        },
+      ],
+      loansRatioById: {
+        'loan-1': { principalRatio: 5 / 6, interestRatio: 1 / 6 },
+      },
+      from: '2026-11-01',
+      to: '2026-11-30',
+      earliestMonthKey: '2026-11',
+      currentMonthKey: '2026-11',
+    });
+    const novRow = report.monthsByKey['2026-11'];
+    assert.ok(novRow);
+    assert.equal(novRow.principal, 2000);
+    assert.equal(novRow.interest, 1000);
+    assert.equal(novRow.defaultAmt, 50);
   });
 });
 

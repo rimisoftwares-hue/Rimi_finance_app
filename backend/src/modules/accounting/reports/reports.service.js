@@ -1218,7 +1218,7 @@ exports.getBusinessReport = async (financeId, from = null, to = null, options = 
   const todayDateIST = options.todayDateIST || getCurrentDateIST();
   const currentMonthKey = todayDateIST.slice(0, 7);
 
-  // 1. Sanity-bounded earliest month across loans and active payments for this finance
+  // 1. Sanity-bounded earliest month across loans, active payments, and active sub_dues for this finance
   const earliestSql = `
     SELECT
       (
@@ -1237,14 +1237,26 @@ exports.getBusinessReport = async (financeId, from = null, to = null, options = 
           AND p.payment_date IS NOT NULL
           AND p.payment_date >= DATE '2000-01-01'
           AND p.payment_date <= $2::date
-      ) AS min_payment_date
+      ) AS min_payment_date,
+      (
+        SELECT TO_CHAR(MIN(sd.payment_date), 'YYYY-MM-DD')
+        FROM sub_due sd
+        JOIN payments p ON p.id = sd.payment_id
+        WHERE sd.finance_id = $1::uuid
+          AND COALESCE(sd.status::text, 'active') <> 'cancelled'
+          AND p.payment_status IS DISTINCT FROM 'cancelled'
+          AND sd.payment_date IS NOT NULL
+          AND sd.payment_date >= DATE '2000-01-01'
+          AND sd.payment_date <= $2::date
+      ) AS min_sub_due_date
   `;
   const { rows: earliestRows } = await db.query(earliestSql, [financeId, todayDateIST]);
   const minLoanDate = earliestRows[0]?.min_loan_date || null;
   const minPaymentDate = earliestRows[0]?.min_payment_date || null;
+  const minSubDueDate = earliestRows[0]?.min_sub_due_date || null;
 
   const earliestMonthKey = pickSanityBoundedEarliestMonth(
-    [minLoanDate, minPaymentDate],
+    [minLoanDate, minPaymentDate, minSubDueDate],
     todayDateIST
   );
 
@@ -1287,25 +1299,64 @@ exports.getBusinessReport = async (financeId, from = null, to = null, options = 
   `;
 
   const paymentsAggSql = `
+    WITH raw_collections AS (
+      SELECT
+        p.customer_id,
+        p.due_date AS ref_due_date,
+        p.payment_date,
+        GREATEST(0, COALESCE(p.amount, 0)) AS amount,
+        GREATEST(0, COALESCE(p.principal_amount, 0)) AS principal_amount,
+        GREATEST(0, COALESCE(p.interest_amount, 0)) AS interest_amount,
+        GREATEST(0, COALESCE(p.penalty, 0)) AS penalty,
+        GREATEST(0, COALESCE(p.hand_loan, 0)) AS hand_loan
+      FROM payments p
+      WHERE p.finance_id = $1::uuid
+        AND p.payment_status IS DISTINCT FROM 'cancelled'
+        AND p.payment_date IS NOT NULL
+        AND p.payment_date >= $2::date
+        AND p.payment_date <= $3::date
+
+      UNION ALL
+
+      SELECT
+        sd.customer_id,
+        p.due_date AS ref_due_date,
+        sd.payment_date,
+        GREATEST(0, COALESCE(sd.paid_amount, 0)) AS amount,
+        GREATEST(0, COALESCE(sd.principal_amount, 0)) AS principal_amount,
+        GREATEST(0, COALESCE(sd.interest_amount, 0)) AS interest_amount,
+        0::numeric AS penalty,
+        0::numeric AS hand_loan
+      FROM sub_due sd
+      JOIN payments p ON p.id = sd.payment_id
+      WHERE sd.finance_id = $1::uuid
+        AND COALESCE(sd.status::text, 'active') <> 'cancelled'
+        AND p.payment_status IS DISTINCT FROM 'cancelled'
+        AND sd.payment_date IS NOT NULL
+        AND sd.payment_date >= $2::date
+        AND sd.payment_date <= $3::date
+    )
     SELECT
       matched_loan.loan_id,
-      p.customer_id,
-      TO_CHAR(p.payment_date, 'YYYY-MM') AS month_key,
-      COALESCE(ROUND(SUM(COALESCE(p.amount, 0)) * 100), 0)::bigint AS amount_paise,
-      COALESCE(ROUND(SUM(COALESCE(p.penalty, 0)) * 100), 0)::bigint AS penalty_paise,
-      COALESCE(ROUND(SUM(COALESCE(p.hand_loan, 0)) * 100), 0)::bigint AS hand_loan_paise
-    FROM payments p
+      rc.customer_id,
+      TO_CHAR(rc.payment_date, 'YYYY-MM') AS month_key,
+      COALESCE(ROUND(SUM(rc.amount) * 100), 0)::bigint AS amount_paise,
+      COALESCE(ROUND(SUM(rc.principal_amount) * 100), 0)::bigint AS principal_paise,
+      COALESCE(ROUND(SUM(rc.interest_amount) * 100), 0)::bigint AS interest_paise,
+      COALESCE(ROUND(SUM(rc.penalty) * 100), 0)::bigint AS penalty_paise,
+      COALESCE(ROUND(SUM(rc.hand_loan) * 100), 0)::bigint AS hand_loan_paise
+    FROM raw_collections rc
     LEFT JOIN LATERAL (
       SELECT l.id AS loan_id
       FROM loans l
       WHERE l.finance_id = $1::uuid
-        AND l.customer_id = p.customer_id
+        AND l.customer_id = rc.customer_id
       ORDER BY
         CASE
-          WHEN p.due_date IS NOT NULL
+          WHEN rc.ref_due_date IS NOT NULL
            AND COALESCE(l.due_date, l.hp_date) IS NOT NULL
-           AND date_trunc('month', p.due_date)::date >= date_trunc('month', COALESCE(l.due_date, l.hp_date))::date
-           AND date_trunc('month', p.due_date)::date <= (
+           AND date_trunc('month', rc.ref_due_date)::date >= date_trunc('month', COALESCE(l.due_date, l.hp_date))::date
+           AND date_trunc('month', rc.ref_due_date)::date <= (
              date_trunc('month', COALESCE(l.due_date, l.hp_date))
              + ((GREATEST(COALESCE(l.due_month, 1), 1) - 1) || ' months')::interval
            )::date
@@ -1313,27 +1364,22 @@ exports.getBusinessReport = async (financeId, from = null, to = null, options = 
           ELSE 1
         END ASC,
         CASE
-          WHEN p.due_date IS NOT NULL AND l.due_date IS NOT NULL
-           AND EXTRACT(DAY FROM p.due_date) = EXTRACT(DAY FROM l.due_date)
+          WHEN rc.ref_due_date IS NOT NULL AND l.due_date IS NOT NULL
+           AND EXTRACT(DAY FROM rc.ref_due_date) = EXTRACT(DAY FROM l.due_date)
           THEN 0
           ELSE 1
         END ASC,
         CASE
-          WHEN COALESCE(l.hp_date, l.due_date) <= COALESCE(p.due_date, p.payment_date)
+          WHEN COALESCE(l.hp_date, l.due_date) <= COALESCE(rc.ref_due_date, rc.payment_date)
           THEN 0
           ELSE 1
         END ASC,
-        ABS(COALESCE(p.due_date, p.payment_date) - COALESCE(l.due_date, l.hp_date, COALESCE(p.due_date, p.payment_date))) ASC,
+        ABS(COALESCE(rc.ref_due_date, rc.payment_date) - COALESCE(l.due_date, l.hp_date, COALESCE(rc.ref_due_date, rc.payment_date))) ASC,
         l.hp_date ASC NULLS LAST,
         l.id ASC
       LIMIT 1
     ) matched_loan ON TRUE
-    WHERE p.finance_id = $1::uuid
-      AND p.payment_status IS DISTINCT FROM 'cancelled'
-      AND p.payment_date IS NOT NULL
-      AND p.payment_date >= $2::date
-      AND p.payment_date <= $3::date
-    GROUP BY matched_loan.loan_id, p.customer_id, TO_CHAR(p.payment_date, 'YYYY-MM')
+    GROUP BY matched_loan.loan_id, rc.customer_id, TO_CHAR(rc.payment_date, 'YYYY-MM')
     ORDER BY month_key ASC
   `;
 
@@ -1380,6 +1426,8 @@ exports.getBusinessReport = async (financeId, from = null, to = null, options = 
     loanId: r.loan_id ? String(r.loan_id) : null,
     customerId: r.customer_id ? String(r.customer_id) : null,
     amountPaise: Number(r.amount_paise) || 0,
+    principalPaise: Number(r.principal_paise) || 0,
+    interestPaise: Number(r.interest_paise) || 0,
     penaltyPaise: Number(r.penalty_paise) || 0,
     handLoanPaise: Number(r.hand_loan_paise) || 0,
     payment_status: 'active',

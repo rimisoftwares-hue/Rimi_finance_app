@@ -285,7 +285,7 @@ router.get(['/recent-activities', '/dashboard/recent-activities'], enhancedCheck
 });
 
 // Monthly Income Breakdown
-router.get(['/monthly-income-breakdown', '/income-breakdown'], enhancedCheckFinance, async (req, res) => {
+router.get(['/monthly-income-breakdown', '/income-breakdown', '/monthly-income'], enhancedCheckFinance, async (req, res) => {
   try {
     const financeId = req.financeId;
 
@@ -304,44 +304,58 @@ router.get(['/monthly-income-breakdown', '/income-breakdown'], enhancedCheckFina
           CURRENT_DATE AS check_date,
           EXTRACT(YEAR FROM CURRENT_DATE) AS current_year,
           EXTRACT(MONTH FROM CURRENT_DATE) AS current_month
+      ),
+      collections AS (
+        SELECT
+          p.finance_id,
+          p.customer_id,
+          p.payment_date,
+          GREATEST(0, COALESCE(p.amount, 0)) AS amount,
+          GREATEST(0, COALESCE(p.principal_amount, 0)) AS principal_amount,
+          GREATEST(0, COALESCE(p.interest_amount, 0)) AS interest_amount,
+          GREATEST(0, COALESCE(p.penalty, 0)) AS penalty
+        FROM payments p
+        WHERE p.finance_id = $1
+          AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+          AND COALESCE(p.status::text, 'paid') <> 'cancelled'
+
+        UNION ALL
+
+        SELECT
+          sd.finance_id,
+          sd.customer_id,
+          sd.payment_date,
+          GREATEST(0, COALESCE(sd.paid_amount, 0)) AS amount,
+          GREATEST(0, COALESCE(sd.principal_amount, 0)) AS principal_amount,
+          GREATEST(0, COALESCE(sd.interest_amount, 0)) AS interest_amount,
+          0::numeric AS penalty
+        FROM sub_due sd
+        JOIN payments p ON p.id = sd.payment_id
+        WHERE sd.finance_id = $1
+          AND COALESCE(sd.status::text, 'active') <> 'cancelled'
+          AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+          AND COALESCE(p.status::text, 'paid') <> 'cancelled'
       )
       SELECT 
         m.month_name AS month,
 
         /* Total Income */
-        COALESCE(SUM(p.amount), 0) AS total_income,
+        ROUND(COALESCE(SUM(col.amount), 0), 2) AS total_income,
 
         /* Average Interest Rate of paid customers */
         COALESCE(
-          SUM(l.interest_rate) / NULLIF(COUNT(DISTINCT p.customer_id), 0),
+          SUM(l.interest_rate) / NULLIF(COUNT(col.customer_id), 0),
           0
         ) AS avg_interest_rate,
 
-        /* Interest Amount */
-        ROUND(
-          COALESCE(SUM(p.amount), 0) *
-          COALESCE(
-            SUM(l.interest_rate) / NULLIF(COUNT(DISTINCT p.customer_id), 0),
-            0
-          ) / 100,
-          2
-        ) AS interest_amount,
+        /* Stored Interest Amount (payments + active sub_due) */
+        ROUND(COALESCE(SUM(col.interest_amount), 0), 2) AS interest_amount,
 
-        /* Principal Amount */
-        ROUND(
-          COALESCE(SUM(p.amount), 0) -
-          (
-            COALESCE(SUM(p.amount), 0) *
-            COALESCE(
-              SUM(l.interest_rate) / NULLIF(COUNT(DISTINCT p.customer_id), 0),
-              0
-            ) / 100
-          ),
-          2
-        ) AS principal_amount,
+        /* Stored Principal Amount (payments + active sub_due) */
+        ROUND(COALESCE(SUM(col.principal_amount), 0), 2) AS principal_amount,
 
         /* Penalty */
-        COALESCE(SUM(p.penalty), 0) AS penalty,
+        ROUND(COALESCE(SUM(col.penalty), 0), 2) AS penalty,
 
         /* Financial Year Logic */
         CASE
@@ -352,24 +366,23 @@ router.get(['/monthly-income-breakdown', '/income-breakdown'], enhancedCheckFina
       FROM months m
       CROSS JOIN date_ranges dr
 
-      LEFT JOIN payments p 
-        ON EXTRACT(MONTH FROM p.payment_date) = m.month_num
-        AND EXTRACT(YEAR FROM p.payment_date) =
+      LEFT JOIN collections col
+        ON EXTRACT(MONTH FROM col.payment_date) = m.month_num
+        AND EXTRACT(YEAR FROM col.payment_date) =
             CASE
               WHEN m.month_num > dr.current_month THEN dr.current_year - 1
               ELSE dr.current_year
             END
-        AND p.payment_date <= dr.check_date
-        AND p.finance_id = $1
+        AND col.payment_date <= dr.check_date
 
       LEFT JOIN LATERAL (
         SELECT l_sub.interest_rate
         FROM loans l_sub
-        WHERE l_sub.customer_id = p.customer_id
-          AND l_sub.finance_id = p.finance_id
+        WHERE l_sub.customer_id = col.customer_id
+          AND l_sub.finance_id = col.finance_id
         ORDER BY l_sub.hp_date DESC NULLS LAST, l_sub.id DESC
         LIMIT 1
-      ) l ON true
+      ) l ON col.customer_id IS NOT NULL
 
       GROUP BY m.month_num, m.month_name, dr.current_month, dr.current_year
       ORDER BY year, m.month_num

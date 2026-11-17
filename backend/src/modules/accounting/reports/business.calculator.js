@@ -647,9 +647,29 @@ function computeBusinessReport({
         ? Math.max(0, Math.round(Number(group.handLoanPaise) || 0))
         : toPaise(group.handLoan ?? group.hand_loan);
 
-    const lookupKey = group.loanId ?? group.loan_id ?? group.customerId ?? group.customer_id;
-    const ratio = group.ratio || getRatio(lookupKey);
-    const { principalPaise, interestPaise } = splitPrincipalInterest(amountPaise, ratio);
+    const hasExplicitPI =
+      (group.principalPaise !== undefined && group.interestPaise !== undefined) ||
+      (group.principal !== undefined && group.interest !== undefined);
+
+    let principalPaise = 0;
+    let interestPaise = 0;
+
+    if (hasExplicitPI) {
+      principalPaise =
+        group.principalPaise !== undefined
+          ? Math.max(0, Math.round(Number(group.principalPaise) || 0))
+          : toPaise(group.principal);
+      interestPaise =
+        group.interestPaise !== undefined
+          ? Math.max(0, Math.round(Number(group.interestPaise) || 0))
+          : toPaise(group.interest);
+    } else {
+      const lookupKey = group.loanId ?? group.loan_id ?? group.customerId ?? group.customer_id;
+      const ratio = group.ratio || getRatio(lookupKey);
+      const split = splitPrincipalInterest(amountPaise, ratio);
+      principalPaise = split.principalPaise;
+      interestPaise = split.interestPaise;
+    }
 
     const b = buckets.get(mk);
     b.principalPaise += principalPaise;

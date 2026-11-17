@@ -144,6 +144,8 @@ function clampedInstallmentDate(anchorDate, monthOffset) {
 function aggregateValidPaymentLedger(payments = [], subDues = []) {
   const cancelledPaymentIds = new Set();
   let mainEmiPaid = 0;
+  let mainPrincipalPaid = 0;
+  let mainInterestPaid = 0;
   let penaltyPaid = 0;
   let validPaymentCount = 0;
   let lastPaymentDate = null;
@@ -157,8 +159,12 @@ function aggregateValidPaymentLedger(payments = [], subDues = []) {
       continue;
     }
     const amt = Math.max(0, toNum(p.amount));
+    const prin = Math.max(0, toNum(p.principal_amount));
+    const intr = Math.max(0, toNum(p.interest_amount));
     const pen = Math.max(0, toNum(p.penalty));
     mainEmiPaid += amt;
+    mainPrincipalPaid += prin;
+    mainInterestPaid += intr;
     penaltyPaid += pen;
     validPaymentCount += 1;
 
@@ -174,6 +180,8 @@ function aggregateValidPaymentLedger(payments = [], subDues = []) {
         const sdStatus = String(sd.status || 'active').trim().toLowerCase();
         if (sdStatus === 'cancelled') continue;
         mainEmiPaid += Math.max(0, toNum(sd.paid_amount ?? sd.amount));
+        mainPrincipalPaid += Math.max(0, toNum(sd.principal_amount));
+        mainInterestPaid += Math.max(0, toNum(sd.interest_amount));
       }
     }
 
@@ -184,6 +192,8 @@ function aggregateValidPaymentLedger(payments = [], subDues = []) {
   }
 
   let subEmiPaid = 0;
+  let subPrincipalPaid = 0;
+  let subInterestPaid = 0;
   for (const sd of subDues || []) {
     if (!sd) continue;
     const sdStatus = String(sd.status || 'active').trim().toLowerCase();
@@ -191,12 +201,18 @@ function aggregateValidPaymentLedger(payments = [], subDues = []) {
     if (sdStatus === 'cancelled' || parentStatus === 'cancelled') continue;
     if (sd.payment_id && cancelledPaymentIds.has(String(sd.payment_id))) continue;
     subEmiPaid += Math.max(0, toNum(sd.paid_amount ?? sd.amount));
+    subPrincipalPaid += Math.max(0, toNum(sd.principal_amount));
+    subInterestPaid += Math.max(0, toNum(sd.interest_amount));
   }
 
   const validEmiPaid = round2(mainEmiPaid + subEmiPaid);
+  const validPrincipalPaid = round2(mainPrincipalPaid + subPrincipalPaid);
+  const validInterestPaid = round2(mainInterestPaid + subInterestPaid);
   const totalPenaltyPaid = round2(penaltyPaid);
   return {
     validEmiPaid,
+    validPrincipalPaid,
+    validInterestPaid,
     totalPenaltyPaid,
     totalAmountPaid: round2(validEmiPaid + totalPenaltyPaid),
     validPaymentCount,
@@ -269,10 +285,20 @@ function computeAuthoritativeLoanLedger(input = {}) {
 
   const outstandingPenaltyAmount = closed ? 0 : rawOutstandingPenalty;
 
-  // Concept 3 & 4: Proportional Principal vs Interest split matching demand.calculator.js
+  // Concept 3 & 4: Stored Principal/Interest split (NBFC Interest-First / Custom Override) with proportional fallback
+  const hasExplicitPrincipalPaid =
+    input.validPrincipalPaid !== undefined && input.validPrincipalPaid !== null;
+  const validPrincipalPaid = hasExplicitPrincipalPaid
+    ? round2(Math.max(0, toNum(input.validPrincipalPaid)))
+    : null;
+
   let outstandingPrincipal = 0;
   if (!closed && remainingScheduledEmiAmount > 0) {
-    if (totalContractualDue > 0 && principalAdvanced > 0) {
+    if (hasExplicitPrincipalPaid && principalAdvanced > 0) {
+      outstandingPrincipal = round2(
+        Math.min(remainingScheduledEmiAmount, Math.max(0, principalAdvanced - validPrincipalPaid))
+      );
+    } else if (totalContractualDue > 0 && principalAdvanced > 0) {
       const principalSharePaid = validEmiPaid * (principalAdvanced / totalContractualDue);
       outstandingPrincipal = round2(
         Math.min(remainingScheduledEmiAmount, Math.max(0, principalAdvanced - principalSharePaid))
@@ -563,6 +589,17 @@ const TENANT_LOAN_LEDGER_SQL = `
     END AS paid_main,
     CASE
       WHEN bl.loan_rank = 1 THEN COALESCE((
+        SELECT SUM(GREATEST(0, COALESCE(p.principal_amount, 0)))::float8
+        FROM public.payments p
+        WHERE p.customer_id = bl.customer_id::uuid
+          AND (p.finance_id IS NULL OR p.finance_id = $1::uuid)
+          AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+          AND COALESCE(p.status::text, 'paid') <> 'cancelled'
+      ), 0)::float8
+      ELSE 0::float8
+    END AS paid_main_principal,
+    CASE
+      WHEN bl.loan_rank = 1 THEN COALESCE((
         SELECT SUM(GREATEST(0, COALESCE(sd.paid_amount, 0)))::float8
         FROM public.sub_due sd
         JOIN public.payments p ON p.id = sd.payment_id
@@ -574,6 +611,19 @@ const TENANT_LOAN_LEDGER_SQL = `
       ), 0)::float8
       ELSE 0::float8
     END AS paid_sub,
+    CASE
+      WHEN bl.loan_rank = 1 THEN COALESCE((
+        SELECT SUM(GREATEST(0, COALESCE(sd.principal_amount, 0)))::float8
+        FROM public.sub_due sd
+        JOIN public.payments p ON p.id = sd.payment_id
+        WHERE sd.customer_id = bl.customer_id::uuid
+          AND sd.finance_id = $1::uuid
+          AND COALESCE(sd.status::text, 'active') <> 'cancelled'
+          AND COALESCE(p.payment_status::text, 'active') <> 'cancelled'
+          AND COALESCE(p.status::text, 'paid') <> 'cancelled'
+      ), 0)::float8
+      ELSE 0::float8
+    END AS paid_sub_principal,
     CASE
       WHEN bl.loan_rank = 1 THEN COALESCE((
         SELECT SUM(GREATEST(0, COALESCE(p.penalty, 0)))::float8
@@ -613,6 +663,11 @@ async function queryTenantLoanLedgers(financeId, opts = {}) {
 
   const ledgers = rows.map((row) => {
     const validEmiPaid = round2(toNum(row.paid_main) + toNum(row.paid_sub));
+    const hasPrincipalCols =
+      row.paid_main_principal !== undefined || row.paid_sub_principal !== undefined;
+    const validPrincipalPaid = hasPrincipalCols
+      ? round2(toNum(row.paid_main_principal) + toNum(row.paid_sub_principal))
+      : undefined;
     const ledger = computeAuthoritativeLoanLedger({
       loanId: row.loan_id,
       customerId: row.customer_id,
@@ -627,6 +682,7 @@ async function queryTenantLoanLedgers(financeId, opts = {}) {
       dueAmount: row.due_amount,
       netPayable: row.net_payable,
       validEmiPaid,
+      validPrincipalPaid,
       totalPenaltyPaid: row.total_penalty_paid,
       loanPenaltyAmount: row.loan_penalty_amount,
       pendingPenaltiesTableSum: row.pending_penalties_sum,
