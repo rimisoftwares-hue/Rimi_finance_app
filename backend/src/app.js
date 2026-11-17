@@ -315,54 +315,6 @@ app.get(['/lastduedate', '/api/lastduedate'], enhancedCheckFinance, async (req, 
   }
 });
 
-// ─── User Profile ─────────────────────────────────────────────────────────────
-app.get('/api/user/profile', async (req, res) => {
-  try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.replace('Bearer ', '');
-
-    if (!token) {
-      return res.status(401).json({ success: false, error: 'No authentication token provided' });
-    }
-
-    const jwt = require('jsonwebtoken');
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'jwt123');
-    } catch (e) {
-      return res.status(401).json({ success: false, error: 'Invalid or expired token' });
-    }
-
-    const userId = decoded.user?.id || decoded.user?.user_id;
-    if (!userId) {
-      return res.status(400).json({ success: false, error: 'User ID missing in token' });
-    }
-
-    const { rows: userDetails } = await db.query(
-      `SELECT 
-        u.id, u.email, u.username, u.phone_no,
-        (SELECT uac.role FROM user_allowed_companies uac WHERE uac.user_id = u.id AND uac.is_active = 1 LIMIT 1) AS role,
-        u.created_at, u.updated_at,
-        COALESCE(
-          (SELECT json_agg(uac.finance_id) FROM user_allowed_companies uac WHERE uac.user_id = u.id AND uac.is_active = 1),
-          '[]'::json
-        ) AS allowed_companies
-      FROM users u WHERE u.id = $1`,
-      [userId]
-    );
-
-    if (userDetails.length === 0) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    res.json({ success: true, user: userDetails[0] });
-  } catch (err) {
-    console.error('Error fetching user profile:', err);
-    res.status(500).json({ success: false, error: 'Failed to fetch user profile', details: err.message });
-  }
-});
-
-
 // ─── Finance profile ──────────────────────────────────────────────────────────
 app.get('/api/finance/profile', enhancedCheckFinance, async (req, res) => {
   try {
