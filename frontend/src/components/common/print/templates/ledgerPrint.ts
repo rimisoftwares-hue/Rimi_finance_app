@@ -2,6 +2,7 @@ import {
   escapeHtml,
   formatDate,
   getImageUrl,
+  isOptionEnabled,
   renderLogoTag,
   renderWatermarkHtml,
 } from '../printHelpers';
@@ -31,7 +32,15 @@ export const generateLedgerHtml = (
 
   const customerPhotoUrl = getImageUrl(customer.cphoto);
   const guardianPhotoUrl = getImageUrl(guardian.gphoto);
-  const showFooter = options.footer !== false;
+  const showFooter = isOptionEnabled(options.footer);
+  const showInterestRate = isOptionEnabled(options.showInterestRate);
+  const showPenalty = isOptionEnabled(options.showPenalty);
+  const showBroker = isOptionEnabled(options.showBroker);
+  const showGuardian = isOptionEnabled(options.showGuardian);
+  const showPhotos = isOptionEnabled(options.showPhotos);
+  const showWorkDetails = isOptionEnabled(options.showWorkDetails);
+  const showVehicleChassisEngine = isOptionEnabled(options.showVehicleChassisEngine);
+  const showTerms = isOptionEnabled(options.showTerms);
 
   const calculateTotals = () => {
     const totalAmount = payments.reduce((sum: number, p: PrintPaymentRecord) => sum + (Number(p.amount) || 0), 0);
@@ -82,15 +91,19 @@ export const generateLedgerHtml = (
         <div class="status-item">
           <span class="status-label">Print Date : </span>
           <span class="status-value">${escapeHtml(new Date().toLocaleDateString('en-IN'))}</span>
-        </div>
+        </div>${
+          showBroker
+            ? `
         <div class="status-item">
           <span class="status-label">Broker : </span>
           <span class="status-value">${escapeHtml(customer.brokerName || 'N/A')}</span>
-        </div>
+        </div>`
+            : ''
+        }
       </div>
 
       <!-- Main Details Section -->
-      <div class="main-grid">
+      <div class="main-grid"${showGuardian ? '' : ' style="grid-template-columns: 1fr;"'}>
         <!-- Customer Information -->
         <div class="info-card">
           <div class="card-header">
@@ -116,7 +129,9 @@ export const generateLedgerHtml = (
                   <span class="detail-value">${
                     ccontacts.map((c) => escapeHtml(c?.number)).filter(Boolean).join(', ') || 'N/A'
                   }</span>
-                </div>
+                </div>${
+                  showWorkDetails
+                    ? `
                 <div class="detail-row">
                   <span class="detail-label">Work Office :</span>
                   <span class="detail-value">${escapeHtml(customer.work_office_address || 'N/A')}</span>
@@ -124,18 +139,26 @@ export const generateLedgerHtml = (
                 <div class="detail-row">
                   <span class="detail-label">Work Phone :</span>
                   <span class="detail-value">${escapeHtml(customer.work_office_phone || 'N/A')}</span>
-                </div>
-              </div>
+                </div>`
+                    : ''
+                }
+              </div>${
+                showPhotos
+                  ? `
               <div class="photo-column">
                 ${
                   customerPhotoUrl
                     ? `<img src="${escapeHtml(customerPhotoUrl)}" class="profile-photo" alt="Customer Photo" onerror="this.style.display='none'" />`
                     : `<div class="photo-placeholder">Customer<br>Photo</div>`
                 }
-              </div>
+              </div>`
+                  : ''
+              }
             </div>
           </div>
-        </div>
+        </div>${
+          showGuardian
+            ? `
 
         <!-- Guardian Information -->
         <div class="info-card">
@@ -163,17 +186,23 @@ export const generateLedgerHtml = (
                     gcontacts.map((c) => escapeHtml(c?.number)).filter(Boolean).join(', ') || 'N/A'
                   }</span>
                 </div>
-              </div>
+              </div>${
+                showPhotos
+                  ? `
               <div class="photo-column">
                 ${
                   guardianPhotoUrl
                     ? `<img src="${escapeHtml(guardianPhotoUrl)}" class="profile-photo" alt="Guardian Photo" onerror="this.style.display='none'" />`
                     : `<div class="photo-placeholder">Guardian<br>Photo</div>`
                 }
-              </div>
+              </div>`
+                  : ''
+              }
             </div>
           </div>
-        </div>
+        </div>`
+            : ''
+        }
       </div>
 
       <!-- Vehicle & Loan Details -->
@@ -192,7 +221,9 @@ export const generateLedgerHtml = (
               <div class="detail-row">
                 <span class="detail-label">Model/Brand:</span>
                 <span class="detail-value">${escapeHtml(vehicle.model_name || vehicle.vehicle_modal || 'N/A')} ${escapeHtml(vehicle.brand || '')}</span>
-              </div>
+              </div>${
+                showVehicleChassisEngine
+                  ? `
               <div class="detail-row">
                 <span class="detail-label">Chassis No:</span>
                 <span class="detail-value">${escapeHtml(vehicle.chassis_number || 'N/A')}</span>
@@ -200,7 +231,9 @@ export const generateLedgerHtml = (
               <div class="detail-row">
                 <span class="detail-label">Engine No:</span>
                 <span class="detail-value">${escapeHtml(vehicle.engine_number || 'N/A')}</span>
-              </div>
+              </div>`
+                  : ''
+              }
               <div class="detail-row">
                 <span class="detail-label">Type/Color:</span>
                 <span class="detail-value">${escapeHtml(vehicle.body_type || '')} ${escapeHtml(vehicle.type || '')} / ${escapeHtml(vehicle.color || 'N/A')}</span>
@@ -231,11 +264,15 @@ export const generateLedgerHtml = (
               <div class="detail-row">
                 <span class="detail-label">Tenure:</span>
                 <span class="detail-value">${escapeHtml(loan.dueMonth ?? loan.due_month ?? 'N/A')} Months</span>
-              </div>
+              </div>${
+                showInterestRate
+                  ? `
               <div class="detail-row">
                 <span class="detail-label">Interest Rate:</span>
                 <span class="detail-value">${escapeHtml(loan.interestRate ?? loan.interest_rate ?? 'N/A')}%</span>
-              </div>
+              </div>`
+                  : ''
+              }
               <div class="detail-row">
                 <span class="detail-label">Monthly EMI:</span>
                 <span class="detail-value currency">₹${escapeHtml((Number(loan.dueAmount ?? loan.due_amount) || 0).toLocaleString('en-IN'))}</span>
@@ -243,18 +280,22 @@ export const generateLedgerHtml = (
               <div class="detail-row">
                 <span class="detail-label">Net Payable:</span>
                 <span class="detail-value currency">₹${escapeHtml(totals.totalDue.toLocaleString('en-IN'))}</span>
-              </div>
+              </div>${
+                showPenalty
+                  ? `
               <div class="detail-row">
                 <span class="detail-label">Penalty Rate:</span>
                 <span class="detail-value currency">₹${escapeHtml((Number(loan.penaltyAmount ?? loan.penalty_amount) || 0).toLocaleString('en-IN'))}/day</span>
-              </div>
+              </div>`
+                  : ''
+              }
             </div>
           </div>
         </div>
       </div>
 
       <!-- Payment Summary Cards -->
-      <div class="summary-cards">
+      <div class="summary-cards"${showPenalty ? '' : ' style="grid-template-columns: repeat(3, 1fr);"'}>
         <div class="summary-card paid">
           <div class="summary-label">Total Paid</div>
           <div class="summary-value">₹${escapeHtml(totals.totalAmount.toLocaleString('en-IN'))}</div>
@@ -262,11 +303,15 @@ export const generateLedgerHtml = (
         <div class="summary-card balance">
           <div class="summary-label">Balance Amount</div>
           <div class="summary-value">₹${escapeHtml(totals.balance.toLocaleString('en-IN'))}</div>
-        </div>
+        </div>${
+          showPenalty
+            ? `
         <div class="summary-card penalty">
           <div class="summary-label">Total Penalty</div>
           <div class="summary-value">₹${escapeHtml(totals.totalPenalty.toLocaleString('en-IN'))}</div>
-        </div>
+        </div>`
+            : ''
+        }
         <div class="summary-card installments">
           <div class="summary-label">Paid Installments</div>
           <div class="summary-value">${escapeHtml(payments.filter((p) => Number(p.amount) > 0).length)} / ${escapeHtml(loan.dueMonth ?? loan.due_month ?? 0)}</div>
@@ -282,11 +327,15 @@ export const generateLedgerHtml = (
           <thead>
             <tr>
               <th width="8%">S.No</th>
-              <th width="18%">Due Date</th>
-              <th width="18%">Payment Date</th>
-              <th width="18%">Bill Number</th>
-              <th width="19%">Amount Paid (₹)</th>
-              <th width="19%">Penalty (₹)</th>
+              <th width="${showPenalty ? '18%' : '22%'}">Due Date</th>
+              <th width="${showPenalty ? '18%' : '22%'}">Payment Date</th>
+              <th width="${showPenalty ? '18%' : '23%'}">Bill Number</th>
+              <th width="${showPenalty ? '19%' : '25%'}">Amount Paid (₹)</th>${
+                showPenalty
+                  ? `
+              <th width="19%">Penalty (₹)</th>`
+                  : ''
+              }
             </tr>
           </thead>
           <tbody>
@@ -300,15 +349,19 @@ export const generateLedgerHtml = (
                 <td class="text-center">${escapeHtml(formatDate(payment.dueDate))}</td>
                 <td class="text-center">${escapeHtml(formatDate(payment.paymentDate))}</td>
                 <td class="text-center">${escapeHtml(payment.billNumber || '-')}</td>
-                <td class="text-right currency">${payment.amount ? `₹${escapeHtml(Number(payment.amount).toLocaleString('en-IN'))}` : '-'}</td>
-                <td class="text-right currency">${payment.penalty ? `₹${escapeHtml(Number(payment.penalty).toLocaleString('en-IN'))}` : '-'}</td>
+                <td class="text-right currency">${payment.amount ? `₹${escapeHtml(Number(payment.amount).toLocaleString('en-IN'))}` : '-'}</td>${
+                  showPenalty
+                    ? `
+                <td class="text-right currency">${payment.penalty ? `₹${escapeHtml(Number(payment.penalty).toLocaleString('en-IN'))}` : '-'}</td>`
+                    : ''
+                }
               </tr>
             `
                     )
                     .join('')
                 : `
               <tr>
-                <td colspan="6" class="no-data">No payment records available</td>
+                <td colspan="${showPenalty ? 6 : 5}" class="no-data">No payment records available</td>
               </tr>
             `
             }
@@ -316,8 +369,12 @@ export const generateLedgerHtml = (
           <tfoot>
             <tr class="total-row">
               <td colspan="4" class="text-right"><strong>TOTAL</strong></td>
-              <td class="text-right currency"><strong>₹${escapeHtml(totals.totalAmount.toLocaleString('en-IN'))}</strong></td>
-              <td class="text-right currency"><strong>₹${escapeHtml(totals.totalPenalty.toLocaleString('en-IN'))}</strong></td>
+              <td class="text-right currency"><strong>₹${escapeHtml(totals.totalAmount.toLocaleString('en-IN'))}</strong></td>${
+                showPenalty
+                  ? `
+              <td class="text-right currency"><strong>₹${escapeHtml(totals.totalPenalty.toLocaleString('en-IN'))}</strong></td>`
+                  : ''
+              }
             </tr>
           </tfoot>
         </table>
@@ -326,7 +383,9 @@ export const generateLedgerHtml = (
       ${
         showFooter
           ? `<!-- Footer & Signatures -->
-      <div class="footer-section">
+      <div class="footer-section">${
+        showTerms
+          ? `
         <div class="terms-section">
           <h4>Terms & Conditions:</h4>
           <ul class="terms-list">
@@ -335,18 +394,24 @@ export const generateLedgerHtml = (
             <li>Vehicle documents will be released only after complete loan settlement</li>
           </ul>
         </div>
-        
-        <div class="signature-grid">
+        `
+          : ''
+      }
+        <div class="signature-grid"${showGuardian ? '' : ' style="grid-template-columns: repeat(2, 1fr);"'}>
           <div class="signature-box">
             <div class="signature-line"></div>
             <div class="signature-label">Customer Signature</div>
             <div class="signature-date">Date: _______________</div>
-          </div>
+          </div>${
+            showGuardian
+              ? `
           <div class="signature-box">
             <div class="signature-line"></div>
             <div class="signature-label">Guarantor Signature</div>
             <div class="signature-date">Date: _______________</div>
-          </div>
+          </div>`
+              : ''
+          }
           <div class="signature-box">
             <div class="signature-line"></div>
             <div class="signature-label">Authorized Signatory</div>

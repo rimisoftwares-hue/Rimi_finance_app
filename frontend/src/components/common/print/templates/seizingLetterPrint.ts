@@ -1,6 +1,7 @@
 import {
   escapeHtml,
   formatDate,
+  isOptionEnabled,
   renderLogoTag,
   renderWatermarkHtml,
 } from '../printHelpers';
@@ -26,7 +27,11 @@ export const generateSeizingLetterHtml = (
   const vehicle = data?.vehicle || {};
   const payments: PrintPaymentRecord[] = Array.isArray(data?.payments) ? data.payments : [];
   const ccontacts: PrintContactRecord[] = Array.isArray(customer?.ccontacts) ? customer.ccontacts : [];
-  const showFooter = options.footer !== false;
+  const showFooter = isOptionEnabled(options.footer);
+  const showRefNo = isOptionEnabled(options.showRefNo);
+  const showLoanSummaryBox = isOptionEnabled(options.showLoanSummaryBox);
+  const showCopyToGuarantor = isOptionEnabled(options.showCopyToGuarantor);
+  const showUrgentStamp = isOptionEnabled(options.showUrgentStamp);
 
   const currentDate = new Date().toLocaleDateString('ta-IN', {
     day: '2-digit',
@@ -71,10 +76,14 @@ export const generateSeizingLetterHtml = (
       </div>
 
       <!-- Reference & Date -->
-      <div class="ref-section">
+      <div class="ref-section"${showRefNo ? '' : ' style="justify-content: flex-end;"'}>${
+        showRefNo
+          ? `
         <div class="ref-left">
           <strong>Ref No:</strong> SAC/SEIZE/${escapeHtml(customer.hplno)}/${escapeHtml(new Date().getFullYear())}
-        </div>
+        </div>`
+          : ''
+      }
         <div class="ref-right">
           <strong>Date:</strong> ${escapeHtml(currentDate)}
         </div>
@@ -98,7 +107,9 @@ export const generateSeizingLetterHtml = (
           வாகன எண் <strong>${escapeHtml(vehicle.vehicle_number || 'N/A')}</strong> - 
           கடன் தொகை செலுத்தாமை - வாகனம் கைப்பற்றுதல் குறித்த இறுதி அறிவிப்பு
         </div>
-      </div>
+      </div>${
+        showLoanSummaryBox
+          ? `
 
       <!-- Loan Details Box -->
       <div class="loan-summary-box">
@@ -137,7 +148,9 @@ export const generateSeizingLetterHtml = (
             <span class="sum-value">₹${escapeHtml((Number(loan.penaltyAmount ?? loan.penalty_amount) || 0).toLocaleString('en-IN'))}/day</span>
           </div>
         </div>
-      </div>
+      </div>`
+          : ''
+      }
 
       <!-- Main Letter Content -->
       <div class="letter-body">
@@ -182,7 +195,9 @@ export const generateSeizingLetterHtml = (
           <em>குறிப்பு: இந்த கடிதம் அனுப்பப்பட்ட பிறகு தாங்கள் பணம் செலுத்தியிருந்தால், 
           ரசீதுடன் உடனடியாக எங்கள் அலுவலகத்தை தொடர்பு கொள்ளவும்.</em>
         </p>
-      </div>
+      </div>${
+        showCopyToGuarantor
+          ? `
 
       <!-- Copy To Section -->
       <div class="copy-section">
@@ -192,11 +207,15 @@ export const generateSeizingLetterHtml = (
           ${escapeHtml(guardian.gfname?.unit || 'த/பெ')}: ${escapeHtml(guardian.gfname?.value || 'N/A')}, 
           ${escapeHtml(guardian.full_address || 'N/A')}
         </div>
-      </div>
+      </div>`
+          : ''
+      }
 
       ${showFooter
       ? `<!-- Signature Section -->
-      <div class="letter-footer">
+      <div class="letter-footer"${showUrgentStamp ? '' : ' style="justify-content: flex-end;"'}>${
+        showUrgentStamp
+          ? `
         <div class="footer-left">
           <div class="urgent-stamp">
             <div class="stamp-box">
@@ -205,7 +224,9 @@ export const generateSeizingLetterHtml = (
               ACTION REQUIRED
             </div>
           </div>
-        </div>
+        </div>`
+          : ''
+      }
         <div class="footer-right">
           <div class="company-signature">
             <p><strong>உண்மையுள்ள,</strong></p>

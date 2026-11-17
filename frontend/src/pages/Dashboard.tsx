@@ -4,6 +4,7 @@ import { Bell, X } from "lucide-react";
 import { DashboardToggle } from "../components/dashboard/DashboardToggle";
 import { MainDashboard } from "../components/dashboard/MainDashboard";
 import { StaffDashboard } from "../components/dashboard/StaffDashboard";
+import { AIBotMascot } from "../components/ai/AIBotMascot";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "../components/ui/button";
 import { usePermissionFlow } from "../hooks/usePermissionFlow";
@@ -103,6 +104,17 @@ export default function Dashboard() {
         </motion.div>
 
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Compact AI Voice Assistant Trigger */}
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("autofinex:open-ai-assistant"))}
+            className="inline-flex items-center gap-2 pl-2 pr-3.5 py-1.5 rounded-xl text-sm font-medium bg-secondary hover:bg-secondary/80 text-foreground border border-border/70 hover:border-sky-400/50 transition-all shadow-xs cursor-pointer"
+            title="Open AutoFinex AI Voice & Chat Assistant"
+          >
+            <AIBotMascot size={24} />
+            <span>AI Assistant</span>
+          </button>
+
           {/* Dashboard Toggle */}
           <DashboardToggle mode={mode} onToggle={setMode} />
         </div>

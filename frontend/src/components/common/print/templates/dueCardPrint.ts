@@ -1,6 +1,7 @@
 import {
   escapeHtml,
   formatDate,
+  isOptionEnabled,
   renderLogoTag,
   renderWatermarkHtml,
 } from '../printHelpers';
@@ -25,7 +26,12 @@ export const generateDueCardHtml = (
   const vehicle = data?.vehicle || {};
   const ccontacts: PrintContactRecord[] = Array.isArray(customer?.ccontacts) ? customer.ccontacts : [];
   const gcontacts: PrintContactRecord[] = Array.isArray(guardian?.gcontacts) ? guardian.gcontacts : [];
-  const showFooter = options.footer !== false;
+  const showFooter = isOptionEnabled(options.footer);
+  const showGuarantor = isOptionEnabled(options.showGuarantor);
+  const showDatesBar = isOptionEnabled(options.showDatesBar);
+  const showVehicleModel = isOptionEnabled(options.showVehicleModel);
+  const showInstructions = isOptionEnabled(options.showInstructions);
+  const showSettlementSection = isOptionEnabled(options.showSettlementSection);
 
   const generateScheduleRows = (start: number, end: number) => {
     let rows = '';
@@ -98,11 +104,15 @@ export const generateDueCardHtml = (
           <div class="info-item">
             <span class="label">Vehicle No:</span>
             <span class="value highlight">${escapeHtml(vehicle.vehicle_number || 'N/A')}</span>
-          </div>
+          </div>${
+            showVehicleModel
+              ? `
           <div class="info-item">
             <span class="label">Vehicle Model:</span>
             <span class="value">${escapeHtml(vehicle.model_name || vehicle.vehicle_modal || 'N/A')}</span>
-          </div>
+          </div>`
+              : ''
+          }
           <div class="info-item">
             <span class="label">HP Amount:</span>
             <span class="value currency">₹${escapeHtml((Number(loan.hpAmount ?? loan.hp_amount) || 0).toLocaleString('en-IN'))}</span>
@@ -119,7 +129,7 @@ export const generateDueCardHtml = (
       </div>
 
       <!-- Customer & Guarantor Details -->
-      <div class="parties-section">
+      <div class="parties-section"${showGuarantor ? '' : ' style="grid-template-columns: 1fr;"'}>
         <div class="party-card">
           <div class="party-header">BORROWER DETAILS</div>
           <div class="party-content">
@@ -142,7 +152,9 @@ export const generateDueCardHtml = (
               }</span>
             </div>
           </div>
-        </div>
+        </div>${
+          showGuarantor
+            ? `
 
         <div class="party-card">
           <div class="party-header">GUARANTOR DETAILS</div>
@@ -166,8 +178,12 @@ export const generateDueCardHtml = (
               }</span>
             </div>
           </div>
-        </div>
-      </div>
+        </div>`
+            : ''
+        }
+      </div>${
+        showDatesBar
+          ? `
 
       <!-- Important Dates -->
       <div class="dates-bar">
@@ -200,7 +216,9 @@ export const generateDueCardHtml = (
             })()
           )}</span>
         </div>
-      </div>
+      </div>`
+          : ''
+      }
 
       <!-- EMI Schedule Table (1-15) -->
       <div class="schedule-section">
@@ -225,10 +243,14 @@ export const generateDueCardHtml = (
       ${
         showFooter
           ? `<!-- Page 1 Footer -->
-      <div class="page-footer">
+      <div class="page-footer"${showInstructions ? '' : ' style="justify-content: flex-end;"'}>${
+        showInstructions
+          ? `
         <div class="instructions">
           <strong>Instructions:</strong> Bring this card for every payment • Pay on or before due date to avoid penalty
-        </div>
+        </div>`
+          : ''
+      }
         <div class="auth-sign">
           For ${escapeHtml(finance?.name || 'RIMI SOFTWARE')} - Authorized Signatory
         </div>
@@ -275,7 +297,7 @@ export const generateDueCardHtml = (
       </div>
 
       ${
-        showFooter
+        showFooter && showSettlementSection
           ? `<!-- Final Settlement Section -->
       <div class="settlement-section">
         <div class="settlement-header">LOAN CLOSURE & FINAL SETTLEMENT</div>
@@ -298,15 +320,19 @@ export const generateDueCardHtml = (
           </div>
         </div>
         
-        <div class="final-signatures">
+        <div class="final-signatures"${showGuarantor ? '' : ' style="grid-template-columns: repeat(2, 1fr);"'}>
           <div class="sig-box">
             <div class="sig-line"></div>
             <div class="sig-label">Borrower Signature</div>
-          </div>
+          </div>${
+            showGuarantor
+              ? `
           <div class="sig-box">
             <div class="sig-line"></div>
             <div class="sig-label">Guarantor Signature</div>
-          </div>
+          </div>`
+              : ''
+          }
           <div class="sig-box">
             <div class="sig-line"></div>
             <div class="sig-label">Manager Signature & Seal</div>

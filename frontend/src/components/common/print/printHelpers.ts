@@ -178,6 +178,8 @@ export const computeOverdueSummary = (
   };
 };
 
+export const isOptionEnabled = (value?: boolean): boolean => value !== false;
+
 export const renderWatermarkHtml = (options?: PrintTemplateOptions): string => {
   if (!options?.watermark) return '';
   return `<div class="print-watermark">CONFIDENTIAL</div>`;

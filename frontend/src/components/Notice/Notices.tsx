@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText, Search, Printer, Download, Mail, MessageCircle, Link2,
-  Eye, X, Check, Users, FileType, Stamp, Award, Filter, RotateCcw,
-  ChevronDown, ChevronLeft, ChevronRight, Loader2, CheckSquare,
+  Eye, X, Users, FileType, Filter, RotateCcw,
+  ChevronDown, ChevronLeft, ChevronRight, Loader2, CheckSquare, SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -23,13 +23,16 @@ import {
 } from "../../types/pendingCollections";
 import {
   PrintDocTypeId,
-  PRINT_A4_STYLESHEET,
+  PrintThemeId,
+  getPrintStylesheet,
   buildCompletePrintHtml,
   inlineImageAsDataUri,
   triggerPrintDocument,
   exportWordDocument,
 } from "@/components/common/print";
 import { AppSelect, TablePagination, TableSkeletonRows } from "../common";
+import { NoticeTemplateDrawer, NOTICE_THEMES } from "./NoticeTemplateDrawer";
+import { useTemplateSettings } from "./useTemplateSettings";
 
 // ---------- 5 Unified Document Types ----------
 const docTypes: { id: PrintDocTypeId; name: string; desc: string }[] = [
@@ -38,13 +41,6 @@ const docTypes: { id: PrintDocTypeId; name: string; desc: string }[] = [
   { id: "seizing_letter", name: "Seizing Letter Print", desc: "Final notice for vehicle seizure" },
   { id: "defaulter_customer", name: "Defaulter Notice - Customer", desc: "Loan defaulter demand notice to customer" },
   { id: "defaulter_coapplicant", name: "Defaulter Notice - Co-Applicant", desc: "Loan defaulter notice to guarantor / co-applicant" },
-];
-
-const themes = [
-  { id: "classic", name: "Classic", desc: "Simple white", accent: "bg-white border-foreground/20" },
-  { id: "modern", name: "Modern", desc: "Clean blue", accent: "bg-primary/5 border-primary/40" },
-  { id: "premium", name: "Premium", desc: "Gradient + logo", accent: "border-warning/40", style: { background: "var(--gradient-primary)", color: "white" } },
-  { id: "compact", name: "Compact", desc: "Minimal print", accent: "bg-secondary/30 border-border" },
 ];
 
 const statusColors: Record<string, string> = {
@@ -96,141 +92,38 @@ const initialFilters: FilterState = {
   dealType: "all",
 };
 
-// ---------- Mini Template Card Preview ----------
-function TemplateThumb({ theme, docName }: { theme: typeof themes[0]; docName: string }) {
-  const isPremium = theme.id === "premium";
-  return (
-    <div
-      className={`relative h-32 rounded-lg border-2 ${theme.accent} overflow-hidden p-2.5 flex flex-col gap-1`}
-      style={theme.style}
-    >
-      <div className="flex items-center gap-1.5">
-        <div className={`h-4 w-4 rounded ${isPremium ? "bg-white/30" : "bg-primary"}`} />
-        <div className={`h-1.5 flex-1 rounded ${isPremium ? "bg-white/40" : "bg-foreground/30"}`} />
-      </div>
-      <div className={`text-[8px] font-bold tracking-wider ${isPremium ? "text-white" : "text-foreground"} text-center mt-1`}>
-        {docName.toUpperCase()}
-      </div>
-      <div className="space-y-0.5 mt-1">
-        <div className={`h-1 rounded w-3/4 ${isPremium ? "bg-white/30" : "bg-foreground/15"}`} />
-        <div className={`h-1 rounded w-2/3 ${isPremium ? "bg-white/30" : "bg-foreground/15"}`} />
-        <div className={`h-1 rounded w-1/2 ${isPremium ? "bg-white/30" : "bg-foreground/15"}`} />
-      </div>
-      <div className={`mt-auto h-3 rounded ${isPremium ? "bg-white/40" : theme.id === "modern" ? "bg-primary/30" : "bg-foreground/20"}`} />
-    </div>
-  );
-}
-
-// ---------- Live Preview (Modern / Premium / Compact visual design unchanged) ----------
-function DocumentPreview({ docType, theme, customer, finance, watermark, footer }: any) {
-  const isPremium = theme.id === "premium";
-  const isModern = theme.id === "modern";
-  const isCompact = theme.id === "compact";
-
-  const companyName = finance?.name || "FINANCE ERP COMPANY";
-  const companyPhone = Array.isArray(finance?.phone_numbers) && finance.phone_numbers.length > 0
-    ? finance.phone_numbers[0]
-    : finance?.phone || "+91 98765 43210";
-  const companySub = [finance?.address || "Main Branch", companyPhone].filter(Boolean).join(" | ");
-  const logoUrl = finance?.print_logo_url || finance?.logo_url || null;
-
-  return (
-    <div className="relative bg-white text-black rounded-xl border border-border overflow-hidden shadow-lg">
-      {watermark && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
-          <span className="text-6xl font-black text-black/5 -rotate-45 select-none">CONFIDENTIAL</span>
-        </div>
-      )}
-
-      {/* Header */}
-      <div
-        className={`px-6 py-4 ${isPremium ? "text-white" : isModern ? "bg-primary/10" : "bg-white border-b-2 border-black"}`}
-        style={isPremium ? { background: "var(--gradient-primary)" } : {}}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`h-10 w-10 rounded-lg flex items-center justify-center font-bold overflow-hidden ${isPremium ? "bg-white/20" : "bg-primary text-white"}`}>
-              {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="h-full w-full object-contain bg-white p-0.5" />
-              ) : (
-                "FE"
-              )}
-            </div>
-            <div>
-              <h2 className={`${isCompact ? "text-base" : "text-xl"} font-bold`}>{companyName}</h2>
-              <p className="text-xs opacity-80">{companySub}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-6 relative z-10">
-        <div className="text-center mb-5">
-          <h3 className={`${isCompact ? "text-sm" : "text-lg"} font-bold uppercase ${isModern ? "text-primary" : ""}`}>
-            {docType.name}
-          </h3>
-          <p className="text-xs text-gray-500 mt-1">Date: {new Date().toLocaleDateString("en-IN")}</p>
-        </div>
-
-        <div className={`grid grid-cols-2 gap-3 mb-5 ${isCompact ? "text-xs" : "text-sm"}`}>
-          <div><span className="text-gray-500">Customer:</span> <span className="font-semibold ml-1">{customer.name}</span></div>
-          <div><span className="text-gray-500">Loan No:</span> <span className="font-semibold ml-1">{customer.hpl}</span></div>
-          <div><span className="text-gray-500">Phone:</span> <span className="font-semibold ml-1">{customer.phone}</span></div>
-          <div><span className="text-gray-500">Vehicle:</span> <span className="font-semibold ml-1">{customer.vehicle}</span></div>
-          <div className="col-span-2"><span className="text-gray-500">Address:</span> <span className="font-semibold ml-1">{customer.address || [customer.street, customer.village, customer.city].filter(Boolean).join(", ") || "N/A"}</span></div>
-        </div>
-
-        <div className={`rounded-lg p-4 mb-4 ${isPremium ? "bg-blue-50" : isModern ? "bg-primary/5" : "border border-gray-300"}`}>
-          <h4 className="font-semibold mb-2 text-sm">Loan Summary</h4>
-          <div className="grid grid-cols-3 gap-3 text-xs">
-            <div><span className="text-gray-500">Principal:</span> <div className="font-bold">₹{Number(customer.principal || 0).toLocaleString("en-IN")}</div></div>
-            <div><span className="text-gray-500">EMI:</span> <div className="font-bold">₹{Number(customer.emi || 0).toLocaleString("en-IN")}</div></div>
-            <div><span className="text-gray-500">Rate:</span> <div className="font-bold">{customer.rate ?? 0}%</div></div>
-            <div><span className="text-gray-500">Paid:</span> <div className="font-bold text-green-600">₹{Number(customer.paid || 0).toLocaleString("en-IN")}</div></div>
-            <div><span className="text-gray-500">Due:</span> <div className="font-bold text-red-600">₹{Number(customer.amount || 0).toLocaleString("en-IN")}</div></div>
-            <div><span className="text-gray-500">Status:</span> <div className="font-bold">{customer.status}</div></div>
-          </div>
-        </div>
-
-        {!isCompact && (
-          <p className="text-xs text-gray-600 leading-relaxed mb-6">
-            This is to inform you that an amount of <strong>₹{Number(customer.amount || 0).toLocaleString("en-IN")}</strong> is overdue against the above loan account. Kindly remit the dues immediately to avoid further action.
-          </p>
-        )}
-
-        <div className="flex justify-between mt-8 pt-4">
-          <div className="text-center">
-            <div className="border-t border-gray-400 w-32 mb-1" />
-            <p className="text-[10px] text-gray-500">Customer Signature</p>
-          </div>
-          <div className="text-center">
-            <div className="border-t border-gray-400 w-32 mb-1" />
-            <p className="text-[10px] text-gray-500">Authorised Signatory</p>
-          </div>
-        </div>
-
-        {footer && (
-          <div className={`mt-5 pt-3 border-t text-center text-[10px] ${isPremium ? "text-gray-600" : "text-gray-500"}`}>
-            <Stamp className="inline h-3 w-3 mr-1" />
-            {companyName} • Authorised Seal & Signature
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ---------- Main ----------
 export default function Notices() {
   const { toast } = useToast();
   const { currentFinance } = useAuth();
 
-  const [docType, setDocType] = useState(docTypes[0]);
-  const [theme, setTheme] = useState(themes[0]); // Default theme = Classic (themes[0])
+  const {
+    settings: templateSettings,
+    selectedDocTypeId,
+    setSelectedDocTypeId,
+    activeConfig,
+    activePrintOptions,
+    updateDocSettings,
+    resetDocSettings,
+  } = useTemplateSettings(currentFinance?.id);
+
+  const docType = docTypes.find((d) => d.id === selectedDocTypeId) || docTypes[0];
+  const theme = NOTICE_THEMES.find((t) => t.id === activeConfig.theme) || NOTICE_THEMES[0];
+
+  const [templateDrawerOpen, setTemplateDrawerOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [watermark, setWatermark] = useState(false);
-  const [footer, setFooter] = useState(true);
+
+  const topTemplateBtnRef = useRef<HTMLButtonElement | null>(null);
+  const bottomTemplateBtnRef = useRef<HTMLButtonElement | null>(null);
+  const lastTemplateTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const openTemplateDrawer = (triggerEl: HTMLButtonElement | null) => {
+    lastTemplateTriggerRef.current = triggerEl;
+    setPreviewOpen(false);
+    setShareOpen(false);
+    setTemplateDrawerOpen(true);
+  };
 
   // Filter & Pagination state (matching PendingCollections.tsx)
   const [filters, setFilters] = useState<FilterState>(initialFilters);
@@ -266,6 +159,7 @@ export default function Notices() {
   const [previewBatchItems, setPreviewBatchItems] = useState<PrintBatchItem[]>([]);
   const [previewFinance, setPreviewFinance] = useState<PrintBatchFinance | null>(null);
   const [previewPagesHtml, setPreviewPagesHtml] = useState<string[]>([]);
+  const [previewAppliedTheme, setPreviewAppliedTheme] = useState<PrintThemeId>(activeConfig.theme);
   const [previewPageIndex, setPreviewPageIndex] = useState(0);
 
   // Debounce search input
@@ -533,7 +427,7 @@ export default function Notices() {
         batchRes.items,
         resolvedFinance,
         docType.id,
-        { watermark, footer },
+        activePrintOptions,
         docType.name
       );
 
@@ -543,22 +437,26 @@ export default function Notices() {
         built,
       };
     },
-    [currentFinance, docType, watermark, footer]
+    [currentFinance, docType, activePrintOptions]
   );
 
-  // Re-build preview pages when docType, watermark, or footer changes while preview is open
+  // Re-build preview pages (debounced ~200ms) when docType or template settings change while preview is open
   useEffect(() => {
     if (!previewOpen || previewBatchItems.length === 0 || !previewFinance) return;
-    const built = buildCompletePrintHtml(
-      previewBatchItems,
-      previewFinance,
-      docType.id,
-      { watermark, footer },
-      docType.name
-    );
-    setPreviewPagesHtml(built.pagesHtml);
-    setPreviewPageIndex((prev) => Math.min(prev, Math.max(0, built.pagesHtml.length - 1)));
-  }, [previewOpen, previewBatchItems, previewFinance, docType, watermark, footer]);
+    const timer = setTimeout(() => {
+      const built = buildCompletePrintHtml(
+        previewBatchItems,
+        previewFinance,
+        docType.id,
+        activePrintOptions,
+        docType.name
+      );
+      setPreviewPagesHtml(built.pagesHtml);
+      setPreviewAppliedTheme(activeConfig.theme);
+      setPreviewPageIndex((prev) => Math.min(prev, Math.max(0, built.pagesHtml.length - 1)));
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [previewOpen, previewBatchItems, previewFinance, docType, activePrintOptions, activeConfig.theme]);
 
   const handleOpenPreview = async () => {
     if (selectedIds.length === 0) {
@@ -576,7 +474,10 @@ export default function Notices() {
       setPreviewBatchItems(items);
       setPreviewFinance(finance);
       setPreviewPagesHtml(built.pagesHtml);
+      setPreviewAppliedTheme(activeConfig.theme);
       setPreviewPageIndex(0);
+      setTemplateDrawerOpen(false);
+      setShareOpen(false);
       setPreviewOpen(true);
     } catch (err: any) {
       console.error("Preview batch fetch error:", err);
@@ -636,7 +537,7 @@ export default function Notices() {
       const filename = `${docType.id}_${selectedIds.length}_customers_${new Date()
         .toISOString()
         .slice(0, 10)}.doc`;
-      exportWordDocument(filename, built.html);
+      exportWordDocument(filename, built.html, activeConfig.theme);
       toast({
         title: "Exported as Word (.doc)",
         description: `${selectedIds.length} customer(s) • ${built.pageCount} page(s)`,
@@ -679,59 +580,12 @@ export default function Notices() {
     setShareOpen(false);
   };
 
-  // Map current preview item for Modern / Premium / Compact DocumentPreview
-  const currentModernPreviewCustomer = (() => {
-    const item = previewBatchItems[previewPageIndex] || previewBatchItems[0];
-    if (item) {
-      const c = item.customer || {};
-      const l = item.loan || {};
-      const v = item.vehicle || {};
-      const pList = Array.isArray(item.payments) ? item.payments : [];
-      const paidSum = pList.reduce((s: number, p: any) => s + (Number(p?.amount) || 0), 0);
-      const totalDue = (Number(l.dueMonth ?? l.due_month) || 0) * (Number(l.dueAmount ?? l.due_amount) || 0);
-      const balance = Math.max(0, totalDue - paidSum);
-      return {
-        name: c.cname || "N/A",
-        hpl: c.hplno ? `HPL ${c.hplno}` : "N/A",
-        phone: Array.isArray(c.ccontacts) && c.ccontacts[0]?.number ? c.ccontacts[0].number : "N/A",
-        vehicle: v.vehicle_number || "N/A",
-        address: c.full_address || "N/A",
-        principal: Number(l.hpAmount ?? l.hp_amount) || 0,
-        emi: Number(l.dueAmount ?? l.due_amount) || 0,
-        rate: Number(l.interestRate ?? l.interest_rate) || 0,
-        paid: paidSum,
-        amount: balance,
-        status: c.loanStatus ? String(c.loanStatus).toUpperCase() : "ACTIVE",
-      };
-    }
-    const fallbackRec =
-      (selectedIds.length > 0 ? selectedRecordsMap[selectedIds[0]] : null) || records[0];
-    return {
-      name: fallbackRec?.name || "N/A",
-      hpl: fallbackRec?.loanNo || "N/A",
-      phone: fallbackRec?.phone || "N/A",
-      vehicle: fallbackRec?.vehicle || "N/A",
-      street: fallbackRec?.street || "",
-      village: fallbackRec?.village || "",
-      city: fallbackRec?.city || "",
-      principal: fallbackRec?.hpAmount || 0,
-      emi: fallbackRec?.installmentAmount || 0,
-      rate: fallbackRec?.interestRate || 0,
-      paid: fallbackRec?.paid || 0,
-      amount: fallbackRec?.balance || 0,
-      status: fallbackRec?.statusLabel || "Active",
-    };
-  })();
+  const totalPreviewPages = Math.max(1, previewPagesHtml.length);
 
-  const totalPreviewPages =
-    theme.id === "classic"
-      ? Math.max(1, previewPagesHtml.length)
-      : Math.max(1, previewBatchItems.length);
-
-  const singlePageIframeDoc =
-    theme.id === "classic" && previewPagesHtml[previewPageIndex]
-      ? `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${PRINT_A4_STYLESHEET} body { padding: 8mm; background: #fff; }</style></head><body>${previewPagesHtml[previewPageIndex]}</body></html>`
-      : "";
+  const previewStylesheet = getPrintStylesheet(previewAppliedTheme);
+  const singlePageIframeDoc = previewPagesHtml[previewPageIndex]
+    ? `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${previewStylesheet} body { padding: 8mm; background: #fff; }</style></head><body>${previewPagesHtml[previewPageIndex]}</body></html>`
+    : "";
 
   const startIndex = totalRecords === 0 ? 0 : (page - 1) * itemsPerPage + 1;
   const endIndex = Math.min(page * itemsPerPage, totalRecords);
@@ -744,15 +598,30 @@ export default function Notices() {
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Notices & Print</h1>
           <p className="text-muted-foreground mt-1 text-sm">Premium document generator & sharing system</p>
         </div>
-        <Button
-          variant="outline"
-          className="gap-2"
-          onClick={handleOpenPreview}
-          disabled={batchLoading || selectedIds.length === 0}
-        >
-          {batchLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
-          Live Preview
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            ref={topTemplateBtnRef}
+            type="button"
+            variant="outline"
+            className="gap-2"
+            onClick={() => openTemplateDrawer(topTemplateBtnRef.current)}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            <span>Template</span>
+            <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-primary/10 text-primary">
+              {theme.name}
+            </span>
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={handleOpenPreview}
+            disabled={batchLoading || selectedIds.length === 0}
+          >
+            {batchLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+            Live Preview
+          </Button>
+        </div>
       </motion.div>
 
       {/* SECTION 1 — TEMPLATE SELECTION */}
@@ -762,16 +631,17 @@ export default function Notices() {
             <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" /> Document Template
             </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Choose document type and visual theme</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Choose document type to generate</p>
           </div>
         </div>
 
         {/* 5 Unified Doc Type Pills */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
           {docTypes.map((d) => (
             <button
               key={d.id}
-              onClick={() => setDocType(d)}
+              type="button"
+              onClick={() => setSelectedDocTypeId(d.id)}
               className={`text-left rounded-lg border-2 p-3 transition-all ${
                 docType.id === d.id
                   ? "border-primary bg-primary/5 shadow-sm"
@@ -782,44 +652,6 @@ export default function Notices() {
               <p className="text-[11px] text-muted-foreground mt-0.5">{d.desc}</p>
             </button>
           ))}
-        </div>
-
-        {/* Theme variants */}
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Template Variants</p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {themes.map((t) => (
-            <motion.button
-              key={t.id}
-              whileHover={{ y: -3 }}
-              onClick={() => setTheme(t)}
-              className={`rounded-xl border-2 transition-all overflow-hidden text-left ${
-                theme.id === t.id
-                  ? "border-primary ring-2 ring-primary/20 shadow-md"
-                  : "border-border hover:border-primary/40"
-              }`}
-            >
-              <TemplateThumb theme={t} docName={docType.name} />
-              <div className="p-2.5 bg-card">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-foreground">{t.name}</p>
-                  {theme.id === t.id && <Check className="h-4 w-4 text-primary" />}
-                </div>
-                <p className="text-[11px] text-muted-foreground">{t.desc}</p>
-              </div>
-            </motion.button>
-          ))}
-        </div>
-
-        {/* Watermark / Footer toggles */}
-        <div className="flex flex-wrap gap-4 mt-5 pt-4 border-t border-border">
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <Checkbox checked={watermark} onCheckedChange={(v) => setWatermark(!!v)} />
-            <Award className="h-4 w-4 text-warning" /> Confidential Watermark
-          </label>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <Checkbox checked={footer} onCheckedChange={(v) => setFooter(!!v)} />
-            <Stamp className="h-4 w-4 text-primary" /> Company Seal & Footer
-          </label>
         </div>
       </motion.section>
 
@@ -1319,6 +1151,17 @@ export default function Notices() {
           </div>
           <div className="flex gap-2">
             <Button
+              ref={bottomTemplateBtnRef}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => openTemplateDrawer(bottomTemplateBtnRef.current)}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Template
+            </Button>
+            <Button
               variant="outline"
               size="sm"
               className="gap-1.5"
@@ -1342,7 +1185,11 @@ export default function Notices() {
               className="gap-1.5"
               style={{ background: "var(--gradient-primary)" }}
               disabled={batchLoading || selectedIds.length === 0}
-              onClick={() => setShareOpen(true)}
+              onClick={() => {
+                setTemplateDrawerOpen(false);
+                setPreviewOpen(false);
+                setShareOpen(true);
+              }}
             >
               <Download className="h-4 w-4" /> Generate & Share
             </Button>
@@ -1351,7 +1198,16 @@ export default function Notices() {
       </motion.div>
 
       {/* Live Preview Dialog */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <Dialog
+        open={previewOpen}
+        onOpenChange={(nextOpen) => {
+          if (nextOpen) {
+            setTemplateDrawerOpen(false);
+            setShareOpen(false);
+          }
+          setPreviewOpen(nextOpen);
+        }}
+      >
         <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex flex-wrap items-center justify-between gap-2 pr-6">
@@ -1384,24 +1240,13 @@ export default function Notices() {
             </div>
           </DialogHeader>
 
-          {theme.id === "classic" ? (
-            <div className="border border-border rounded-xl overflow-hidden bg-white shadow-inner">
-              <iframe
-                title={`Preview Page ${previewPageIndex + 1}`}
-                srcDoc={singlePageIframeDoc}
-                className="w-full h-[65vh] border-0 bg-white"
-              />
-            </div>
-          ) : (
-            <DocumentPreview
-              docType={docType}
-              theme={theme}
-              customer={currentModernPreviewCustomer}
-              finance={previewFinance || currentFinance}
-              watermark={watermark}
-              footer={footer}
+          <div className="border border-border rounded-xl overflow-hidden bg-white shadow-inner">
+            <iframe
+              title="Live Document Preview"
+              srcDoc={singlePageIframeDoc}
+              className="w-full h-[65vh] border-0 bg-white"
             />
-          )}
+          </div>
 
           <div className="flex justify-end gap-2 mt-3">
             <Button
@@ -1433,7 +1278,16 @@ export default function Notices() {
       </Dialog>
 
       {/* Share dialog */}
-      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+      <Dialog
+        open={shareOpen}
+        onOpenChange={(nextOpen) => {
+          if (nextOpen) {
+            setTemplateDrawerOpen(false);
+            setPreviewOpen(false);
+          }
+          setShareOpen(nextOpen);
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Share Document</DialogTitle>
@@ -1464,6 +1318,19 @@ export default function Notices() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Right-Side Template Customization Drawer */}
+      <NoticeTemplateDrawer
+        open={templateDrawerOpen}
+        onClose={() => setTemplateDrawerOpen(false)}
+        docTypes={docTypes}
+        activeDocTypeId={selectedDocTypeId}
+        onSelectDocType={setSelectedDocTypeId}
+        settings={templateSettings}
+        onUpdateSettings={updateDocSettings}
+        onResetDocSettings={resetDocSettings}
+        returnFocusRef={lastTemplateTriggerRef}
+      />
     </div>
   );
 }

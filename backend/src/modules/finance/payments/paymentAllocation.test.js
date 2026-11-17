@@ -196,3 +196,4 @@ test('fetchCustomerPaymentsWithSubDues maps principal_amount and interest_amount
   assert.equal(list[0].sub_dues[0].principal_amount, 4000);
   assert.equal(list[0].sub_dues[0].interest_amount, 0);
 });
+

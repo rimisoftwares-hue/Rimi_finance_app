@@ -1,6 +1,7 @@
 import {
   computeOverdueSummary,
   escapeHtml,
+  isOptionEnabled,
   renderLogoTag,
   renderWatermarkHtml,
 } from '../printHelpers';
@@ -28,7 +29,12 @@ export const generateDefaulterCustomerHtml = (
   const payments: PrintPaymentRecord[] = Array.isArray(data?.payments) ? data.payments : [];
   const ccontacts: PrintContactRecord[] = Array.isArray(customer?.ccontacts) ? customer.ccontacts : [];
   const gcontacts: PrintContactRecord[] = Array.isArray(guardian?.gcontacts) ? guardian.gcontacts : [];
-  const showFooter = options.footer !== false;
+  const showFooter = isOptionEnabled(options.footer);
+  const showRefNo = isOptionEnabled(options.showRefNo);
+  const showLoanSummaryBox = isOptionEnabled(options.showLoanSummaryBox);
+  const showPaidInstallments = isOptionEnabled(options.showPaidInstallments);
+  const showCopyToGuarantor = isOptionEnabled(options.showCopyToGuarantor);
+  const showUrgentStamp = isOptionEnabled(options.showUrgentStamp);
 
   const summary = computeOverdueSummary(loan, payments);
   const totalDemand = summary.overdueAmount + summary.penaltyTotal;
@@ -69,10 +75,14 @@ export const generateDefaulterCustomerHtml = (
       </div>
 
       <!-- Reference & Date -->
-      <div class="ref-section">
+      <div class="ref-section"${showRefNo ? '' : ' style="justify-content: flex-end;"'}>${
+        showRefNo
+          ? `
         <div class="ref-left">
           <strong>Ref No:</strong> DN/CUST/${escapeHtml(customer.hplno || 'N/A')}/${escapeHtml(new Date().getFullYear())}
-        </div>
+        </div>`
+          : ''
+      }
         <div class="ref-right">
           <strong>Date:</strong> ${escapeHtml(currentDate)}
         </div>
@@ -96,7 +106,9 @@ export const generateDefaulterCustomerHtml = (
           <strong>${escapeHtml(customer.hplno || 'N/A')}</strong> — VEHICLE NO.
           <strong>${escapeHtml(vehicle.vehicle_number || 'N/A')}</strong>
         </div>
-      </div>
+      </div>${
+        showLoanSummaryBox
+          ? `
 
       <!-- Account & Default Particulars -->
       <div class="loan-summary-box">
@@ -117,11 +129,15 @@ export const generateDefaulterCustomerHtml = (
           <div class="summary-item">
             <span class="sum-label">Monthly EMI:</span>
             <span class="sum-value">₹${escapeHtml(summary.emiAmount.toLocaleString('en-IN'))}</span>
-          </div>
+          </div>${
+            showPaidInstallments
+              ? `
           <div class="summary-item">
             <span class="sum-label">Paid Installments:</span>
             <span class="sum-value">${escapeHtml(summary.paidEmis)} / ${escapeHtml(summary.dueMonth)} Months (₹${escapeHtml(summary.totalPaid.toLocaleString('en-IN'))})</span>
-          </div>
+          </div>`
+              : ''
+          }
           <div class="summary-item">
             <span class="sum-label">Overdue EMIs:</span>
             <span class="sum-value highlight-red">${escapeHtml(summary.overdueEmis)} Installment(s)</span>
@@ -135,7 +151,9 @@ export const generateDefaulterCustomerHtml = (
             <span class="sum-value highlight-red">₹${escapeHtml(summary.penaltyTotal.toLocaleString('en-IN'))}</span>
           </div>
         </div>
-      </div>
+      </div>`
+          : ''
+      }
 
       <!-- Legal Notice Body -->
       <div class="letter-body">
@@ -159,7 +177,9 @@ export const generateDefaulterCustomerHtml = (
         <p class="closing-note">
           <em>${escapeHtml(DEFAULTER_CUSTOMER_LEGAL_WORDING.ignoreIfPaidNote)}</em>
         </p>
-      </div>
+      </div>${
+        showCopyToGuarantor
+          ? `
 
       <!-- Copy To Guarantor -->
       <div class="copy-section">
@@ -175,12 +195,16 @@ export const generateDefaulterCustomerHtml = (
               : 'No Co-Applicant / Guarantor on record'
           }
         </div>
-      </div>
+      </div>`
+          : ''
+      }
 
       ${
         showFooter
           ? `<!-- Signature Section -->
-      <div class="letter-footer">
+      <div class="letter-footer"${showUrgentStamp ? '' : ' style="justify-content: flex-end;"'}>${
+        showUrgentStamp
+          ? `
         <div class="footer-left">
           <div class="urgent-stamp">
             <div class="stamp-box">
@@ -189,7 +213,9 @@ export const generateDefaulterCustomerHtml = (
               IMMEDIATE ACTION
             </div>
           </div>
-        </div>
+        </div>`
+          : ''
+      }
         <div class="footer-right">
           <div class="company-signature">
             <p><strong>Yours faithfully,</strong></p>

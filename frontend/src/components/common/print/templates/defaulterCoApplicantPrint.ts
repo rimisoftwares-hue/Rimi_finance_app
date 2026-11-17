@@ -1,6 +1,7 @@
 import {
   computeOverdueSummary,
   escapeHtml,
+  isOptionEnabled,
   renderLogoTag,
   renderWatermarkHtml,
 } from '../printHelpers';
@@ -28,7 +29,12 @@ export const generateDefaulterCoApplicantHtml = (
   const payments: PrintPaymentRecord[] = Array.isArray(data?.payments) ? data.payments : [];
   const ccontacts: PrintContactRecord[] = Array.isArray(customer?.ccontacts) ? customer.ccontacts : [];
   const gcontacts: PrintContactRecord[] = Array.isArray(guardian?.gcontacts) ? guardian.gcontacts : [];
-  const showFooter = options.footer !== false;
+  const showFooter = isOptionEnabled(options.footer);
+  const showRefNo = isOptionEnabled(options.showRefNo);
+  const showLoanSummaryBox = isOptionEnabled(options.showLoanSummaryBox);
+  const showBorrowerPhone = isOptionEnabled(options.showBorrowerPhone);
+  const showCopyToBorrower = isOptionEnabled(options.showCopyToBorrower);
+  const showUrgentStamp = isOptionEnabled(options.showUrgentStamp);
 
   const currentDate = new Date().toLocaleDateString('en-IN', {
     day: '2-digit',
@@ -103,10 +109,14 @@ export const generateDefaulterCoApplicantHtml = (
       </div>
 
       <!-- Reference & Date -->
-      <div class="ref-section">
+      <div class="ref-section"${showRefNo ? '' : ' style="justify-content: flex-end;"'}>${
+        showRefNo
+          ? `
         <div class="ref-left">
           <strong>Ref No:</strong> DN/GUAR/${escapeHtml(customer.hplno || 'N/A')}/${escapeHtml(new Date().getFullYear())}
-        </div>
+        </div>`
+          : ''
+      }
         <div class="ref-right">
           <strong>Date:</strong> ${escapeHtml(currentDate)}
         </div>
@@ -131,7 +141,9 @@ export const generateDefaulterCoApplicantHtml = (
           <strong>${escapeHtml(customer.hplno || 'N/A')}</strong> — VEHICLE NO.
           <strong>${escapeHtml(vehicle.vehicle_number || 'N/A')}</strong>
         </div>
-      </div>
+      </div>${
+        showLoanSummaryBox
+          ? `
 
       <!-- Principal Borrower & Default Summary Box -->
       <div class="loan-summary-box">
@@ -140,11 +152,15 @@ export const generateDefaulterCoApplicantHtml = (
           <div class="summary-item">
             <span class="sum-label">Principal Borrower:</span>
             <span class="sum-value">${escapeHtml(customer.cname || 'N/A')}</span>
-          </div>
+          </div>${
+            showBorrowerPhone
+              ? `
           <div class="summary-item">
             <span class="sum-label">Borrower Phone:</span>
             <span class="sum-value">${ccontacts.map((c) => escapeHtml(c?.number)).filter(Boolean).join(', ') || 'N/A'}</span>
-          </div>
+          </div>`
+              : ''
+          }
           <div class="summary-item">
             <span class="sum-label">HPL Account No:</span>
             <span class="sum-value">${escapeHtml(customer.hplno || 'N/A')}</span>
@@ -170,7 +186,9 @@ export const generateDefaulterCoApplicantHtml = (
             <span class="sum-value highlight-red">₹${escapeHtml(summary.penaltyTotal.toLocaleString('en-IN'))} / ₹${escapeHtml(totalDemand.toLocaleString('en-IN'))}</span>
           </div>
         </div>
-      </div>
+      </div>`
+          : ''
+      }
 
       <!-- Legal Notice Body -->
       <div class="letter-body">
@@ -194,7 +212,9 @@ export const generateDefaulterCoApplicantHtml = (
         <p class="closing-note">
           <em>${escapeHtml(DEFAULTER_COAPPLICANT_LEGAL_WORDING.ignoreIfPaidNote)}</em>
         </p>
-      </div>
+      </div>${
+        showCopyToBorrower
+          ? `
 
       <!-- Copy To Principal Borrower -->
       <div class="copy-section">
@@ -202,12 +222,16 @@ export const generateDefaulterCoApplicantHtml = (
         <div class="guarantor-info">
           <strong>${escapeHtml(customer.cname || 'N/A')}</strong>, ${escapeHtml(customer.cfname?.unit || 'Rel')}: ${escapeHtml(customer.cfname?.value || 'N/A')}, ${escapeHtml(customer.full_address || 'N/A')}
         </div>
-      </div>
+      </div>`
+          : ''
+      }
 
       ${
         showFooter
           ? `<!-- Signature Section -->
-      <div class="letter-footer">
+      <div class="letter-footer"${showUrgentStamp ? '' : ' style="justify-content: flex-end;"'}>${
+        showUrgentStamp
+          ? `
         <div class="footer-left">
           <div class="urgent-stamp">
             <div class="stamp-box">
@@ -216,7 +240,9 @@ export const generateDefaulterCoApplicantHtml = (
               JOINT LIABILITY
             </div>
           </div>
-        </div>
+        </div>`
+          : ''
+      }
         <div class="footer-right">
           <div class="company-signature">
             <p><strong>Yours faithfully,</strong></p>

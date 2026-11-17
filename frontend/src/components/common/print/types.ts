@@ -12,6 +12,33 @@ export interface PrintTemplateOptions {
   footer?: boolean;
   showLogo?: boolean; // default true
   theme?: PrintThemeId; // default 'classic'
+
+  // Optional per-template detail toggles (all default to true / show when omitted)
+  // Ledger
+  showInterestRate?: boolean;
+  showPenalty?: boolean;
+  showBroker?: boolean;
+  showGuardian?: boolean;
+  showPhotos?: boolean;
+  showWorkDetails?: boolean;
+  showVehicleChassisEngine?: boolean;
+  showTerms?: boolean;
+
+  // Due Card
+  showGuarantor?: boolean;
+  showDatesBar?: boolean;
+  showVehicleModel?: boolean;
+  showInstructions?: boolean;
+  showSettlementSection?: boolean;
+
+  // Seizing Letter & Defaulter Notices
+  showRefNo?: boolean;
+  showLoanSummaryBox?: boolean;
+  showPaidInstallments?: boolean;
+  showBorrowerPhone?: boolean;
+  showCopyToGuarantor?: boolean;
+  showCopyToBorrower?: boolean;
+  showUrgentStamp?: boolean;
 }
 
 export interface PrintDocumentTypeConfig {
