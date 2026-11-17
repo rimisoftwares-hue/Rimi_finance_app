@@ -32,6 +32,10 @@ const {
 const {
   checkExistingCustomerIdentity,
 } = require('../risk/existingCustomerCheck.service');
+const {
+  processCustomerPaymentDb,
+  fetchCustomerPaymentsWithSubDues,
+} = require('../finance/payments/paymentAllocation.service');
 require("dotenv").config();
 
 const bucketName = process.env.BUCKET_NAME;
@@ -5056,9 +5060,9 @@ router.get('/:customerId/payments', enhancedCheckFinance, async (req, res) => {
   try {
     const customerId = req.params.customerId;
 
-    // Verify customer exists with dual lookup (UUID or HPL)
+    // Verify customer exists with dual lookup (UUID or HPL) scoped to tenant
     const { rows: customerCheck } = await db.query(
-      'SELECT id, hplno FROM customers WHERE (id::text = $1 OR (hplno::text = $1 AND finance_id = $2))',
+      'SELECT id, hplno FROM customers WHERE (id::text = $1 OR hplno::text = $1) AND finance_id = $2',
       [customerId, req.financeId]
     );
 
@@ -5070,109 +5074,11 @@ router.get('/:customerId/payments', enhancedCheckFinance, async (req, res) => {
     }
 
     const actualCustomerId = customerCheck[0].id;
-
-    // Fetch payments joined with sub_due
-    const { rows: payments } = await db.query(`
-      SELECT 
-        p.id,
-        TO_CHAR(p.due_date, 'YYYY-MM-DD') AS "dueDate",
-        TO_CHAR(p.payment_date, 'YYYY-MM-DD') AS "paymentDate",
-        p.bill_number AS "billNumber",
-        p.amount,
-        p.penalty,
-        p.status,
-        p.payment_status,
-        p.collected_by,
-        p.payment_mode,
-        p.payment_mode_1,
-        p.payment_mode_1_amount,
-        p.cancelled_by,
-        p.edited_by,
-        p.edited_at,
-        p.hand_loan,
-        p.hand_loan_remark,
-        p.remarks,
-        p.created_at,
-        sd.id AS sub_due_id,
-        sd.bill_number AS sub_due_bill_number,
-        TO_CHAR(sd.payment_date, 'YYYY-MM-DD') AS sub_due_payment_date,
-        sd.paid_amount AS sub_due_paid_amount,
-        sd.payment_mode AS sub_due_payment_mode,
-        sd.payment_mode_amount AS sub_due_payment_mode_amount,
-        sd.payment_mode_1 AS sub_due_payment_mode_1,
-        sd.payment_mode_1_amount AS sub_due_payment_mode_1_amount,
-        sd.status AS sub_due_status,
-        sd.collected_by AS sub_due_collected_by,
-        sd.cancelled_by AS sub_due_cancelled_by,
-        sd.edited_by AS sub_due_edited_by,
-        sd.edited_at AS sub_due_edited_at,
-        sd.created_at AS sub_due_created_at,
-        ROW_NUMBER() OVER (
-          PARTITION BY sd.payment_id 
-          ORDER BY sd.payment_date ASC
-        ) AS sub_due_row_no
-      FROM payments p
-      LEFT JOIN sub_due sd ON sd.payment_id = p.id AND sd.customer_id = $1
-      WHERE p.customer_id = $1 
-      ORDER BY p.id`,
-      [actualCustomerId]
-    );
-
-    const paymentsMap = new Map();
-
-    for (const row of payments) {
-      let payment = paymentsMap.get(row.id);
-
-      if (!payment) {
-        payment = {
-          id: row.id,
-          dueDate: row.dueDate,
-          paymentDate: row.paymentDate,
-          billNumber: row.billNumber,
-          amount: Number(row.amount) || 0,
-          penalty: Number(row.penalty) || 0,
-          status: row.status,
-          payment_status: row.payment_status,
-          collected_by: row.collected_by,
-          payment_mode: row.payment_mode || 'cash',
-          payment_mode_1: row.payment_mode_1,
-          payment_mode_1_amount: Number(row.payment_mode_1_amount) || 0,
-          cancelled_by: row.cancelled_by,
-          edited_by: row.edited_by,
-          edited_at: row.edited_at,
-          hand_loan: Number(row.hand_loan) || 0,
-          hand_loan_remark: row.hand_loan_remark,
-          remarks: row.remarks,
-          created_at: row.created_at,
-          sub_dues: []
-        };
-        paymentsMap.set(row.id, payment);
-      }
-
-      if (row.sub_due_id) {
-        payment.sub_dues.push({
-          id: row.sub_due_id,
-          row_no: row.sub_due_row_no,
-          bill_number: row.sub_due_bill_number,
-          payment_date: row.sub_due_payment_date,
-          paid_amount: Number(row.sub_due_paid_amount) || 0,
-          payment_mode: row.sub_due_payment_mode || 'cash',
-          payment_mode_amount: Number(row.sub_due_payment_mode_amount) || 0,
-          payment_mode_1: row.sub_due_payment_mode_1,
-          payment_mode_1_amount: Number(row.sub_due_payment_mode_1_amount) || 0,
-          status: row.sub_due_status,
-          collected_by: row.sub_due_collected_by,
-          cancelled_by: row.sub_due_cancelled_by,
-          edited_by: row.sub_due_edited_by,
-          edited_at: row.sub_due_edited_at,
-          created_at: row.sub_due_created_at
-        });
-      }
-    }
+    const payments = await fetchCustomerPaymentsWithSubDues(db, req.financeId, actualCustomerId);
 
     res.json({
       success: true,
-      payments: Array.from(paymentsMap.values())
+      payments,
     });
   } catch (err) {
     console.error('Error fetching payments:', err);
@@ -5191,9 +5097,9 @@ router.post('/:customerId/payments', enhancedCheckFinance, async (req, res) => {
   try {
     await conn.query('BEGIN');
 
-    // 1. Verify customer with dual UUID / HPL lookup
+    // Verify customer with dual UUID / HPL lookup scoped to tenant
     const { rows: customerRows } = await conn.query(
-      'SELECT id, hplno FROM customers WHERE (id::text = $1 OR (hplno::text = $1 AND finance_id = $2))',
+      'SELECT id, hplno FROM customers WHERE (id::text = $1 OR hplno::text = $1) AND finance_id = $2',
       [rawCustomerId, req.financeId]
     );
 
@@ -5203,213 +5109,42 @@ router.post('/:customerId/payments', enhancedCheckFinance, async (req, res) => {
     }
 
     const customerId = customerRows[0].id;
-    const hplno = customerRows[0].hplno;
+    const collectedById =
+      req.principalType === 'user' && req.user?.id
+        ? req.user.id
+        : null;
 
-    // 2. Request data
-    const {
-      dueDate,
-      dueAmount,
-      paymentDate,
-      billNumber,
-      amount,
-      last_payment_id,
-      last_due_paid,
-      penalty,
-      collected_by,
-      payment_mode,
-      payment_mode_1,
-      payment_mode_1_amount,
-      hand_loan,
-      hand_loan_remark,
-      remarks,
-    } = req.body;
-
-    const totalReceived = Number(amount) || 0;
-    const alreadyPaid = Number(last_due_paid) || 0;
-
-    let mode1Remaining = totalReceived - Number(payment_mode_1_amount) || 0;
-    let mode2Remaining = Number(payment_mode_1_amount) || 0;
-
-    function deductFromModes(needed) {
-      const mode1Used = Math.min(needed, mode1Remaining);
-      needed -= mode1Used;
-      mode1Remaining -= mode1Used;
-
-      const mode2Used = Math.min(needed, mode2Remaining);
-      mode2Remaining -= mode2Used;
-
-      return { mode1Used, mode2Used };
-    }
-
-    // Step 1 - Old Due Settlement
-    const outstandingDebt = last_payment_id
-      ? Math.max(0, dueAmount - alreadyPaid)
-      : 0;
-
-    let remainingAfterDebt = totalReceived;
-
-    if (outstandingDebt > 0 && last_payment_id !== null) {
-      const { mode1Used, mode2Used } = deductFromModes(outstandingDebt);
-
-      const __insSubDue = pgInsertClause({
-        finance_id: req.financeId,
-        customer_id: customerId,
-        payment_id: last_payment_id,
-        bill_number: billNumber,
-        payment_date: paymentDate,
-        paid_amount: outstandingDebt,
-        payment_mode: payment_mode || 'cash',
-        payment_mode_amount: mode1Used,
-        payment_mode_1: payment_mode_1 || null,
-        payment_mode_1_amount: mode2Used,
-        status: 'active',
-        collected_by: collected_by || null,
-      });
-
-      await conn.query(
-        `INSERT INTO sub_due (${__insSubDue.columns}) VALUES (${__insSubDue.placeholders})`,
-        __insSubDue.values
-      );
-
-      remainingAfterDebt = totalReceived - outstandingDebt;
-      const oldStatus = remainingAfterDebt > 0 ? 'paid' : 'partial';
-
-      await conn.query(
-        'UPDATE payments SET status = $1 WHERE id = $2',
-        [oldStatus, last_payment_id]
-      );
-    }
-
-    // Step 2 - Current Due
-    let remaining = remainingAfterDebt;
-    let applyToCurrent = 0;
-    let currentPaymentId = null;
-
-    if (remaining > 0) {
-      applyToCurrent = Math.min(remaining, dueAmount);
-      const { mode1Used: curr1, mode2Used: curr2 } = deductFromModes(applyToCurrent);
-
-      const currentStatus =
-        applyToCurrent >= dueAmount
-          ? 'paid'
-          : applyToCurrent > 0
-            ? 'partial'
-            : 'pending';
-
-      if (currentStatus !== 'pending') {
-        const __insPay = pgInsertClause({
-          finance_id: req.financeId,
-          customer_id: customerId,
-          dueDate: dueDate,
-          paymentDate: paymentDate,
-          billNumber: billNumber,
-          amount: applyToCurrent,
-          penalty: Number(penalty) || 0,
-          status: currentStatus,
-          payment_mode: payment_mode || 'cash',
-          payment_mode_1: payment_mode_1 || null,
-          payment_mode_1_amount: curr2,
-          collected_by: collected_by || null,
-          hand_loan: Number(hand_loan) || 0,
-          hand_loan_remark: hand_loan_remark || null,
-          remarks: remarks || null,
-        });
-
-        const { rows: payResult } = await conn.query(
-          `INSERT INTO payments (${__insPay.columns}) VALUES (${__insPay.placeholders}) RETURNING id`,
-          __insPay.values
-        );
-
-        currentPaymentId = payResult[0]?.id;
-      }
-
-      remaining -= applyToCurrent;
-    }
-
-    // Step 3 - Multi-Month Advance Allocation
-    let advancePaymentIds = [];
-    if (remaining > 0) {
-      let baseDate = dueDate;
-      while (remaining > 0) {
-        const parts = baseDate.split('-');
-        let year = parseInt(parts[0], 10);
-        let month = parseInt(parts[1], 10);
-        const day = parseInt(parts[2], 10);
-        month += 1;
-        if (month > 12) { month = 1; year += 1; }
-        const nextDueDate = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-
-        const payAmount = Math.min(remaining, dueAmount);
-        const { mode1Used, mode2Used } = deductFromModes(payAmount);
-
-        const status =
-          payAmount >= dueAmount
-            ? 'paid'
-            : payAmount > 0
-              ? 'partial'
-              : 'pending';
-
-        const __insAdv = pgInsertClause({
-          finance_id: req.financeId,
-          customer_id: customerId,
-          dueDate: nextDueDate,
-          paymentDate: paymentDate,
-          billNumber: billNumber,
-          amount: payAmount,
-          penalty: 0,
-          status: status,
-          payment_mode: payment_mode || 'cash',
-          payment_mode_1: payment_mode_1 || null,
-          payment_mode_1_amount: mode2Used,
-          collected_by: collected_by || null,
-          hand_loan: 0,
-          hand_loan_remark: null,
-          remarks: `[Advance auto ₹${payAmount}]`,
-        });
-
-        const { rows: advResult } = await conn.query(
-          `INSERT INTO payments (${__insAdv.columns}) VALUES (${__insAdv.placeholders}) RETURNING id`,
-          __insAdv.values
-        );
-
-        advancePaymentIds.push(advResult[0]?.id);
-        remaining -= payAmount;
-        baseDate = nextDueDate;
-      }
-    }
-
-    // Step 4 - Activity log
-    const __insAct = pgInsertClause({
-      finance_id: req.financeId,
-      type: 'payment',
-      reference_id: hplno,
-      description: `Payment ₹${totalReceived} for ${hplno}`,
-      amount: totalReceived,
-      created_by: collected_by || 'System',
+    const data = await processCustomerPaymentDb(conn, {
+      ...req.body,
+      financeId: req.financeId,
+      customerId,
+      collected_by_id: collectedById,
     });
-    await conn.query(
-      `INSERT INTO recent_activity (${__insAct.columns}) VALUES (${__insAct.placeholders})`,
-      __insAct.values
-    );
 
     await conn.query('COMMIT');
 
     res.json({
       success: true,
       message: 'Payment processed successfully',
-      data: {
-        total_received: totalReceived,
-        old_due_cleared: outstandingDebt,
-        current_paid: applyToCurrent,
-        advance_split: advancePaymentIds.length,
-        payment_id: currentPaymentId,
-        advance_ids: advancePaymentIds,
-      },
+      data,
     });
-
   } catch (err) {
     await conn.query('ROLLBACK');
     console.error('Payment error:', err);
+    if (err && (err.code === '23514' || err.code === '22023')) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+        error: err.message,
+      });
+    }
+    if (err && err.code === 'P0002') {
+      return res.status(404).json({
+        success: false,
+        message: err.message,
+        error: err.message,
+      });
+    }
     res.status(500).json({
       success: false,
       message: 'Payment failed',
