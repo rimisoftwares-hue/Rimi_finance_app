@@ -3,6 +3,8 @@ import { Outlet, useNavigate } from "react-router-dom";
 import { Moon, Sun, Bell, ChevronDown, Check, Loader2, Building2, KeyRound } from "lucide-react";
 import { Button } from "./ui/button";
 import { Sidebar } from "./Sidebar";
+import { FloatingAIAssistant } from "./ai/FloatingAIAssistant";
+import { AIAssistantProvider } from "../contexts/AIAssistantContext";
 import { useOwnerAuth } from "../contexts/OwnerAuthContext";
 import { useAuth } from "../contexts/AuthContext";
 import { JoinWithCodeDialog } from "./invitations/JoinWithCodeDialog";
@@ -268,6 +270,11 @@ export function Layout() {
           </main>
         </div>
       </div>
+
+      {/* Global Cross-Page Floating AI Assistant (persists position & session across all routes) */}
+      <AIAssistantProvider>
+        <FloatingAIAssistant />
+      </AIAssistantProvider>
     </div>
   );
 }
