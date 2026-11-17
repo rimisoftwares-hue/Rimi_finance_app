@@ -11,6 +11,7 @@ export function usePermissionFlow(type: PermissionType) {
 
   const native = useCallback(async (): Promise<PermissionResult> => {
     if (type === 'camera') return S.requestCamera();
+    if (type === 'microphone') return S.requestMicrophone();
     if (type === 'location') return S.requestLocation();
     return S.requestNotification();
   }, [type]);

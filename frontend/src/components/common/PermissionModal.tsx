@@ -10,6 +10,7 @@ import {
 import { Button } from '../ui/button';
 import {
   Camera,
+  Mic,
   MapPin,
   Bell,
   Settings,
@@ -52,6 +53,11 @@ const PERMISSION_COPY: Record<
     title: 'Notification Access',
     blockedTitle: 'Notification Access Blocked',
     softText: 'Allow notifications to receive due reminders and assignment updates.',
+  },
+  microphone: {
+    title: 'Microphone Access',
+    blockedTitle: 'Microphone Access Blocked',
+    softText: 'Allow microphone access to talk directly with AutoFinex AI in Tamil, English, or Hindi.',
   },
 };
 
@@ -136,6 +142,12 @@ export const PermissionModal: React.FC<PermissionModalProps> = ({
         return (
           <div className={bgClasses}>
             <Bell className={iconClasses} />
+          </div>
+        );
+      case 'microphone':
+        return (
+          <div className={bgClasses}>
+            <Mic className={iconClasses} />
           </div>
         );
       default:

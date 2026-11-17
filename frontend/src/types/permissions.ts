@@ -1,4 +1,4 @@
-export type PermissionType = 'camera' | 'location' | 'notification';
+export type PermissionType = 'camera' | 'location' | 'notification' | 'microphone';
 export type PermissionStatus = 'unknown' | 'granted' | 'prompt' | 'blocked';
 
 export interface PermissionResult {

@@ -6,6 +6,8 @@
   <string>This app uses the camera to capture KYC documents and vehicle inspection photos.</string>
   <key>NSLocationWhenInUseUsageDescription</key>
   <string>This app uses your location to record field collection points and agent check-ins.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>This app uses your microphone so you can speak with the AutoFinex AI Voice Assistant.</string>
 </dict>
 </plist>
 

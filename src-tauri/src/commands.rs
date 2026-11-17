@@ -19,6 +19,7 @@ pub fn open_os_privacy_settings(permission_type: String) -> Result<(), String> {
     {
         let uri = match permission_type.as_str() {
             "camera" => "ms-settings:privacy-webcam",
+            "microphone" => "ms-settings:privacy-microphone",
             "location" => "ms-settings:privacy-location",
             "notification" => "ms-settings:notifications",
             _ => "ms-settings:privacy",
@@ -34,6 +35,7 @@ pub fn open_os_privacy_settings(permission_type: String) -> Result<(), String> {
     {
         let url = match permission_type.as_str() {
             "camera" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",
+            "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
             "location" => "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices",
             "notification" => "x-apple.systempreferences:com.apple.preference.notifications",
             _ => "x-apple.systempreferences:com.apple.preference.security",
@@ -47,6 +49,7 @@ pub fn open_os_privacy_settings(permission_type: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         let panel = match permission_type.as_str() {
+            "microphone" => "sound",
             "location" => "location",
             "notification" => "notifications",
             _ => "privacy",

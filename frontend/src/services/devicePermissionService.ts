@@ -21,7 +21,13 @@ export const DevicePermissionService = {
         return (await isPermissionGranted()) ? 'granted' : 'prompt';
       }
       if (navigator.permissions?.query) {
-        const name = (type === 'camera' ? 'camera' : 'geolocation') as PermissionName;
+        const name = (
+          type === 'camera'
+            ? 'camera'
+            : type === 'microphone'
+              ? 'microphone'
+              : 'geolocation'
+        ) as PermissionName;
         const s = await navigator.permissions.query({ name });
         return s.state === 'denied' ? 'blocked' : (s.state as PermissionStatus);
       }
@@ -39,6 +45,27 @@ export const DevicePermissionService = {
     } catch (e: any) {
       const blocked = e?.name === 'NotAllowedError' || e?.name === 'SecurityError';
       // NotFoundError / NotReadableError = no camera or camera busy, NOT a permission problem
+      return { granted: false, blocked, error: e?.message ?? String(e) };
+    }
+  },
+
+  async requestMicrophone(): Promise<PermissionResult> {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        return {
+          granted: false,
+          blocked: false,
+          error: 'Microphone is not supported in this browser or device',
+        };
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      return { granted: true };
+    } catch (e: any) {
+      const blocked =
+        e?.name === 'NotAllowedError' ||
+        e?.name === 'PermissionDeniedError' ||
+        e?.name === 'SecurityError';
       return { granted: false, blocked, error: e?.message ?? String(e) };
     }
   },
