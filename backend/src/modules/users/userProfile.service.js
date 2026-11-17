@@ -219,8 +219,27 @@ function assertNoSensitiveFields(value, path = 'root') {
 /**
  * Section 1 Query: Fetch profile & finance row (1 query)
  */
-async function fetchProfileSection(queryable, { financeId, principalId, ownerUsername, isOwnerToken, nowDate }) {
-  const buildSql = (includePasswordChangedAt) => `
+async function fetchProfileSection(queryable, { financeId, principalId, isOwnerToken, nowDate }) {
+  const buildOwnerSql = (includePasswordChangedAt) => `
+    SELECT
+      fd.id AS finance_id,
+      fd.finance_name,
+      o.id AS owner_id,
+      o.username AS owner_username,
+      o.is_active AS owner_is_active,
+      TO_CHAR((o.created_at AT TIME ZONE current_setting('TimeZone') AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD') AS owner_created_date,
+      ${
+        includePasswordChangedAt
+          ? `TO_CHAR(o.password_changed_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')`
+          : `NULL::text`
+      } AS owner_last_password_change
+    FROM finance_detail fd
+    LEFT JOIN owner o ON o.id = $2::uuid
+    WHERE fd.id = $1::uuid
+    LIMIT 1
+  `;
+
+  const buildUserSql = (includePasswordChangedAt) => `
     SELECT
       fd.id AS finance_id,
       fd.finance_name,
@@ -235,15 +254,6 @@ async function fetchProfileSection(queryable, { financeId, principalId, ownerUse
           ? `TO_CHAR(u.password_changed_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')`
           : `NULL::text`
       } AS user_last_password_change,
-      o.id AS owner_id,
-      o.username AS owner_username,
-      o.is_active AS owner_is_active,
-      TO_CHAR((o.created_at AT TIME ZONE current_setting('TimeZone') AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD') AS owner_created_date,
-      ${
-        includePasswordChangedAt
-          ? `TO_CHAR(o.password_changed_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD')`
-          : `NULL::text`
-      } AS owner_last_password_change,
       uac.role AS company_role,
       uac.is_active AS company_is_active,
       TO_CHAR((uac.assigned_at AT TIME ZONE current_setting('TimeZone') AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD') AS company_assigned_date,
@@ -266,23 +276,7 @@ async function fetchProfileSection(queryable, { financeId, principalId, ownerUse
       addr.pincode,
       (latest_als.login_time AT TIME ZONE current_setting('TimeZone')) AS last_login_timestamptz
     FROM finance_detail fd
-    LEFT JOIN users u ON (
-      CASE
-        WHEN $4::boolean = false THEN u.id = $2::uuid
-        ELSE (
-          u.id = $2::uuid
-          OR (
-            $3::text IS NOT NULL
-            AND LOWER(u.username) = LOWER($3::text)
-            AND EXISTS (
-              SELECT 1 FROM user_allowed_companies uac_match
-              WHERE uac_match.user_id = u.id AND uac_match.finance_id = fd.id
-            )
-          )
-        )
-      END
-    )
-    LEFT JOIN owner o ON ($4::boolean = true AND o.id = $2::uuid)
+    LEFT JOIN users u ON u.id = $2::uuid
     LEFT JOIN user_allowed_companies uac
       ON uac.user_id = u.id AND uac.finance_id = fd.id
     LEFT JOIN LATERAL (
@@ -294,10 +288,11 @@ async function fetchProfileSection(queryable, { financeId, principalId, ownerUse
         ud_sub.education_qualification,
         ud_sub.photo
       FROM users_details ud_sub
-      WHERE ud_sub.finance_id = fd.id
-        AND u.id IS NOT NULL
+      WHERE u.id IS NOT NULL
         AND (ud_sub.user_id = u.id OR ud_sub.id = u.id)
-      ORDER BY (ud_sub.user_id = u.id) DESC, ud_sub.created_at DESC
+      ORDER BY (ud_sub.finance_id = fd.id) DESC NULLS LAST,
+               (ud_sub.user_id = u.id) DESC,
+               ud_sub.created_at DESC
       LIMIT 1
     ) ud ON true
     LEFT JOIN LATERAL (
@@ -333,7 +328,8 @@ async function fetchProfileSection(queryable, { financeId, principalId, ownerUse
     LIMIT 1
   `;
 
-  const params = [financeId, principalId, ownerUsername || null, Boolean(isOwnerToken)];
+  const buildSql = isOwnerToken ? buildOwnerSql : buildUserSql;
+  const params = [financeId, principalId];
   let res;
   try {
     res = await queryable.query(buildSql(true), params);
@@ -354,8 +350,8 @@ async function fetchProfileSection(queryable, { financeId, principalId, ownerUse
 
   const todayIstStr = getIstDateString(nowDate);
 
-  // Case 1: Owner principal without a corresponding `users` row (Decision F)
-  if (isOwnerToken && !row.user_id) {
+  // Case 1: License / Owner principal (`owner` table only; never matches a `users` row)
+  if (isOwnerToken) {
     if (!row.owner_id) {
       const err = new Error('Owner account not found');
       err.statusCode = 404;
@@ -391,16 +387,14 @@ async function fetchProfileSection(queryable, { financeId, principalId, ownerUse
     };
   }
 
-  // Case 2: Standard `users` row (or owner with a linked `users` row)
+  // Case 2: User principal (`users` + `users_details` + `user_allowed_companies` only)
   if (!row.user_id) {
     const err = new Error('User profile not found');
     err.statusCode = 404;
     throw err;
   }
 
-  const rawRole = isOwnerToken
-    ? 'owner'
-    : String(row.company_role || 'agent').toLowerCase();
+  const rawRole = String(row.company_role || 'agent').toLowerCase();
   const joiningDate =
     row.ud_joining_date ||
     row.company_assigned_date ||
@@ -419,10 +413,7 @@ async function fetchProfileSection(queryable, { financeId, principalId, ownerUse
     ? new Date(row.last_login_timestamptz).toISOString()
     : null;
 
-  const lastPasswordChange =
-    row.user_last_password_change ||
-    row.owner_last_password_change ||
-    '-';
+  const lastPasswordChange = row.user_last_password_change || '-';
 
   return {
     resolvedUserId: String(row.user_id),
@@ -1127,13 +1118,10 @@ async function getUserProfileOverview(req, options = {}) {
     throw err;
   }
 
-  const ownerUsername = isOwnerToken ? (req.owner?.username || null) : null;
-
   // 1. Fetch profile section (1 query)
   const { resolvedUserId, profile } = await fetchProfileSection(queryable, {
     financeId,
     principalId,
-    ownerUsername,
     isOwnerToken,
     nowDate,
   });
