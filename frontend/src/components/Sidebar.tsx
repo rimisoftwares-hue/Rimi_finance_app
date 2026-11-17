@@ -205,9 +205,16 @@ export function Sidebar() {
 
   const isOwner = Boolean((owner && (!user || user.role === 'owner')) || user?.role === 'owner');
 
+  const userRecord = (user ?? null) as Record<string, unknown> | null;
+  const ownerRecord = (owner ?? null) as Record<string, unknown> | null;
+  const pickString = (rec: Record<string, unknown> | null, key: string): string => {
+    const val = rec?.[key];
+    return typeof val === 'string' ? val : '';
+  };
+
   // User display & profile computations — when user?.id exists, never fall back to owner.* fields
   const displayName = hasUserPrincipal
-    ? (user as any)?.name?.trim() ||
+    ? pickString(userRecord, 'name').trim() ||
       fetchedName ||
       user?.username?.trim() ||
       user?.email?.split('@')[0] ||
@@ -225,20 +232,20 @@ export function Sidebar() {
             rawRole.charAt(0).toUpperCase() + rawRole.slice(1);
 
   const username = hasUserPrincipal ? (user?.username || '') : (owner?.username || '');
-  const email = hasUserPrincipal ? (user?.email || '') : ((owner as any)?.email || '');
+  const email = hasUserPrincipal ? (user?.email || '') : pickString(ownerRecord, 'email');
   const phone = hasUserPrincipal
-    ? (user?.phone_no || (user as any)?.phone || '')
-    : ((owner as any)?.phone || '');
+    ? (user?.phone_no || pickString(userRecord, 'phone'))
+    : pickString(ownerRecord, 'phone');
   const financeName = currentFinance?.name || currentFinance?.finance_name || '';
 
   const directPhoto = hasUserPrincipal
-    ? (user as any)?.photo ||
-      (user as any)?.photo_url ||
-      (user as any)?.profile_photo ||
-      (user as any)?.avatar ||
+    ? pickString(userRecord, 'photo') ||
+      pickString(userRecord, 'photo_url') ||
+      pickString(userRecord, 'profile_photo') ||
+      pickString(userRecord, 'avatar') ||
       null
-    : (owner as any)?.photo ||
-      (owner as any)?.photo_url ||
+    : pickString(ownerRecord, 'photo') ||
+      pickString(ownerRecord, 'photo_url') ||
       null;
 
   const photoUrl = directPhoto || fetchedPhoto;

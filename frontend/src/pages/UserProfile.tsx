@@ -237,18 +237,23 @@ export default function UserProfile() {
         }
         setOverview(data);
         setNowMs(Date.now());
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const e = err as {
+          name?: string;
+          message?: string;
+          response?: { data?: { error?: string; message?: string } };
+        } | null;
         if (
-          err?.name === "CanceledError" ||
-          err?.name === "AbortError" ||
+          e?.name === "CanceledError" ||
+          e?.name === "AbortError" ||
           isStale()
         ) {
           return;
         }
         const msg =
-          err?.response?.data?.error ||
-          err?.response?.data?.message ||
-          err?.message ||
+          e?.response?.data?.error ||
+          e?.response?.data?.message ||
+          e?.message ||
           "Unable to load profile overview.";
         setErrorMessage(msg);
       } finally {
