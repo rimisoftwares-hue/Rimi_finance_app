@@ -21,6 +21,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   signInternalPayload,
@@ -570,4 +572,56 @@ test('Phase 1A.3: voiceAgent.client rejects unset/mock modes, sends layered head
       assert.ok(deepCall.headers['X-AutoFinex-Signature']);
     }
   );
+});
+
+test('Phase 1A.4: Proposed RLS & read-function hardening SQL artifacts enforce autofinex_voice_ro guards, Option B, and zero biometric edits', () => {
+  const backendRoot = path.resolve(__dirname, '../../../../..');
+  const proposeSqlPath = path.join(
+    backendRoot,
+    'sql/migrations/propose_voice_ro_rls_and_fn_tenant_hardening.sql'
+  );
+  const rollbackSqlPath = path.join(
+    backendRoot,
+    'sql/migrations/propose_voice_ro_rls_and_fn_tenant_hardening.rollback.sql'
+  );
+  const verifySqlPath = path.join(backendRoot, 'scripts/verify_voice_ro_rls_dev.sql');
+  const cleanupSqlPath = path.join(backendRoot, 'scripts/sql/cleanup_historical_mock_calls.sql');
+
+  for (const p of [proposeSqlPath, rollbackSqlPath, verifySqlPath, cleanupSqlPath]) {
+    assert.equal(fs.existsSync(p), true, `Missing proposed SQL artifact: ${p}`);
+    assert.equal(fs.statSync(p).size > 200, true, `SQL artifact unexpectedly small: ${p}`);
+  }
+
+  const proposeSql = fs.readFileSync(proposeSqlPath, 'utf8');
+  const rollbackSql = fs.readFileSync(rollbackSqlPath, 'utf8');
+  const verifySql = fs.readFileSync(verifySqlPath, 'utf8');
+  const cleanupSql = fs.readFileSync(cleanupSqlPath, 'utf8');
+
+  // 1. Restricted TO autofinex_voice_ro + zero FORCE ROW LEVEL SECURITY on shared ERP tables
+  assert.match(proposeSql, /TO autofinex_voice_ro/);
+  assert.equal(/FORCE\s+ROW\s+LEVEL\s+SECURITY/i.test(proposeSql), false);
+
+  // 2. All 4 read functions hardened with current_user = 'autofinex_voice_ro' + app.current_finance_id + ERRCODE 42501
+  for (const fnName of [
+    'fn_calculate_loan_ledger_summary',
+    'fn_get_voice_loan_financial_facts',
+    'fn_get_precall_memory_bundle',
+    'fn_calculate_customer_due_summary',
+  ]) {
+    assert.equal(proposeSql.includes(fnName), true, `Missing hardened function ${fnName}`);
+    assert.equal(rollbackSql.includes(fnName), true, `Missing rollback function ${fnName}`);
+    assert.equal(verifySql.includes(fnName), true, `Missing DEV test for ${fnName}`);
+  }
+  assert.match(proposeSql, /current_user\s*=\s*'autofinex_voice_ro'/);
+  assert.match(proposeSql, /voice_ro_tenant_context_mismatch/);
+  assert.match(proposeSql, /42501/);
+
+  // 3. Option B enforced: zero SECURITY DEFINER functions granted to autofinex_voice_ro
+  assert.equal(/SECURITY\s+DEFINER/i.test(proposeSql), false);
+
+  // 4. Biometrics strictly out of scope: zero references to voice_speaker_profiles or voice_call_biometrics
+  for (const sqlText of [proposeSql, rollbackSql, verifySql, cleanupSql]) {
+    assert.equal(/voice_speaker_profiles/i.test(sqlText), false);
+    assert.equal(/voice_call_biometrics/i.test(sqlText), false);
+  }
 });
