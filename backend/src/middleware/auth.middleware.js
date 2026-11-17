@@ -109,6 +109,8 @@ const enhancedCheckFinance = async (req, res, next) => {
       };
       req.isOwner = true;
       req.authMode = 'license';
+      req.principalType = 'owner';
+      req.principalId = ownerCheck.owner.id;
 
       let financeId = headerFinanceId || (decoded.current_finance_id ? String(decoded.current_finance_id).trim() : '');
 
@@ -211,6 +213,8 @@ const enhancedCheckFinance = async (req, res, next) => {
 
     req.authMode = userValidation.authMode;
     req.financeId = resolvedFinanceId;
+    req.principalType = 'user';
+    req.principalId = userValidation.userRow.id;
     req.user = {
       ...decoded.user,
       id: userValidation.userRow.id,
