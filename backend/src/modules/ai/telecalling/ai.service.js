@@ -11,9 +11,9 @@
  */
 
 const crypto = require('crypto');
-const { db } = require('../../config/database.config');
-const { scoreCustomer, todayIso } = require('../risk/risk.scoring');
-const { getCustomerFinancialRollup } = require('../finance/financialCalculation.service');
+const { db } = require('../../../config/database.config');
+const { scoreCustomer, todayIso } = require('../../risk/risk.scoring');
+const { getCustomerFinancialRollup } = require('../../finance/financialCalculation.service');
 const {
   checkVoiceSystemHealth,
   dispatchManualCallToVoiceAgent,

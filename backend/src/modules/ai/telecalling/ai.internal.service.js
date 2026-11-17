@@ -11,7 +11,7 @@
  */
 
 const crypto = require('crypto');
-const { db } = require('../../config/database.config');
+const { db } = require('../../../config/database.config');
 const { validateRecordingS3Key } = require('./voiceRecording.s3');
 const {
   toDbLifecycleStatus,

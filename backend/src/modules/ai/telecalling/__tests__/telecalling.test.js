@@ -6,8 +6,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 test('Rimi Finance /api/ai Multi-Tenant Service & Routes Suite', async (t) => {
-  const aiService = require('./ai.service');
-  const aiRoutes = require('./ai.routes');
+  const aiService = require('../ai.service');
+  const aiRoutes = require('../../ai.routes');
 
   const TENANT_A = '01960000-0000-7000-8000-000000000101';
   const TENANT_B = '01960000-0000-7000-8000-000000000202';

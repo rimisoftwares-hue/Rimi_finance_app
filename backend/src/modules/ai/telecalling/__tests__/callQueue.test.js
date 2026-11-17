@@ -206,7 +206,7 @@ function createMockQueueStore(overrides = {}) {
 }
 
 test('Phase 3 — Persistent Manual Multi-Call Queue Service & Worker (9 Core Scenarios)', async (t) => {
-  const callQueue = require('./callQueue.service');
+  const callQueue = require('../callQueue.service');
 
   await t.test('Case 1: Single customer queue submission dispatches & completes cleanly', async () => {
     const store = createMockQueueStore();

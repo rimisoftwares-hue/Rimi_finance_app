@@ -10,14 +10,14 @@ if (typeof net.setDefaultAutoSelectFamily === 'function') {
   net.setDefaultAutoSelectFamily(false);
 }
 
-const path = require('path');
-require('dotenv').config({
-  path: path.resolve(__dirname, '../.env')
-});
+const { loadBackendEnv, assertRequiredAiEnvOnBoot } = require('./config/env.loader');
+loadBackendEnv();
+assertRequiredAiEnvOnBoot();
 
 const WebSocket = require('ws');
 const { app } = require('./app');
 const { isConnected, db } = require('./config/database.config');
+const { attachAssistantWebSocketGateway } = require('./modules/ai/assistant/gateway/assistantWs.gateway');
 
 const PORT = process.env.PORT || 3004;
 
@@ -95,6 +95,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('='.repeat(60) + '\n');
   // Uncomment to enable WebSocket:
   // setupWebSocket(server);
+  attachAssistantWebSocketGateway(server);
 
   // OCR worker (AI Scan) runs in-process only when both flags are on.
   // It never runs DDL; the OCR tables come from sql/migrations/006_create_ocr_tables.sql.

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const express = require('express');
 
-const voiceRecordingS3 = require('./voiceRecording.s3');
+const voiceRecordingS3 = require('../voiceRecording.s3');
 
 function listenServer(expressApp) {
   return new Promise((resolve, reject) => {
@@ -27,7 +27,7 @@ function closeServer(server) {
 }
 
 test('Phase 1.1 (CORS): createCorsMiddleware allows configured origins + Idempotency-Key and blocks invalid/wildcard origins', async () => {
-  const { createCorsMiddleware, resolveAllowedCorsOrigins } = require('../../config/cors.config');
+  const { createCorsMiddleware, resolveAllowedCorsOrigins } = require('../../../../config/cors.config');
 
   // 1. Wildcard '*' in env must never be added to credentialed allowlist
   const prodOrigins = resolveAllowedCorsOrigins({
@@ -150,7 +150,7 @@ test('Phase 1.1 (CORS): createCorsMiddleware allows configured origins + Idempot
 });
 
 test('Phase 1.2 (Mounted Express App): src/app.js OPTIONS /api/ai/calls/manual allows Idempotency-Key and rejects untrusted Origin', async () => {
-  const { app } = require('../../app');
+  const { app } = require('../../../../app');
   const { server, baseUrl } = await listenServer(app);
   try {
     const okPreflight = await fetch(`${baseUrl}/api/ai/calls/manual`, {
@@ -272,7 +272,7 @@ test('Phase 1.3 (Private S3 KYC Presigning): presignCustomerPhoto signs same-buc
   assert.equal(recordingFullUrl, null);
 
   // 8. getTelecallingLeads requests 900s (15m) short-lived TTL when presigning customer KYC photos
-  const aiService = require('./ai.service');
+  const aiService = require('../ai.service');
   const observedLeadTtls = [];
   await aiService.getTelecallingLeads(
     '11111111-1111-4111-8111-111111111111',

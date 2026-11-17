@@ -9,8 +9,8 @@
 
 const express = require('express');
 const router = express.Router();
-const { verifyInternalSignature } = require('./voiceAgent.client');
-const internalService = require('./ai.internal.service');
+const { verifyInternalSignature } = require('./telecalling/voiceAgent.client');
+const internalService = require('./telecalling/ai.internal.service');
 
 function requireVoiceAiHmacAuth(req, res, next) {
   const timestamp = req.headers['x-autofinex-timestamp'];

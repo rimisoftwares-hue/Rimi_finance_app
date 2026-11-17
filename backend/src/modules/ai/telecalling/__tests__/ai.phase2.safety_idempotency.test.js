@@ -497,8 +497,8 @@ function createStatefulCallRunner(opts = {}) {
 }
 
 test('Phase 2.1 (A6): Shared 10-state <-> DB status mapper enforces initiating->initiated, forward-only transitions, and immutable terminals', async () => {
-  const mapper = require('./callLifecycle.mapper');
-  const internalService = require('./ai.internal.service');
+  const mapper = require('../callLifecycle.mapper');
+  const internalService = require('../ai.internal.service');
 
   assert.deepEqual(mapper.DOMAIN_CALL_STATES, [
     'idle',
@@ -586,9 +586,9 @@ test('Phase 2.1 (A6): Shared 10-state <-> DB status mapper enforces initiating->
 });
 
 test('Phase 2.2: Idempotency-Key validation, replay (Idempotency-Replay: true), and 422 payload mismatch on /calls/manual and /calls/queue', async () => {
-  const aiRoutes = require('./ai.routes');
-  const aiService = require('./ai.service');
-  const callQueue = require('./callQueue.service');
+  const aiRoutes = require('../../ai.routes');
+  const aiService = require('../ai.service');
+  const callQueue = require('../callQueue.service');
 
   // 1. Missing Idempotency-Key on POST /api/ai/calls/manual -> 400
   const missingRes = createMockExpressRes();
@@ -726,8 +726,8 @@ test('Phase 2.2: Idempotency-Key validation, replay (Idempotency-Replay: true), 
 });
 
 test('Phase 2.3 (A1 + A3): Connect error never burns attempt/cooldown; read timeout marks unknown/needs_reconcile with NO auto-retry', async () => {
-  const aiService = require('./ai.service');
-  const callQueue = require('./callQueue.service');
+  const aiService = require('../ai.service');
+  const callQueue = require('../callQueue.service');
   const runner = createStatefulCallRunner();
 
   // 1. Pre-dial connect error (`ECONNREFUSED`) -> 503/502, attempt = 0, cooldown NOT burned!
@@ -873,8 +873,8 @@ test('Phase 2.3 (A1 + A3): Connect error never burns attempt/cooldown; read time
 });
 
 test('Phase 2.4 (Telephony Mode + A5 Gates): Fail-closed VOICE_TELEPHONY_MODE, kill switch, live confirm, allowlist, owner_features, and untrusted fields', async () => {
-  const aiService = require('./ai.service');
-  const voiceClient = require('./voiceAgent.client');
+  const aiService = require('../ai.service');
+  const voiceClient = require('../voiceAgent.client');
 
   const savedEnv = {
     VOICE_TELEPHONY_MODE: process.env.VOICE_TELEPHONY_MODE,
@@ -1036,10 +1036,10 @@ test('Phase 2.4 (Telephony Mode + A5 Gates): Fail-closed VOICE_TELEPHONY_MODE, k
 });
 
 test('Phase 2.5 (A4 + Legacy 410): Mock calls tag mock-<callId>, isolate L2/L3/PTP/DNC, dry-run is strictly read-only, and /leads/:leadId/call returns 410 Gone', async () => {
-  const aiService = require('./ai.service');
-  const aiRoutes = require('./ai.routes');
-  const internalService = require('./ai.internal.service');
-  const { auditMockVoiceDataDryRun } = require('../../../scripts/cleanup_mock_voice_data_dry_run');
+  const aiService = require('../ai.service');
+  const aiRoutes = require('../../ai.routes');
+  const internalService = require('../ai.internal.service');
+  const { auditMockVoiceDataDryRun } = require('../../../../../scripts/cleanup_mock_voice_data_dry_run');
 
   // 1. Mock mode tags provider_call_id = `mock-${callId}`
   const runner = createStatefulCallRunner();

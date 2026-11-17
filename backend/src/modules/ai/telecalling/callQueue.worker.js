@@ -4,7 +4,7 @@
  * Queue worker entrypoint re-exporting `callQueue.service.js` lifecycle helpers
  * for startup recovery or standalone execution.
  */
-const { db } = require('../../config/database.config');
+const { db } = require('../../../config/database.config');
 const callQueueService = require('./callQueue.service');
 
 /**

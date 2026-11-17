@@ -37,8 +37,8 @@ test('Phase 4A.1: mock-* provider_call_id is immutable in SQL across ai.service.
   process.env.VOICE_AI_KILL_SWITCH = 'false';
 
   try {
-    const aiService = require('./ai.service');
-    const internalService = require('./ai.internal.service');
+    const aiService = require('../ai.service');
+    const internalService = require('../ai.internal.service');
 
     const executedUpdateSqls = [];
     let callRow = null;
@@ -328,7 +328,7 @@ test('Phase 4A.1: mock-* provider_call_id is immutable in SQL across ai.service.
 });
 
 test('Phase 4A.2: cleanup_mock_voice_data_dry_run.js selects p.ptp_status (not p.status) and remains strictly read-only', async () => {
-  const { auditMockVoiceDataDryRun } = require('../../../scripts/cleanup_mock_voice_data_dry_run');
+  const { auditMockVoiceDataDryRun } = require('../../../../../scripts/cleanup_mock_voice_data_dry_run');
 
   const executedQueries = [];
   const schemaStrictClient = {
@@ -363,8 +363,8 @@ test('Phase 4A.2: cleanup_mock_voice_data_dry_run.js selects p.ptp_status (not p
 });
 
 test('Phase 4A.3: database.config.js refuses non-local DB hosts when NODE_ENV=test unless ALLOW_REMOTE_DB_IN_TESTS=true', () => {
-  const backendDir = path.resolve(__dirname, '../../..');
-  const dbConfigPath = path.resolve(__dirname, '../../config/database.config.js');
+  const backendDir = path.resolve(__dirname, '../../../../..');
+  const dbConfigPath = path.resolve(__dirname, '../../../../config/database.config.js');
 
   // 1. Remote host in NODE_ENV=test without ALLOW_REMOTE_DB_IN_TESTS=true must fail closed immediately
   const blockedRun = spawnSync(

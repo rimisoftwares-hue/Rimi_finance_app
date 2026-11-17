@@ -3,10 +3,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { signInternalPayload } = require('./voiceAgent.client');
-const internalRoutes = require('./ai.internal.routes');
-const internalService = require('./ai.internal.service');
-const aiService = require('./ai.service');
+const { signInternalPayload } = require('../voiceAgent.client');
+const internalRoutes = require('../../ai.internal.routes');
+const internalService = require('../ai.internal.service');
+const aiService = require('../ai.service');
 
 const FINANCE_A = '01a14ed2-5df9-7175-839b-3cbaca84f231';
 const FINANCE_B = '11111111-2222-3333-4444-555555555555';

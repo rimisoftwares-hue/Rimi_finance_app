@@ -10,5 +10,11 @@ test_assets/
 e2e/
 test_scripts/
 .env
+.env.local
+*.env.local
 backend/.env
+backend/.env.local
 
+
+# AI assistant SQL audit log (contains finance/user ids + generated SQL). Rotate/retain per policy; never commit.
+backend/logs/

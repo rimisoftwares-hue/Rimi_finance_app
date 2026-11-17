@@ -10,8 +10,9 @@
 
 const express = require('express');
 const router = express.Router();
-const service = require('./ai.service');
-const callQueueService = require('./callQueue.service');
+const service = require('./telecalling/ai.service');
+const callQueueService = require('./telecalling/callQueue.service');
+const assistantRoutes = require('./assistant/http/assistant.routes');
 
 function sendError(res, err, fallbackMessage) {
   const status = err.statusCode || 500;
@@ -218,6 +219,9 @@ router.get('/calls/queue/active', handleGetActiveCallQueue);
 router.post('/calls/queue/:batchId/cancel', handleCancelCallQueue);
 router.get('/calls/:callId', handleGetCallStatus);
 router.get('/calls/:callId/recording-url', handleGetCallRecordingUrl);
+
+// Floating Real-Time AI Voice Assistant & Read-Only Database Intelligence (`/api/ai/assistant/*`)
+router.use('/assistant', assistantRoutes);
 
 router.handleGetVoiceHealth = handleGetVoiceHealth;
 router.handleGetDashboard = handleGetDashboard;

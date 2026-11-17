@@ -4,20 +4,20 @@ process.env.NODE_ENV = 'test';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { scoreCustomer } = require('../risk/risk.scoring');
-const aiService = require('./ai.service');
-const aiRoutes = require('./ai.routes');
+const { scoreCustomer } = require('../../../risk/risk.scoring');
+const aiService = require('../ai.service');
+const aiRoutes = require('../../ai.routes');
 const {
   checkVoiceSystemHealth,
   clearVoiceHealthCache,
   signInternalPayload,
   verifyInternalSignature,
-} = require('./voiceAgent.client');
+} = require('../voiceAgent.client');
 const {
   validateRecordingS3Key,
   buildVoiceRecordingS3Key,
   buildVoiceRecordingPutOnlyIamPolicy,
-} = require('./voiceRecording.s3');
+} = require('../voiceRecording.s3');
 
 const TENANT_ID = '20000000-0000-4000-8000-000000000001';
 const OTHER_TENANT_ID = '20000000-0000-4000-8000-000000000999';

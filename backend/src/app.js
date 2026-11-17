@@ -3,9 +3,8 @@
 // Extracted from backend/index.js. No business logic changes.
 
 const path = require('path');
-require('dotenv').config({
-  path: path.resolve(__dirname, '../.env')
-});
+const { loadBackendEnv } = require('./config/env.loader');
+loadBackendEnv();
 
 const express = require('express');
 const cookieParser = require('cookie-parser');

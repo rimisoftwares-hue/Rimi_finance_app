@@ -23,7 +23,7 @@
 
 const crypto = require('node:crypto');
 const os = require('node:os');
-const { db } = require('../../config/database.config');
+const { db } = require('../../../config/database.config');
 const aiService = require('./ai.service');
 const { validateIdempotencyKey } = require('./callLifecycle.mapper');
 
