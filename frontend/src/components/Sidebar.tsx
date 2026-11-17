@@ -185,6 +185,7 @@ export function Sidebar() {
   const [activeFlyout, setActiveFlyout] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [fetchedPhoto, setFetchedPhoto] = useState<string | null>(null);
+  const [fetchedName, setFetchedName] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isLoggingOutRef = useRef(false);
@@ -195,19 +196,27 @@ export function Sidebar() {
   const { user, userLogout, currentFinance } = useAuth();
   const location = useLocation();
 
+  const activeUserId = user?.id ? String(user.id) : '';
+  const activeFinanceId =
+    currentFinance?.id !== undefined && currentFinance?.id !== null
+      ? String(currentFinance.id)
+      : '';
+  const hasUserPrincipal = Boolean(activeUserId);
+
   const isOwner = Boolean((owner && (!user || user.role === 'owner')) || user?.role === 'owner');
 
-  // User display & profile computations
-  const displayName =
-    (user as any)?.name?.trim() ||
-    user?.username?.trim() ||
-    user?.email?.split('@')[0] ||
-    owner?.username?.trim() ||
-    'User';
+  // User display & profile computations — when user?.id exists, never fall back to owner.* fields
+  const displayName = hasUserPrincipal
+    ? (user as any)?.name?.trim() ||
+      fetchedName ||
+      user?.username?.trim() ||
+      user?.email?.split('@')[0] ||
+      'User'
+    : owner?.username?.trim() || 'User';
 
   const userInitial = displayName.charAt(0).toUpperCase() || 'U';
 
-  const rawRole = user?.role || (owner ? 'owner' : 'user');
+  const rawRole = hasUserPrincipal ? (user?.role || 'user') : (owner ? 'owner' : 'user');
   const userRole =
     rawRole === 'owner' ? 'Owner' :
       rawRole === 'admin' ? 'Admin' :
@@ -215,40 +224,63 @@ export function Sidebar() {
           rawRole === 'staff' ? 'Staff' :
             rawRole.charAt(0).toUpperCase() + rawRole.slice(1);
 
-  const username = user?.username || owner?.username || '';
-  const email = user?.email || (owner as any)?.email || '';
-  const phone = user?.phone_no || (user as any)?.phone || (owner as any)?.phone || '';
+  const username = hasUserPrincipal ? (user?.username || '') : (owner?.username || '');
+  const email = hasUserPrincipal ? (user?.email || '') : ((owner as any)?.email || '');
+  const phone = hasUserPrincipal
+    ? (user?.phone_no || (user as any)?.phone || '')
+    : ((owner as any)?.phone || '');
   const financeName = currentFinance?.name || currentFinance?.finance_name || '';
 
-  const directPhoto =
-    (user as any)?.photo ||
-    (user as any)?.photo_url ||
-    (user as any)?.profile_photo ||
-    (user as any)?.avatar ||
-    (owner as any)?.photo ||
-    (owner as any)?.photo_url ||
-    null;
+  const directPhoto = hasUserPrincipal
+    ? (user as any)?.photo ||
+      (user as any)?.photo_url ||
+      (user as any)?.profile_photo ||
+      (user as any)?.avatar ||
+      null
+    : (owner as any)?.photo ||
+      (owner as any)?.photo_url ||
+      null;
 
   const photoUrl = directPhoto || fetchedPhoto;
 
-  // Asynchronously fetch profile overview if no photo is on the user object
+  // Refetch profile overview on [user?.id, currentFinance?.id] and guard against stale responses
   useEffect(() => {
-    if (!directPhoto && user) {
-      let isSubscribed = true;
-      fetchUserProfileOverview()
-        .then((data) => {
-          if (isSubscribed && data?.profile?.photo) {
-            setFetchedPhoto(data.profile.photo);
-          }
-        })
-        .catch(() => {
-          // Silently ignore
-        });
-      return () => {
-        isSubscribed = false;
-      };
+    setFetchedPhoto(null);
+    setFetchedName(null);
+
+    if (!activeUserId) {
+      return;
     }
-  }, [directPhoto, user]);
+
+    let isSubscribed = true;
+    const controller = new AbortController();
+
+    fetchUserProfileOverview({
+      signal: controller.signal,
+      expectedUserId: activeUserId,
+      financeId: activeFinanceId || undefined,
+    })
+      .then((data) => {
+        if (
+          !isSubscribed ||
+          controller.signal.aborted ||
+          String(data?.profile?.id || '') !== activeUserId
+        ) {
+          return;
+        }
+        setFetchedPhoto(data?.profile?.photo || null);
+        const resolvedName = data?.profile?.name?.trim();
+        setFetchedName(resolvedName && resolvedName !== '-' ? resolvedName : null);
+      })
+      .catch(() => {
+        // Silently ignore cancelled or background sidebar fetch errors
+      });
+
+    return () => {
+      isSubscribed = false;
+      controller.abort();
+    };
+  }, [activeUserId, activeFinanceId]);
 
   useEffect(() => {
     setImgError(false);

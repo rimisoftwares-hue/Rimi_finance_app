@@ -10,7 +10,7 @@ import { Badge } from "../components/ui/badge";
 import { Separator } from "../components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Button } from "../components/ui/button";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { JoinWithCodeDialog } from "../components/invitations/JoinWithCodeDialog";
@@ -193,41 +193,89 @@ export default function UserProfile() {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   const navigate = useNavigate();
-  const { currentFinance } = useAuth();
+  const { user, currentFinance } = useAuth();
+  const activeUserId = user?.id ? String(user.id) : "";
+  const activeFinanceId =
+    currentFinance?.id !== undefined && currentFinance?.id !== null
+      ? String(currentFinance.id)
+      : "";
+  const requestSeqRef = useRef(0);
 
-  const loadProfile = useCallback(async (signal?: AbortSignal) => {
-    setIsLoading(true);
-    setErrorMessage(null);
-    try {
-      const data = await fetchUserProfileOverview(signal);
-      if (!signal?.aborted) {
-        setOverview(data);
-        setNowMs(Date.now());
-      }
-    } catch (err: any) {
-      if (err?.name === "CanceledError" || err?.name === "AbortError" || signal?.aborted) {
+  const loadProfile = useCallback(
+    async (signal?: AbortSignal, isCancelled?: () => boolean) => {
+      if (!activeUserId) {
         return;
       }
-      const msg =
-        err?.response?.data?.error ||
-        err?.response?.data?.message ||
-        err?.message ||
-        "Unable to load profile overview.";
-      setErrorMessage(msg);
-    } finally {
-      if (!signal?.aborted) {
-        setIsLoading(false);
+
+      const seq = ++requestSeqRef.current;
+      const isStale = () =>
+        Boolean(signal?.aborted) ||
+        Boolean(isCancelled?.()) ||
+        seq !== requestSeqRef.current;
+
+      setOverview((prev) =>
+        prev && String(prev.profile.id) === activeUserId ? prev : null
+      );
+      setIsLoading(true);
+      setErrorMessage(null);
+
+      try {
+        const data = await fetchUserProfileOverview({
+          signal,
+          expectedUserId: activeUserId,
+          financeId: activeFinanceId || undefined,
+        });
+        if (isStale()) {
+          return;
+        }
+        if (String(data.profile?.id || "") !== activeUserId) {
+          setOverview(null);
+          setErrorMessage(
+            "Profile identity mismatch: loaded profile does not match the signed-in user."
+          );
+          return;
+        }
+        setOverview(data);
+        setNowMs(Date.now());
+      } catch (err: any) {
+        if (
+          err?.name === "CanceledError" ||
+          err?.name === "AbortError" ||
+          isStale()
+        ) {
+          return;
+        }
+        const msg =
+          err?.response?.data?.error ||
+          err?.response?.data?.message ||
+          err?.message ||
+          "Unable to load profile overview.";
+        setErrorMessage(msg);
+      } finally {
+        if (!isStale()) {
+          setIsLoading(false);
+        }
       }
-    }
-  }, []);
+    },
+    [activeUserId, activeFinanceId]
+  );
 
   useEffect(() => {
+    if (!activeUserId) {
+      setOverview(null);
+      setErrorMessage(null);
+      return;
+    }
+
+    let cancelled = false;
     const controller = new AbortController();
-    loadProfile(controller.signal);
+    loadProfile(controller.signal, () => cancelled);
+
     return () => {
+      cancelled = true;
       controller.abort();
     };
-  }, [loadProfile, currentFinance?.id]);
+  }, [activeUserId, activeFinanceId, loadProfile]);
 
   // Refresh live duration once per minute if today's session is active
   useEffect(() => {
@@ -253,11 +301,22 @@ export default function UserProfile() {
     );
   };
 
-  if (isLoading && !overview) {
+  if (!activeUserId) {
     return <ProfileSkeleton />;
   }
 
-  if (errorMessage && !overview) {
+  const hasIdentityMismatch = Boolean(
+    overview && String(overview.profile.id) !== activeUserId
+  );
+
+  if (isLoading && (!overview || hasIdentityMismatch)) {
+    return <ProfileSkeleton />;
+  }
+
+  if ((errorMessage && !overview) || hasIdentityMismatch) {
+    const mismatchMsg =
+      errorMessage ||
+      "Profile identity mismatch: loaded profile does not match the signed-in user.";
     return (
       <div className="py-12">
         <Card className="max-w-lg mx-auto">
@@ -267,7 +326,7 @@ export default function UserProfile() {
             </div>
             <div className="space-y-1">
               <p className="text-base font-semibold text-foreground">Failed to load profile</p>
-              <p className="text-xs text-muted-foreground">{errorMessage}</p>
+              <p className="text-xs text-muted-foreground">{mismatchMsg}</p>
             </div>
             <Button
               size="sm"
@@ -287,6 +346,14 @@ export default function UserProfile() {
   }
 
   const { profile, performance, activityLog, assignedData } = overview;
+  const displayEmail =
+    profile.email && profile.email.trim() !== "" && profile.email.trim() !== "-"
+      ? profile.email
+      : user?.email?.trim() || "-";
+  const displayPhone =
+    profile.phone && profile.phone.trim() !== "" && profile.phone.trim() !== "-"
+      ? profile.phone
+      : user?.phone_no?.trim() || "-";
   const canInvite = profile.rawRole === "owner" || profile.rawRole === "admin";
   const avatarInitial = (profile.name && profile.name !== "-" ? profile.name : "U")
     .charAt(0)
@@ -384,8 +451,8 @@ export default function UserProfile() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <InfoRow icon={Mail} label="Email" value={profile.email} />
-                <InfoRow icon={Phone} label="Phone" value={profile.phone} />
+                <InfoRow icon={Mail} label="Email" value={displayEmail} />
+                <InfoRow icon={Phone} label="Phone" value={displayPhone} />
                 <InfoRow icon={MapPin} label="Address" value={profile.address} />
               </CardContent>
             </Card>

@@ -108,32 +108,71 @@ export interface ChangePasswordResponse {
   ownerToken?: string;
 }
 
+export interface FetchUserProfileOverviewOptions {
+  signal?: AbortSignal;
+  expectedUserId?: string;
+  financeId?: string | number | null;
+}
+
 /**
  * Fetches the logged-in user's own profile overview scoped to the active finance.
  */
 export async function fetchUserProfileOverview(
-  signal?: AbortSignal
+  signalOrOptions?: AbortSignal | FetchUserProfileOverviewOptions
 ): Promise<UserProfileOverviewData> {
+  const isAbortSignal =
+    Boolean(signalOrOptions) &&
+    typeof signalOrOptions === 'object' &&
+    'aborted' in (signalOrOptions as AbortSignal);
+
+  const signal = isAbortSignal
+    ? (signalOrOptions as AbortSignal)
+    : (signalOrOptions as FetchUserProfileOverviewOptions | undefined)?.signal;
+  const expectedUserId = !isAbortSignal
+    ? (signalOrOptions as FetchUserProfileOverviewOptions | undefined)?.expectedUserId
+    : undefined;
+  const financeId = !isAbortSignal
+    ? (signalOrOptions as FetchUserProfileOverviewOptions | undefined)?.financeId
+    : undefined;
+
+  const headers: Record<string, string> = {};
+  if (financeId !== undefined && financeId !== null && String(financeId).trim() !== '') {
+    headers['finance-id'] = String(financeId).trim();
+  }
+
   const response = await apiClient.get<UserProfileOverviewResponse>(
     '/user/profile-overview',
-    { signal }
+    {
+      signal,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    }
   );
   const body = response.data;
   if (!body?.success) {
     throw new Error('Failed to load profile overview');
   }
+
+  let resolved: UserProfileOverviewData | null = null;
   if (body.profile && body.performance && body.activityLog && body.assignedData) {
-    return {
+    resolved = {
       profile: body.profile,
       performance: body.performance,
       activityLog: body.activityLog,
       assignedData: body.assignedData,
     };
+  } else if (body.data) {
+    resolved = body.data;
   }
-  if (body.data) {
-    return body.data;
+
+  if (!resolved) {
+    throw new Error('Invalid profile overview payload');
   }
-  throw new Error('Invalid profile overview payload');
+
+  if (expectedUserId && String(resolved.profile.id) !== String(expectedUserId)) {
+    throw new Error('Profile identity mismatch: loaded profile does not match the signed-in user.');
+  }
+
+  return resolved;
 }
 
 /**
