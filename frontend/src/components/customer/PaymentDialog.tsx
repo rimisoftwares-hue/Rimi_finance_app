@@ -660,6 +660,15 @@ import {
   SelectValue,
 } from '../ui/select';
 import type { SeizingRecord } from './SeizingHistoryTable';
+import {
+  round2,
+  computeAutoPaymentSplit,
+  applyManualPrincipalChange,
+  applyManualInterestChange,
+  buildSubmitPaymentPayload,
+  type PaymentDialogLoanContext,
+  type OpenDueLedgerItem,
+} from './paymentSplitModel';
 
 interface PaymentDialogProps {
   isOpen: boolean;
@@ -673,6 +682,8 @@ interface PaymentDialogProps {
   currentUserName?: string;
   isOwner?: boolean;
   allUsers?: any[];
+  loan?: PaymentDialogLoanContext | null;
+  openDues?: OpenDueLedgerItem[];
 }
 export interface User_new {
   id: string;
@@ -703,8 +714,24 @@ const PaymentDialog = ({
   currentUserName = '',
   isOwner = false,
   allUsers = [],
+  loan = null,
+  openDues = [],
 }: PaymentDialogProps) => {
   const [formData, setFormData] = useState<PaymentFormData>(initialData);
+  const [splitError, setSplitError] = useState<string | null>(null);
+
+  const autoPreview = useMemo(
+    () =>
+      computeAutoPaymentSplit({
+        amount: Number(formData.amount) || 0,
+        loan,
+        openDues,
+        isEditing,
+      }),
+    [formData.amount, loan, openDues, isEditing]
+  );
+
+  const isMultiDue = autoPreview.isMultiDue;
 
   // Unified list of users including fallback for currently selected collector
   const usersList = useMemo(() => {
@@ -740,19 +767,38 @@ const PaymentDialog = ({
     return list;
   }, [allUsers, formData.collected_by, currentUserName]);
 
-  // Initialize form data with current user name
+  // Initialize form data with current user name & Principal/Interest split
   useEffect(() => {
     if (isOpen) {
-      const initialCollector = isEditing
-        ? (initialData.collected_by || currentUserName)
-        : (initialData.collected_by || currentUserName);
+      setSplitError(null);
+      const initialCollector = initialData.collected_by || currentUserName;
+      const initAmt = Math.max(0, round2(initialData.amount || 0));
+      const hasValidExplicitPI =
+        isEditing &&
+        initialData.principal_amount !== undefined &&
+        initialData.interest_amount !== undefined &&
+        round2((initialData.principal_amount || 0) + (initialData.interest_amount || 0)) === initAmt;
+
+      const computed = computeAutoPaymentSplit({
+        amount: initAmt,
+        loan,
+        openDues,
+        isEditing,
+      });
 
       setFormData({
         ...initialData,
-        collected_by: initialCollector
+        amount: initAmt,
+        principal_amount: hasValidExplicitPI
+          ? round2(initialData.principal_amount)
+          : computed.principal_amount,
+        interest_amount: hasValidExplicitPI
+          ? round2(initialData.interest_amount)
+          : computed.interest_amount,
+        collected_by: initialCollector,
       });
     }
-  }, [initialData, isOpen, currentUserName, isEditing]);
+  }, [initialData, isOpen, currentUserName, isEditing, loan, openDues]);
 
   // Keep collected_by updated if currentUserName loads after initial open
   useEffect(() => {
@@ -764,14 +810,104 @@ const PaymentDialog = ({
     }
   }, [isOpen, currentUserName, formData.collected_by]);
 
+  const handleAmountChange = (rawVal: string) => {
+    const nextAmt = rawVal === '' ? 0 : Math.max(0, round2(rawVal));
+    const nextSplit = computeAutoPaymentSplit({
+      amount: nextAmt,
+      loan,
+      openDues,
+      isEditing,
+    });
+    setSplitError(null);
+    setFormData(prev => ({
+      ...prev,
+      amount: nextAmt,
+      principal_amount: nextSplit.principal_amount,
+      interest_amount: nextSplit.interest_amount,
+    }));
+  };
+
+  const handlePrincipalChange = (rawVal: string) => {
+    if (isMultiDue) return;
+    const val = rawVal === '' ? 0 : Math.max(0, round2(rawVal));
+    const next = applyManualPrincipalChange(
+      Number(formData.amount) || 0,
+      val,
+      Number(formData.interest_amount) || 0
+    );
+    setSplitError(null);
+
+    if (!isEditing && autoPreview.singleDueCap > 0 && next.amount > autoPreview.singleDueCap) {
+      const autoMulti = computeAutoPaymentSplit({
+        amount: next.amount,
+        loan,
+        openDues,
+        isEditing: false,
+      });
+      setFormData(prev => ({
+        ...prev,
+        amount: next.amount,
+        principal_amount: autoMulti.principal_amount,
+        interest_amount: autoMulti.interest_amount,
+      }));
+      return;
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      amount: next.amount,
+      principal_amount: next.principal_amount,
+      interest_amount: next.interest_amount,
+    }));
+  };
+
+  const handleInterestChange = (rawVal: string) => {
+    if (isMultiDue) return;
+    const val = rawVal === '' ? 0 : Math.max(0, round2(rawVal));
+    const next = applyManualInterestChange(
+      Number(formData.amount) || 0,
+      val,
+      Number(formData.principal_amount) || 0
+    );
+    setSplitError(null);
+
+    if (!isEditing && autoPreview.singleDueCap > 0 && next.amount > autoPreview.singleDueCap) {
+      const autoMulti = computeAutoPaymentSplit({
+        amount: next.amount,
+        loan,
+        openDues,
+        isEditing: false,
+      });
+      setFormData(prev => ({
+        ...prev,
+        amount: next.amount,
+        principal_amount: autoMulti.principal_amount,
+        interest_amount: autoMulti.interest_amount,
+      }));
+      return;
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      amount: next.amount,
+      principal_amount: next.principal_amount,
+      interest_amount: next.interest_amount,
+    }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const finalData = {
+    const candidate: PaymentFormData = {
       ...formData,
-      collected_by: formData.collected_by || currentUserName
+      collected_by: formData.collected_by || currentUserName,
     };
-    onSubmit(finalData);
-    console.log('formData:', finalData.collected_by);
+    const result = buildSubmitPaymentPayload(candidate, isMultiDue);
+    if (!result.ok || !result.payload) {
+      setSplitError(result.error || 'Principal + Interest must equal Amount.');
+      return;
+    }
+    setSplitError(null);
+    onSubmit(result.payload);
   };
 
   const updateField = (field: keyof PaymentFormData, value: any) => {
@@ -846,8 +982,10 @@ const PaymentDialog = ({
               <Input
                 id="amount"
                 type="number"
+                min="0"
+                step="0.01"
                 value={formData.amount || ''}
-                onChange={e => updateField('amount', Number(e.target.value))}
+                onChange={e => handleAmountChange(e.target.value)}
                 placeholder="0"
                 className="input-field"
               />
@@ -857,12 +995,66 @@ const PaymentDialog = ({
               <Input
                 id="penalty"
                 type="number"
+                min="0"
+                step="0.01"
                 value={(formData.penalty) || ''}
                 onChange={e => updateField('penalty', Number(e.target.value))}
                 placeholder="0"
                 className="input-field"
               />
             </div>
+          </div>
+
+          {/* Principal & Interest Split (Editable for Single-Due, Auto-Locked for Multi-Due) */}
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="principal_amount">Principal (₹)</Label>
+                <Input
+                  id="principal_amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  readOnly={isMultiDue}
+                  value={
+                    (formData.amount || 0) > 0 || (formData.principal_amount || 0) > 0
+                      ? (formData.principal_amount ?? 0)
+                      : ''
+                  }
+                  onChange={e => handlePrincipalChange(e.target.value)}
+                  placeholder="0"
+                  className={`input-field ${isMultiDue ? 'bg-muted/60 cursor-not-allowed' : ''}`}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="interest_amount">Interest (₹)</Label>
+                <Input
+                  id="interest_amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  readOnly={isMultiDue}
+                  value={
+                    (formData.amount || 0) > 0 || (formData.interest_amount || 0) > 0
+                      ? (formData.interest_amount ?? 0)
+                      : ''
+                  }
+                  onChange={e => handleInterestChange(e.target.value)}
+                  placeholder="0"
+                  className={`input-field ${isMultiDue ? 'bg-muted/60 cursor-not-allowed' : ''}`}
+                />
+              </div>
+            </div>
+
+            {isMultiDue && (
+              <div className="rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+                Multi-due payment detected — Principal &amp; Interest will auto-split per due (Interest-First).
+              </div>
+            )}
+
+            {splitError && (
+              <p className="text-xs font-medium text-destructive">{splitError}</p>
+            )}
           </div>
 
           {/* Conditionally show Collected By dropdown */}

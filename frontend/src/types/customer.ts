@@ -333,6 +333,8 @@ export interface Payment {
   paymentDate: string | null;
   billNumber: string;
   amount: number;
+  principal_amount?: number;
+  interest_amount?: number;
   penalty: number;
   // Optional fields from database
   status?: 'paid' | 'partial' | 'pending' | string;
@@ -359,6 +361,8 @@ export interface SubDue {
   bill_number: string;
   payment_date: string;
   paid_amount: number;
+  principal_amount?: number;
+  interest_amount?: number;
   payment_mode: string;
   payment_mode_amount: number;
   payment_mode_1: string | null;
@@ -372,6 +376,11 @@ export interface PaymentFormData {
   paymentDate: string;
   billNumber: string;
   amount: number;
+  principal_amount?: number;
+  interest_amount?: number;
+  dueAmount?: number;
+  last_payment_id?: string | number | null;
+  last_due_paid?: number;
   penalty: number;
   collected_by: string;
   payment_mode: string;
