@@ -8,6 +8,10 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    let _ = window.set_icon(icon);
+                }
+
                 // Windows-specific native caption customization
                 #[cfg(target_os = "windows")]
                 {

@@ -41,12 +41,12 @@ export function Layout() {
     document.documentElement.classList.toggle("dark");
   };
 
-  // Display finance name fallback order: currentFinance?.name -> currentFinance?.finance_name -> owner?.username -> "RIMI Software"
+  // Display finance name fallback order: currentFinance?.name -> currentFinance?.finance_name -> owner?.username -> "Rimio Software"
   const displayName =
     currentFinance?.name ||
     currentFinance?.finance_name ||
     owner?.username ||
-    "RIMI Software";
+    "Rimio Software";
 
   const handleSwitchFinance = async (f: (typeof financeList)[number]) => {
     if (String(f.id) === String(currentFinance?.id)) {

@@ -9,7 +9,6 @@ import {
   KeyRound,
   Loader2,
   Lock,
-  ShieldCheck,
   User,
 } from 'lucide-react';
 import { useOwnerAuth } from '../contexts/OwnerAuthContext';
@@ -249,9 +248,13 @@ const OwnerLogin: React.FC = () => {
             interval={4500}
             overlayContent={
               <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/15">
-                <ShieldCheck className="h-4 w-4 text-blue-400" />
+                <img
+                  src="./Rimio_logo.svg"
+                  alt="Rimio Logo"
+                  className="h-4 w-4 object-contain shrink-0"
+                />
                 <span className="text-xs font-semibold tracking-wide text-white">
-                  AutoFinex &middot; Rimi Software
+                  AutoFinex &middot; Rimio Software
                 </span>
               </div>
             }
@@ -269,8 +272,12 @@ const OwnerLogin: React.FC = () => {
             {/* Mobile Brand Pill */}
             <motion.div variants={itemVariants} className="lg:hidden mb-5 flex items-center gap-2">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                <span>AutoFinex</span>
+                <img
+                  src="./Rimio_logo.svg"
+                  alt="Rimio Logo"
+                  className="h-3.5 w-3.5 object-contain shrink-0"
+                />
+                <span>AutoFinex &middot; Rimio</span>
               </div>
             </motion.div>
 

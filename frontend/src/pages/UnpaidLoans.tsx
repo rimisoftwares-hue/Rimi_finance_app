@@ -416,7 +416,7 @@ const UnpaidLoans = () => {
         printWindow.document.write(`
           <html>
             <head>
-              <title>Senthur Finance - Unpaid Loans Report</title>
+              <title>Rimio - Unpaid Loans Report</title>
               <style>
                 body {
                   font-family: Arial, sans-serif;

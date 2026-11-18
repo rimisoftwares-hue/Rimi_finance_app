@@ -504,8 +504,8 @@ export function Sidebar() {
               >
                 {/* Default state: Logo */}
                 <img
-                  src="./rimi_logo.png"
-                  alt="RIMI Logo"
+                  src="./Rimio_logo.svg"
+                  alt="Rimio Logo"
                   className="w-6 h-6 object-contain transition-all duration-200 group-hover:opacity-0 group-hover:scale-75"
                   onError={(e) => {
                     e.currentTarget.style.display = "none";
@@ -523,8 +523,8 @@ export function Sidebar() {
             <div className="w-full flex items-center justify-between min-w-0 animate-in fade-in duration-200">
               <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
                 <img
-                  src="./rimi_logo.png"
-                  alt="RIMI Logo"
+                  src="./Rimio_logo.svg"
+                  alt="Rimio Logo"
                   className="w-6 h-6 object-contain shrink-0"
                   onError={(e) => {
                     e.currentTarget.style.display = "none";
@@ -532,7 +532,7 @@ export function Sidebar() {
                 />
                 <div className="flex items-baseline gap-1 whitespace-nowrap overflow-hidden">
                   <span className="text-base font-bold text-foreground tracking-tight">
-                    RIMI
+                    Rimio
                   </span>
                   <span className="text-xs font-semibold text-primary">
                     Software
