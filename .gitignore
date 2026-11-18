@@ -25,3 +25,10 @@ frontend/.env.*
 
 # AI assistant SQL audit log (contains finance/user ids + generated SQL). Rotate/retain per policy; never commit.
 backend/logs/
+
+# Build artifacts: compiled backend binaries (pkg output / Tauri sidecar). Rebuild locally; never commit (63MB+, may embed config).
+*.exe
+src-tauri/bin/*.exe
+
+# Editor scratch buffers (one previously leaked DB credentials)
+Untitled-*.txt
